@@ -1,0 +1,10 @@
+.build/
+dist/
+.swiftpm/
+.DS_Store
+*.pem
+*.key
+.env
+.env.*
+github-auth.txt
+github_key*

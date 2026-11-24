@@ -1,0 +1,53 @@
+name: macOS checks
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-check:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Build the app and checks
+        run: bash scripts/swift-local.sh build -c release
+      - name: Check profiles, PAC rules and synthetic recovery
+        run: .build/release/CLAYCoreChecks
+      - name: Check loopback PAC server
+        run: .build/release/CLAYCoreChecks --pac-fixture
+      - name: Check subscription downloads
+        run: python3 scripts/smoke-subscriptions.py .build/release/CLAYCoreChecks
+      - name: Build and verify the public Apple Silicon package
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/package-macos.sh --public
+          version="$(cat VERSION)"
+          archive="CLAY-$version-macos-arm64.zip"
+          (cd dist/release && shasum -a 256 -c "$archive.sha256")
+          scratch="$(mktemp -d)"
+          trap 'rm -r "$scratch"' EXIT
+          /usr/bin/ditto -x -k "dist/release/$archive" "$scratch"
+          app="$scratch/CLAY.app"
+          /usr/bin/codesign --verify --strict "$app"
+          [[ "$(/usr/bin/lipo -archs "$app/Contents/MacOS/CLAY")" == arm64 ]]
+          [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" == "$version" ]]
+          [[ "$(/usr/libexec/PlistBuddy -c 'Print :CLAYUseAdjacentMihomo' "$app/Contents/Info.plist")" == false ]]
+          [[ -z "$(find "$scratch" \( -iname '*mihomo*' -o -iname '*xray*' \) -print -quit)" ]]
+          for notice in CLAY Yams libyaml; do
+            test -s "$app/Contents/Resources/LICENSE-$notice.txt"
+          done

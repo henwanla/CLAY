@@ -17,7 +17,7 @@ else
 fi
 version="$(cat VERSION)"
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$(uname -m)" == arm64 ]] || { echo 'A numeric VERSION and Apple silicon build host are required.' >&2; exit 1; }
-build_number=3
+build_number=4
 scripts/swift-local.sh build -c release
 builddir="$(scripts/swift-local.sh build -c release --show-bin-path)"
 stage="$(mktemp -d "$root/.build/package.XXXXXX")"
@@ -54,6 +54,15 @@ cat > "$app/Contents/Info.plist" <<PLIST
 </dict></plist>
 PLIST
 install -m 644 Resources/CLAY.icns "$app/Contents/Resources/CLAY.icns"
+if ! $public; then
+  # Keep the separately licensed engine with the app when it is moved or installed.
+  embedded="$app/Contents/Resources/Mihomo"
+  mkdir -p "$embedded"
+  install -m 755 "$engine" "$embedded/mihomo"
+  install -m 644 "$license" "$embedded/COPYING.txt"
+  printf '%s\n' 'Mihomo v1.19.34 (unmodified upstream macOS arm64 executable)' 'GNU GPL version 3; source and build instructions: https://github.com/MetaCubeX/mihomo/tree/v1.19.34' > "$embedded/UPSTREAM.txt"
+  [[ "$(shasum -a 256 < "$embedded/mihomo" | cut -d ' ' -f 1)" == "$expected" ]]
+fi
 /usr/bin/plutil -lint "$app/Contents/Info.plist"
 /usr/bin/codesign --force --sign - "$app"
 /usr/bin/codesign --verify --strict "$app"

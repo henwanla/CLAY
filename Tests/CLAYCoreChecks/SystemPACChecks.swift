@@ -14,6 +14,7 @@ private final class PACPreferencesFixture: SystemPACBackend, SystemPACSession {
     var journalBeforeWrite = false
     var failCommit = false
     var failApply = false
+    var delayApply = false
     var interactive: Bool?
 
     deinit { try? FileManager.default.removeItem(at: directory) }
@@ -32,7 +33,11 @@ private final class PACPreferencesFixture: SystemPACBackend, SystemPACSession {
     }
     func apply() throws {
         if failApply { throw Failure.apply }
-        active = Set(persisted.values.compactMap { $0[Self.marker] as? String })
+        if delayApply { return }
+        active = Set(persisted.values.compactMap { values in
+            guard (values["ProxyAutoConfigEnable"] as? NSNumber)?.boolValue == true else { return nil }
+            return values[Self.marker] as? String
+        })
     }
     func activePACURLs(serviceID: String) -> Set<String> { active }
 }
@@ -100,7 +105,7 @@ extension CoreTests {
 
         try simulate { fixture, manager in
             try manager.enable(url: older)
-            fixture.persisted["wifi"] = [marker: external, "HTTPEnable": 1]
+            fixture.persisted["wifi"] = [marker: external, "ProxyAutoConfigEnable": 1, "HTTPEnable": 1]
             let outcome = try manager.restore()
             try require(outcome == .externallyChanged && fixture.writes.count == 1, "external takeover avoids writes")
             try require(fixture.persisted["wifi"]?[marker] as? String == external && fixture.active.contains(external), "external URL takes effect")
@@ -109,7 +114,7 @@ extension CoreTests {
 
         for failureBeforeCommit in [true, false] {
             try simulate { fixture, manager in
-                fixture.persisted["wifi"] = [marker: original, "HTTPEnable": 1]
+                fixture.persisted["wifi"] = [marker: original, "ProxyAutoConfigEnable": 1, "HTTPEnable": 1]
                 try manager.enable(url: older)
                 fixture.failCommit = failureBeforeCommit
                 fixture.failApply = !failureBeforeCommit
@@ -141,6 +146,34 @@ extension CoreTests {
             fixture.failApply = false
             let outcome = try manager.restore()
             try require(outcome == .restored && fixture.active.isEmpty && fixture.writes.count == 3, "retry applies committed restore without rewriting settings")
+        }
+
+        for externallyChanged in [false, true] {
+            try simulate { fixture, manager in
+                try manager.enable(url: older)
+                if externallyChanged {
+                    fixture.persisted["wifi"] = [marker: external, "ProxyAutoConfigEnable": 1, "HTTPEnable": 1]
+                }
+                let expectedWrites = externallyChanged ? 1 : 2
+                fixture.delayApply = true
+                do {
+                    _ = try manager.restore()
+                    throw PACPreferencesFixture.Failure.unexpected("restore should wait for the effective PAC to change", #line)
+                } catch SystemPACError.restorationPending {}
+                let pending = try manager.pendingRecovery()
+                try require(pending == PACPreferencesFixture.primary && manager.needsListener(at: older),
+                            "successful Apply with a stale PAC retains the journal and listener")
+                try require(fixture.active == [older.absoluteString] && fixture.writes.count == expectedWrites,
+                            "restore never overwrites an external PAC while propagation is pending")
+                fixture.delayApply = false
+                try fixture.apply()
+                let outcome = try manager.restore()
+                try require(outcome == (externallyChanged ? .externallyChanged : .restored), "settled retry reports the original restore outcome")
+                try require(fixture.writes.count == expectedWrites && !manager.needsListener(at: older),
+                            "retry releases the listener without rewriting preferences")
+                let cleared = try manager.pendingRecovery()
+                try require(cleared == nil, "retry clears the journal only after the owned URL is inactive")
+            }
         }
 
         try simulate { fixture, manager in

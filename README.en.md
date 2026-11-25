@@ -2,14 +2,14 @@
 
 [简体中文](README.md) · [Changelog](CHANGELOG.md) · [GitHub Releases](https://github.com/henwanla/CLAY/releases)
 
-CLAY is a native macOS proxy app with subscriptions, menu bar controls, PAC routing, live traffic, and a connection inspector. The published 0.3.0 preview targets Apple Silicon and macOS 13 or later. This page also describes unreleased work on `develop`.
+CLAY is a native macOS proxy app with subscriptions, menu bar controls, PAC routing, live traffic, and a connection inspector. The published 0.3.0 preview targets Apple Silicon and macOS 13 or later. This page also describes source features that are not in the published 0.3.0 package.
 
 ## Getting started
 
-1. **Local preview:** Open `CLAY.app`, then use Settings (**设置**) → Choose Mihomo (**选择 Mihomo…**) to select `Dependencies/mihomo` beside the app. New builds remember the selected executable’s fingerprint. Verify the source and select it again after replacing or upgrading the core.
+1. **Local preview (build 4 and later):** Open `CLAY.app`. If you have not selected another core, CLAY uses the bundled Mihomo with a pinned fingerprint. To use a different trusted core, choose it in Settings (**设置**). Verify the source and select it again after replacing or upgrading an external core.
 2. **GitHub release:** Download `CLAY-0.3.0-macos-arm64.zip` and the matching `.zip.sha256`. In the download directory, run `shasum -a 256 -c CLAY-0.3.0-macos-arm64.zip.sha256` before extracting the ZIP. The public package requires you to install Mihomo separately, as shown below. The app has an ad hoc signature and has no Developer ID signature or notarization. If macOS blocks the package, you can build it from source under your usual security policy.
 3. Under Subscriptions (**订阅**), select Add subscription (**添加订阅…**) and enter your provider’s HTTPS link. Under Nodes (**节点**), you can also paste share links or import UTF-8 JSON, YAML, or text files.
-4. Choose a node and select Start (**启动**). Overview (**概览**) shows a local address that accepts HTTP and SOCKS5. Apps can connect through a manually configured address or through PAC.
+4. Choose a node and select Connect macOS (**连接 macOS**) from the main window or menu bar. CLAY starts the local proxy and sets up system PAC for the current primary network service or the service you choose in PAC Rules. For manual setup, use Start local proxy only (**仅启动本机代理**) and enter the HTTP/SOCKS5 address from Overview (**概览**) in the app. In the **published 0.3.0 package**, use Start (**启动**) and then Apply to macOS (**应用到 macOS**) under PAC Rules.
 5. Closing the window keeps CLAY and its proxy running. In new builds, the menu bar also lets you switch nodes and routing modes. Quit CLAY or press `⌘Q` to end the session. CLAY does not launch automatically at login.
 
 ### Install Mihomo for the public package
@@ -40,7 +40,7 @@ Builds from the newer source let you choose a routing mode from Overview or the 
 | --- | --- | --- |
 | Manual connection | Start CLAY and manually enter its HTTP/SOCKS5 address in an app. | Only apps configured with that address; macOS settings stay as they were. |
 | Local PAC | Under PAC Rules, select Start local PAC (**启动本机 PAC**), then copy its loopback URL to a PAC-capable app. | Only apps configured with that PAC URL; macOS settings stay as they were. |
-| System PAC | Pick a network service in PAC Rules and select Apply to macOS (**应用到 macOS**). | Changes the selected service. Temporarily disables that service’s manual HTTP, HTTPS, and SOCKS proxies and automatic proxy discovery. |
+| System PAC | Select Connect macOS (**连接 macOS**). You can choose the network service in PAC Rules. | Changes the selected service. Temporarily disables that service’s manual HTTP, HTTPS, and SOCKS proxies and automatic proxy discovery. |
 
 Rules run from top to bottom. The first match wins; unmatched traffic uses your chosen Direct or Proxy default. The initial default is Proxy. Loopback is always direct. Explicit rules can override the optional local and private address bypass. Rules match exact domains or IPs, domain suffixes, domain keywords, and IPv4 CIDR ranges. CIDR applies to literal IPv4 addresses without a DNS lookup. Enter a domain, IP, or URL to see which rule matches. Paste rules one per line to append them in bulk, for example:
 

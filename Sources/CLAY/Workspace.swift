@@ -77,6 +77,7 @@ enum Probe {
     }
     private static let enginePreference = "clay.trusted-mihomo.v1"
     private static let routingPreference = "clay.routing-mode.v1"
+    private static let previewEngineFingerprint = "a55a9073f9b7b1fa596a82c034d2dae3407ec34732102b6e42c5513ce3033f34"
     private var trustedEngine: TrustedEngine?
 
     init(store: SubscriptionStore = SubscriptionStore(), pac: PACControl? = nil, preferences: UserDefaults = .standard) {
@@ -88,6 +89,11 @@ enum Probe {
            FileManager.default.isExecutableFile(atPath: saved.path) {
             trustedEngine = saved
             engine = URL(fileURLWithPath: saved.path)
+        } else if let supplied = Bundle.main.resourceURL?.appendingPathComponent("Mihomo", isDirectory: true).appendingPathComponent("mihomo") {
+            if FileManager.default.isExecutableFile(atPath: supplied.path) {
+                trustedEngine = TrustedEngine(path: supplied.path, fingerprint: Self.previewEngineFingerprint)
+                engine = supplied
+            }
         }
         routingMode = preferences.string(forKey: Self.routingPreference).flatMap(CoreRoutingMode.init(rawValue:)) ?? .global
         do {
@@ -99,10 +105,19 @@ enum Probe {
     }
     var chosen: NodeProfile? { nodes.first { $0.id == active } }
     var running: Bool { proxyAddress != nil }
-    var canToggleProxy: Bool { !shuttingDown && (running || (!busy && !pac.hasLiveOwnership && engine != nil && chosen != nil)) }
+    var canStartManual: Bool {
+        !shuttingDown && !busy && !running && !pac.busy && !pac.hasLiveOwnership && !pac.needsRecovery && engine != nil && chosen != nil
+    }
+    var canConnectSystem: Bool {
+        guard !shuttingDown, !busy, !pac.busy, !pac.needsRecovery, !pac.hasLiveOwnership else { return false }
+        return running || canStartManual
+    }
     var menuStatus: String {
-        if running { return "代理运行中" }
-        if pendingStart != nil { return "代理启动中" }
+        if pac.needsRecovery { return "系统代理待恢复" }
+        if let service = pac.systemService { return "系统 PAC 已配置 · \(service.name)" }
+        if pac.busy { return "正在配置 PAC" }
+        if running { return "本机代理运行中 · macOS 未接入" }
+        if pendingStart != nil { return "正在启动本机代理" }
         return "代理已停止"
     }
     var canUseManual: Bool { manualResults != nil && selectedSubscription != nil }
@@ -294,7 +309,12 @@ enum Probe {
         status = engine == nil ? "等待选择 Mihomo" : nodes.isEmpty ? "等待导入节点" : "可启动"
     }
 
-    func toggleProxy() { if running { stop() } else { start() } }
+    /// A user can attach macOS to a running manual session without restarting it.
+    func connectSystem() {
+        guard canConnectSystem else { return }
+        if running { publishPAC(toSystem: true) }
+        else { startSession(connectSystem: true) }
+    }
 
     func selectRoutingMode(_ mode: CoreRoutingMode) {
         guard !busy, mode != routingMode else { return }
@@ -325,8 +345,10 @@ enum Probe {
         pac.publish(port: core.proxyPort, toSystem: toSystem)
     }
 
-    func start() {
-        guard !shuttingDown, !busy, !running, !pac.hasLiveOwnership, let engine, let trustedEngine, let selected = chosen else { return }
+    func start() { startSession(connectSystem: false) }
+
+    private func startSession(connectSystem: Bool) {
+        guard canStartManual, let engine, let trustedEngine, let selected = chosen else { return }
         let policy = pac.policy
         busy = true; status = "正在启动 Mihomo…"
         pendingStart = Task { [weak self] in
@@ -344,9 +366,10 @@ enum Probe {
                                                           expectedFingerprint: trustedEngine.fingerprint,
                                                           mode: routingMode, policy: policy)
                 if Task.isCancelled { session.stopAndWait(); return }
-                core = session; proxyAddress = session.proxyAddress; status = "本机代理运行中"
+                core = session; proxyAddress = session.proxyAddress; status = "本机代理已就绪"
                 runningRules = policy
                 monitorTraffic(session)
+                if connectSystem { publishPAC(toSystem: true) }
             } catch let error as SessionError {
                 if error == .engineChanged {
                     self.engine = nil

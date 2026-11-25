@@ -2,10 +2,13 @@
 
 ## 开发中 / Unreleased
 
+- 主窗口和菜单栏新增「连接 macOS」，区分只启动本机代理和已配置系统 PAC。系统仍在使用 CLAY 的 PAC 时保留恢复记录和监听。本机预览包内带已校验的 Mihomo。
+
 - 菜单栏可切换节点与规则、全局、直连模式；手动接入、本机 PAC 和系统 PAC 仍独立设置。
 - 扩大 Shadowsocks、Trojan 导入；订阅缓存加密，Mihomo 启动时复核已选择文件的指纹。
 - 添加便携 CLI，可在本地验证节点和 PAC 规则；原生构建与验收状态见[跨平台路线](docs/跨平台路线.md)。
 
+- Connect macOS from the window or menu bar, with a distinct local-only state. CLAY keeps its recovery record and listeners while macOS still uses its PAC URL. The local preview includes a verified Mihomo executable.
 - Switch nodes and Rule, Global, or Direct from the menu bar. Manual connection, local PAC, and system PAC remain separately configured.
 - Import a supported subset of Shadowsocks and Trojan profiles. The subscription cache is encrypted, and the app rechecks the selected Mihomo executable's fingerprint before launching it.
 - Add a portable CLI for local profile and PAC validation. See the [platform roadmap](docs/跨平台路线.md) for build and verification status.

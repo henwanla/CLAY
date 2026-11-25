@@ -19,7 +19,7 @@ public enum SystemPACRestoreResult: Equatable, Sendable {
 
 public enum SystemPACError: LocalizedError {
     case invalidURL, chooseService, serviceUnavailable, externallyChanged, authorizationDenied
-    case backupUnavailable, recoveryRequired, configuration(Int32)
+    case backupUnavailable, recoveryRequired, restorationPending, configuration(Int32)
 
     public var errorDescription: String? {
         switch self {
@@ -30,6 +30,7 @@ public enum SystemPACError: LocalizedError {
         case .authorizationDenied: return "macOS 没有授予修改网络配置的权限，请在前台重试。"
         case .backupUnavailable: return "无法读取或保存 PAC 恢复记录。请检查 CLAY 应用支持目录。"
         case .recoveryRequired: return "上次修改可能仍在生效。请先使用「恢复系统代理」确认并恢复设置。"
+        case .restorationPending: return "macOS 仍在使用 CLAY 的 PAC 地址。请稍等片刻，再试一次恢复。"
         case .configuration(let status): return "macOS 网络设置操作失败（\(status)）。请稍后重试。"
         }
     }
@@ -45,6 +46,7 @@ public enum SystemPACError: LocalizedError {
     func preferences(serviceID: String) throws -> [String: Any]?
     func commit(_ values: [String: Any], serviceID: String) throws
     func apply() throws
+    /// URLs of enabled PAC configurations in the effective or service state.
     func activePACURLs(serviceID: String) -> Set<String>
 }
 
@@ -193,6 +195,11 @@ public enum SystemPACError: LocalizedError {
                 let originals = try Self.originals(in: journal)
                 if journal.changedKeys.allSatisfy({ Self.equal(current?[$0], originals[$0]) }) { result = .noBackup }
             }
+            // Apply can return before configd publishes the new state. Retain the
+            // journal and listener ownership so the caller can retry after it settles.
+            guard session.activePACURLs(serviceID: id).isDisjoint(with: journal.ownedURLs) else {
+                throw SystemPACError.restorationPending
+            }
             do { try FileManager.default.removeItem(at: file) }
             catch { throw SystemPACError.backupUnavailable }
             liveURLs.removeAll(); managedService = nil
@@ -318,7 +325,8 @@ private struct MacSystemPACSession: SystemPACSession {
                                                                       serviceID as CFString, kSCEntNetProxies)
         var addresses = Set<String>()
         func collect(_ values: [String: Any]) {
-            if let url = values[kSCPropNetProxiesProxyAutoConfigURLString as String] as? String { addresses.insert(url) }
+            if (values[kSCPropNetProxiesProxyAutoConfigEnable as String] as? NSNumber)?.boolValue == true,
+               let url = values[kSCPropNetProxiesProxyAutoConfigURLString as String] as? String { addresses.insert(url) }
             if let scoped = values["__SCOPED__"] as? [String: [String: Any]] { scoped.values.forEach(collect) }
             if let supplemental = values["__SUPPLEMENTAL__"] as? [[String: Any]] { supplemental.forEach(collect) }
         }

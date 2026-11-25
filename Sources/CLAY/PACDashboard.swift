@@ -25,45 +25,51 @@ struct PACDashboard: View {
     }
 
     private var runtime: some View {
-        card("启用方式", icon: "switch.2") {
+        card("系统代理与本机 PAC", icon: "switch.2") {
             HStack {
-                Label(control.modeLabel, systemImage: control.localURL == nil ? "circle" : "circle.fill")
+                Label(control.modeLabel, systemImage: control.needsRecovery ? "exclamationmark.triangle.fill" : control.localURL == nil ? "circle" : "circle.fill")
                     .foregroundStyle(control.needsRecovery ? Color.orange : Color.secondary)
                 Spacer()
                 if control.busy { ProgressView().controlSize(.small) }
             }
             if control.needsRecovery {
-                Text("检测到 CLAY 的系统 PAC 还需要恢复。先恢复原设置，再应用新的规则。")
+                Text(control.recoveryService.map { "「\($0.name)」的系统代理设置待恢复。先恢复原设置，再连接 macOS。" }
+                    ?? "系统代理设置待恢复。先恢复原设置，再连接 macOS。")
                     .font(.callout).foregroundStyle(.orange)
-                Button("恢复原网络代理设置") { control.restoreSystem() }.disabled(control.busy)
+                Button("恢复原网络代理设置") { control.restoreSystem() }.disabled(control.busy || model.busy)
+            } else if let service = control.systemService {
+                Text("已配置网络服务：\(service.name)。切换到其他网络服务时，先恢复原设置，再连接到新服务。")
+                    .font(.callout).foregroundStyle(.secondary)
+                HStack {
+                    Button("更新系统 PAC") { model.publishPAC(toSystem: true) }
+                        .disabled(!model.running || model.busy || control.busy || control.activePolicy == control.policy)
+                    Button("恢复原网络代理设置") { control.restoreSystem() }.disabled(control.busy || model.busy)
+                }
             } else {
                 HStack {
-                    if control.systemService == nil {
-                        Button(control.localURL == nil ? "启动本机 PAC" : "更新本机 PAC") { model.publishPAC(toSystem: false) }
-                            .disabled(!model.running || control.busy || control.activePolicy == control.policy)
-                        if control.localURL != nil { Button("停止本机 PAC") { control.stopLocal() }.disabled(control.busy) }
-                    } else {
-                        Button("更新系统 PAC") { model.publishPAC(toSystem: true) }
-                            .disabled(!model.running || control.busy || control.activePolicy == control.policy)
-                        Button("恢复原系统设置") { control.restoreSystem() }.disabled(control.busy)
-                    }
-                    if let url = control.localURL { Button("复制 PAC 地址") { model.copy(url.absoluteString) } }
+                    Picker("网络服务", selection: $control.serviceID) {
+                        Text(primaryServiceLabel).tag("")
+                        ForEach(control.services, id: \.id) { Text($0.name + ($0.isPrimary ? "（主要）" : "")).tag($0.id) }
+                    }.disabled(control.busy || model.busy)
+                    Button { control.refreshServices() } label: { Image(systemName: "arrow.clockwise") }
+                        .help("重新读取网络服务").accessibilityLabel("重新读取网络服务").disabled(control.busy || model.busy)
+                    Button("连接 macOS") { model.connectSystem() }.disabled(!model.canConnectSystem)
                 }
-                if control.systemService == nil {
-                    HStack {
-                        Picker("网络服务", selection: $control.serviceID) {
-                            Text("当前主要服务").tag("")
-                            ForEach(control.services, id: \.id) { Text($0.name + ($0.isPrimary ? "（主要）" : "")).tag($0.id) }
-                        }.disabled(control.busy)
-                        Button { control.refreshServices() } label: { Image(systemName: "arrow.clockwise") }
-                            .help("重新读取网络服务").accessibilityLabel("重新读取网络服务").disabled(control.busy)
-                        Button("应用到 macOS") { model.publishPAC(toSystem: true) }
-                            .disabled(!model.running || control.busy)
+                Text(selectedServiceDescription).font(.callout).foregroundStyle(.secondary)
+                Divider()
+                HStack {
+                    Button(control.localURL == nil ? "启动本机 PAC" : "更新本机 PAC") { model.publishPAC(toSystem: false) }
+                        .disabled(!model.running || model.busy || control.busy || control.activePolicy == control.policy)
+                    if control.localURL != nil {
+                        Button("停止本机 PAC") { control.stopLocal() }.disabled(control.busy || model.busy)
                     }
                 }
             }
             if let url = control.localURL {
-                Text(url.absoluteString).font(.caption.monospaced()).textSelection(.enabled).lineLimit(1)
+                HStack {
+                    Text(url.absoluteString).font(.caption.monospaced()).textSelection(.enabled).lineLimit(1)
+                    Button("复制 PAC 地址") { model.copy(url.absoluteString) }
+                }
             }
             if let active = control.activePolicy, active != control.policy {
                 Label("规则已保存，当前 PAC 仍用上一版。点「更新」生效。", systemImage: "clock")
@@ -72,9 +78,23 @@ struct PACDashboard: View {
             if !control.message.isEmpty {
                 Text(control.message).font(.callout).foregroundStyle(control.messageIsError ? Color.orange : Color.secondary)
             }
-            Text(model.running ? "本机 PAC 地址可填入支持 PAC 的应用。应用到 macOS 时只改所选网络服务，可能要求管理员授权。" : "可先编辑和预览规则，启动代理后再启用 PAC。")
+            Text("系统 PAC 只影响遵循 macOS 代理设置的应用，应用设置时系统可能请求授权。本机 PAC 地址可手动填入支持 PAC 的应用。")
                 .font(.caption).foregroundStyle(.secondary)
         }
+    }
+
+    private var primaryServiceLabel: String {
+        control.services.first(where: \.isPrimary).map { "自动（\($0.name)）" } ?? "自动选择当前主要服务"
+    }
+
+    private var selectedServiceDescription: String {
+        if let service = control.services.first(where: { $0.id == control.serviceID }) {
+            return "连接时为「\(service.name)」启用系统 PAC。"
+        }
+        if control.services.contains(where: \.isPrimary) {
+            return "连接时自动使用 macOS 当前的主要网络服务。"
+        }
+        return "未识别到主要网络服务。若自动连接失败，请刷新列表并选择正在使用的服务。"
     }
 
     private var policy: some View {

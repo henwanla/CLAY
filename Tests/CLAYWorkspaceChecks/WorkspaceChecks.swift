@@ -13,6 +13,42 @@ private final class NoSystemPACBackend: SystemPACBackend {
     }
 }
 
+private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
+    static let service = SystemPACService(id: "fixture", name: "Fixture Network", isPrimary: true)
+    static let urlKey = "ProxyAutoConfigURLString"
+    static let baseline: [String: Any] = ["HTTPEnable": 1, "HTTPProxy": "proxy.example.test", "ExceptionsList": ["localhost"]]
+
+    var denyAuthorization = false
+    private(set) var attempts = 0
+    private(set) var persisted = baseline
+    private(set) var activeURL: String?
+    private(set) var applies = 0
+    var observeApply: ((String?, String?) -> Void)?
+
+    var matchesBaseline: Bool { NSDictionary(dictionary: persisted).isEqual(to: Self.baseline) }
+
+    func withLocked<T>(interactive: Bool, _ body: (any SystemPACSession) throws -> T) throws -> T {
+        guard interactive else { throw CheckFailed("system PAC expected a foreground action") }
+        attempts += 1
+        if denyAuthorization { throw SystemPACError.authorizationDenied }
+        return try body(self)
+    }
+
+    func services() -> [SystemPACService] { [Self.service] }
+    func preferences(serviceID: String) throws -> [String: Any]? { serviceID == Self.service.id ? persisted : nil }
+    func commit(_ values: [String: Any], serviceID: String) throws {
+        guard serviceID == Self.service.id else { throw CheckFailed("fixture did not select its primary network service") }
+        persisted = values
+    }
+    func apply() throws {
+        let next = persisted[Self.urlKey] as? String
+        observeApply?(activeURL, next)
+        activeURL = next
+        applies += 1
+    }
+    func activePACURLs(serviceID: String) -> Set<String> { serviceID == Self.service.id ? Set([activeURL].compactMap { $0 }) : [] }
+}
+
 @main struct WorkspaceChecks {
     @MainActor static func main() async {
         do {
@@ -31,7 +67,7 @@ private final class NoSystemPACBackend: SystemPACBackend {
             let engine = URL(filePath: args[2])
             try model.trustEngine(engine, persist: false)
             do {
-                try await checkRefresh(model, store: store, origin: args[1], directory: directory)
+                try await checkRefresh(model, store: store, origin: args[1], directory: directory, preferences: preferences)
                 try await checkEnginePin(engine: engine, model: model)
                 try await checkBackgroundHealth(model)
             } catch {
@@ -39,6 +75,7 @@ private final class NoSystemPACBackend: SystemPACBackend {
                 throw error
             }
             await model.shutdown()
+            try await checkSystemConnection(engine: engine, origin: args[1], directory: directory.appendingPathComponent("system-connect"))
             print("PASS running listener stays available through refresh and failure; stop and offline reload use the last successful list")
             print("PASS background health monitor notices exit of the owned Mihomo and clears its listener without a window")
             print("PASS local PAC published with the live proxy port and was removed before the proxy listener")
@@ -63,7 +100,8 @@ private final class NoSystemPACBackend: SystemPACBackend {
         }
     }
 
-    @MainActor private static func checkRefresh(_ model: Workspace, store: SubscriptionStore, origin: String, directory: URL) async throws {
+    @MainActor private static func checkRefresh(_ model: Workspace, store: SubscriptionStore, origin: String,
+                                               directory: URL, preferences: UserDefaults) async throws {
         let token = "synthetic-fixture-token"
         model.addSubscription(name: "Fixture", input: origin + "/changing?token=" + token)
         try await wait("initial download") { !model.fetchingSubscription }
@@ -95,14 +133,7 @@ private final class NoSystemPACBackend: SystemPACBackend {
             throw CheckFailed("local PAC could not start")
         }
         try require(endpoint.host == "127.0.0.1" && !model.pac.hasLiveOwnership, "local PAC should leave macOS proxy settings untouched")
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 3; config.timeoutIntervalForResource = 5
-        config.connectionProxyDictionary = ["HTTPEnable": 0, "HTTPSEnable": 0, "SOCKSEnable": 0, "ProxyAutoConfigEnable": 0, "ProxyAutoDiscoveryEnable": 0]
-        let client = URLSession(configuration: config)
-        defer { client.finishTasksAndInvalidate() }
-        let (data, response) = try await client.data(from: endpoint)
-        let expected = try model.pac.policy.makeScript(proxyPort: port)
-        try require((response as? HTTPURLResponse)?.statusCode == 200 && data == Data(expected.utf8), "local PAC did not serve the current workspace policy")
+        try await checkPACScript(endpoint, policy: model.pac.policy, proxyPort: port)
 
         model.refreshSubscription(source)
         try await wait("changed subscription") { !model.fetchingSubscription }
@@ -122,13 +153,105 @@ private final class NoSystemPACBackend: SystemPACBackend {
         try require(model.telemetry == nil, "stop retained the previous session's telemetry")
         try require(!model.sourceChangePending && model.nodes.map(\.name) == ["replaced"], "stop did not apply the last successful refresh")
 
-        let reloaded = Workspace(store: store, pac: model.pac)
+        let reloaded = Workspace(store: store, pac: model.pac, preferences: preferences)
         try require(reloaded.selectedSubscription == source && reloaded.nodes.map(\.name) == ["replaced"], "a new workspace did not load the last successful subscription from disk")
         let manager = FileManager.default
         let file = directory.appendingPathComponent("subscriptions.json")
         let dirMode = try manager.attributesOfItem(atPath: directory.path)[.posixPermissions] as? Int
         let fileMode = try manager.attributesOfItem(atPath: file.path)[.posixPermissions] as? Int
         try require(dirMode == 0o700 && fileMode == 0o600, "credential catalog permissions are not private")
+    }
+
+    @MainActor private static func checkSystemConnection(engine: URL, origin: String, directory: URL) async throws {
+        let suite = "CLAYSystemConnectChecks-\(UUID())"
+        guard let preferences = UserDefaults(suiteName: suite) else { throw CheckFailed("could not isolate system connection preferences") }
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let store = SubscriptionStore(directory: directory.appendingPathComponent("catalog"), keyStore: TestSubscriptionKeyStore())
+        let managerDirectory = directory.appendingPathComponent("pac")
+        let fixture = WorkspacePACFixture()
+        let manager = SystemPACManager(backend: fixture, journalDirectory: managerDirectory)
+        let model = Workspace(store: store, pac: PACControl(manager: manager, preferences: preferences), preferences: preferences)
+        model.pac.serviceID = WorkspacePACFixture.service.id
+        try model.trustEngine(engine, persist: false)
+        try require(model.applyImport("vless://4624a73a-98ce-43e7-8868-4deba224779c@127.0.0.1:1234#fixture"), "could not import synthetic node")
+        model.selectRoutingMode(.rule) // The synthetic origin has no upstream node; Rule sends loopback direct through the mixed proxy.
+        var installHadLivePAC = false, restoreHadLivePAC = false
+        var restoreHadLiveProxy = false
+        var observedProxyPort: UInt16?
+        fixture.observeApply = { previous, next in
+            if let port = next.flatMap({ URL(string: $0)?.port }).flatMap(UInt16.init(exactly:)) {
+                installHadLivePAC = canConnect(to: port)
+            } else if let port = previous.flatMap({ URL(string: $0)?.port }).flatMap(UInt16.init(exactly:)) {
+                restoreHadLivePAC = canConnect(to: port)
+                restoreHadLiveProxy = observedProxyPort.map { canConnect(to: $0) } ?? false
+            }
+        }
+
+        func checkAttachedAndStop(priorPID: pid_t? = nil) async throws {
+            try await wait("system connection") { !model.busy && !model.pac.busy && (model.pac.systemService != nil || model.pac.messageIsError) }
+            guard model.pac.systemService == WorkspacePACFixture.service, !model.pac.messageIsError,
+                  let listener = model.proxyAddress, let proxyPort = URL(string: listener)?.port,
+                  let localProxyPort = UInt16(exactly: proxyPort), let endpoint = model.pac.localURL,
+                  let pacPort = endpoint.port.flatMap(UInt16.init(exactly:)) else { throw CheckFailed("system PAC did not attach to Mihomo") }
+            observedProxyPort = localProxyPort
+            if let priorPID {
+                let activePID = try ownedEnginePID()
+                try require(activePID == priorPID, "attaching system PAC replaced the running Mihomo")
+            }
+            try require(installHadLivePAC && fixture.activeURL == endpoint.absoluteString, "mock settings were applied before the PAC server was listening")
+            try require(fixture.persisted["ProxyAutoConfigEnable"] as? Int == 1 && fixture.persisted["HTTPEnable"] as? Int == 0,
+                        "system PAC was not enabled in the mock settings")
+            try await checkPACScript(endpoint, policy: model.pac.policy, proxyPort: proxyPort)
+            try require(proxyFetch(origin, through: listener) && proxyFetch(origin, through: "socks5h://127.0.0.1:\(proxyPort)"),
+                        "manual HTTP or SOCKS relay stopped after system PAC attached")
+            try await wait("live traffic counters") { (model.telemetry?.downloadTotal ?? 0) > 0 }
+
+            try require(model.stop(), "stopping the proxy did not restore its system settings")
+            try require(fixture.matchesBaseline && fixture.activeURL == nil && restoreHadLivePAC && restoreHadLiveProxy,
+                        "original settings were not restored while both local listeners were still available")
+            let pending = try manager.pendingRecovery()
+            try require(pending == nil && !model.running && model.pac.systemService == nil && !canConnect(to: localProxyPort),
+                        "stop retained proxy state or a recovery journal after restoring settings")
+            try await wait("restored PAC listener shutdown") { model.pac.localURL == nil && !canConnect(to: pacPort) }
+        }
+
+        do {
+            fixture.denyAuthorization = true
+            model.connectSystem()
+            try await wait("authorization refusal") { !model.busy && !model.pac.busy && model.pac.messageIsError }
+            guard let listener = model.proxyAddress else { throw CheckFailed("authorization refusal also stopped the manual proxy") }
+            try require(fixture.attempts == 1 && fixture.applies == 0 && fixture.matchesBaseline && fixture.activeURL == nil,
+                        "authorization refusal changed the simulated settings")
+            try require(model.pac.systemService == nil && model.pac.localURL == nil && proxyFetch(origin, through: listener),
+                        "authorization refusal did not preserve usable manual access")
+            let priorPID = try ownedEnginePID()
+
+            fixture.denyAuthorization = false
+            model.connectSystem()
+            try await checkAttachedAndStop(priorPID: priorPID)
+            installHadLivePAC = false; restoreHadLivePAC = false; restoreHadLiveProxy = false
+
+            model.connectSystem()
+            try await checkAttachedAndStop()
+            try require(fixture.applies == 4, "each enable and restore must apply exactly once")
+        } catch {
+            fixture.denyAuthorization = false
+            await model.shutdown()
+            throw error
+        }
+        await model.shutdown()
+        print("PASS system connect launches or reuses Mihomo, authorization refusal preserves manual access, and stop restores mocked settings first")
+    }
+
+    private static func checkPACScript(_ endpoint: URL, policy: PACPolicy, proxyPort: Int) async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 3; config.timeoutIntervalForResource = 5
+        config.connectionProxyDictionary = ["HTTPEnable": 0, "HTTPSEnable": 0, "SOCKSEnable": 0, "ProxyAutoConfigEnable": 0, "ProxyAutoDiscoveryEnable": 0]
+        let client = URLSession(configuration: config)
+        defer { client.finishTasksAndInvalidate() }
+        let (data, response) = try await client.data(from: endpoint)
+        let expected = try policy.makeScript(proxyPort: proxyPort)
+        try require((response as? HTTPURLResponse)?.statusCode == 200 && data == Data(expected.utf8), "local PAC did not serve the current workspace policy")
     }
 
     @MainActor private static func checkBackgroundHealth(_ model: Workspace) async throws {

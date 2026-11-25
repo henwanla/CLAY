@@ -20,7 +20,7 @@ import SwiftUI
         MenuBarExtra {
             StatusMenu(model: model, pac: model.pac, navigation: navigation)
         } label: {
-            StatusIndicator(model: model)
+            StatusIndicator(model: model, pac: model.pac)
         }
         .menuBarExtraStyle(.menu)
     }
@@ -54,9 +54,16 @@ import SwiftUI
 
 private struct StatusIndicator: View {
     @ObservedObject var model: Workspace
+    @ObservedObject var pac: PACControl
     var body: some View {
-        Image(systemName: model.busy && !model.running ? "cube.transparent" : model.running ? "cube.fill" : "cube")
+        Image(systemName: symbol)
             .accessibilityLabel(Text("CLAY · \(model.menuStatus)"))
+    }
+
+    private var symbol: String {
+        if pac.needsRecovery || pac.messageIsError { return "exclamationmark.triangle.fill" }
+        if model.running { return pac.systemService == nil ? "cube.fill" : "checkmark.circle.fill" }
+        return model.busy || pac.busy ? "cube.transparent" : "cube"
     }
 }
 
@@ -76,7 +83,30 @@ private struct StatusMenu: View {
 
     var body: some View {
         Text("CLAY · \(model.menuStatus)")
-        if model.running || pac.needsRecovery { Text(pac.modeLabel) }
+        if pac.systemService == nil, pac.localURL != nil, !pac.needsRecovery { Text("本机 PAC 已启用") }
+        if pac.messageIsError { Text(pac.message) }
+        if pac.hasLiveOwnership || pac.needsRecovery {
+            Button("恢复原网络代理设置") { pac.restoreSystem() }.disabled(pac.busy || model.busy)
+        }
+        if pac.messageIsError || pac.needsRecovery {
+            Button("查看 PAC 设置…") { showDashboard(.pac) }
+        }
+        Divider()
+        if pac.systemService == nil || pac.needsRecovery || !model.running {
+            Button("连接 macOS") { model.connectSystem() }.disabled(!model.canConnectSystem)
+        }
+        if model.running {
+            Button("停止代理") { model.stop() }.disabled(model.busy || pac.busy)
+        } else {
+            Button("仅启动本机代理") { model.start() }.disabled(!model.canStartManual)
+            if model.engine == nil { Button("设置 Mihomo 内核…") { showDashboard(.settings) } }
+            if model.nodes.isEmpty {
+                Button("导入节点…") { showDashboard(.nodes); model.presentImport = true }.disabled(model.busy)
+                Button("添加订阅…") { showDashboard(.subscriptions); model.presentSubscription = true }
+                    .disabled(model.fetchingSubscription)
+            }
+        }
+        Divider()
         Menu("流量模式：\(model.routingMode.label)") {
             ForEach(CoreRoutingMode.allCases) { mode in
                 Button { model.selectRoutingMode(mode) } label: {
@@ -101,13 +131,8 @@ private struct StatusMenu: View {
             Button("复制代理地址") { model.copy(address) }
         }
         if let url = pac.localURL { Button("复制 PAC 地址") { model.copy(url.absoluteString) } }
-        if pac.hasLiveOwnership || pac.needsRecovery {
-            Button("恢复原网络代理设置") { pac.restoreSystem() }.disabled(pac.busy)
-        }
         Divider()
         Button("打开 CLAY") { showDashboard() }
-        Button(model.running ? "停止代理" : "启动代理") { model.toggleProxy() }.disabled(!model.canToggleProxy)
-        Divider()
         Button("退出 CLAY") { NSApp.terminate(nil) }
     }
 
@@ -161,14 +186,22 @@ private struct Dashboard: View {
                 List(selection: $navigation.page) {
                     ForEach(Page.allCases) { item in Label(item.rawValue, systemImage: item.icon).tag(item) }
                 }.listStyle(.sidebar)
-                Label(model.running ? "本机代理运行中" : "本机代理已停止", systemImage: "circle.fill")
-                    .font(.caption).foregroundStyle(model.running ? Color.green : Color.secondary).padding(13)
+                Label(model.menuStatus, systemImage: connectionSymbol)
+                    .font(.caption).foregroundStyle(connectionColor).padding(13)
             }.navigationSplitViewColumnWidth(min: 157, ideal: 186, max: 240)
         } detail: {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     HStack { Text((page ?? .overview).rawValue).font(.largeTitle.bold()); Spacer(); controls }
-                    Text(model.status).font(.callout).foregroundStyle(.secondary).accessibilityIdentifier("session-status")
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label(model.menuStatus, systemImage: connectionSymbol)
+                            .font(.callout.weight(.semibold)).foregroundStyle(connectionColor)
+                        if model.status != model.menuStatus {
+                            Text(model.status).font(.callout).foregroundStyle(.secondary).accessibilityIdentifier("session-status")
+                        }
+                    }
+                    if page != .pac { pacNotice }
+                    if !model.running { setupActions }
                     switch page ?? .overview {
                     case .overview: overview
                     case .connections: ConnectionDashboard(model: model)
@@ -184,11 +217,73 @@ private struct Dashboard: View {
             .sheet(isPresented: $model.presentImport, onDismiss: { input = "" }) { importSheet }
             .sheet(isPresented: $model.presentSubscription, onDismiss: { subscriptionURL = ""; subscriptionName = "" }) { subscriptionSheet }
     }
-    @ViewBuilder private var controls: some View {
+    private var connectionSymbol: String {
+        if pac.needsRecovery || pac.messageIsError { return "exclamationmark.triangle.fill" }
+        if model.running, pac.systemService != nil { return "checkmark.circle.fill" }
+        return model.running ? "circle.fill" : "circle"
+    }
+
+    private var connectionColor: Color {
+        if pac.needsRecovery || pac.messageIsError { return .orange }
+        return model.running && pac.systemService != nil ? .green : .secondary
+    }
+
+    private var controls: some View {
         HStack(spacing: 10) {
-            if model.busy { ProgressView().controlSize(.small) }
-            Button(model.running ? "停止" : "启动") { model.toggleProxy() }
-                .buttonStyle(.borderedProminent).disabled(!model.canToggleProxy)
+            if model.busy || pac.busy { ProgressView().controlSize(.small) }
+            if model.running {
+                Button("停止代理") { model.stop() }.disabled(model.busy || pac.busy)
+            } else {
+                Button("仅启动本机代理") { model.start() }
+                    .help("启动回环代理端口供应用手动连接；不修改 macOS 网络设置。")
+                    .disabled(!model.canStartManual)
+            }
+            if pac.systemService == nil || pac.needsRecovery || !model.running {
+                Button("连接 macOS") { model.connectSystem() }
+                    .buttonStyle(.borderedProminent)
+                    .help("启动代理并为所选网络服务启用系统 PAC。")
+                    .disabled(!model.canConnectSystem)
+            }
+        }
+    }
+
+    @ViewBuilder private var pacNotice: some View {
+        if pac.needsRecovery || pac.messageIsError {
+            VStack(alignment: .leading, spacing: 7) {
+                if pac.needsRecovery {
+                    Label(pac.recoveryService.map { "「\($0.name)」的系统代理设置待恢复。" } ?? "系统代理设置待恢复。",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(.callout.weight(.semibold)).foregroundStyle(.orange)
+                }
+                if pac.messageIsError {
+                    Text(pac.message).font(.callout).foregroundStyle(.orange)
+                }
+                HStack {
+                    if pac.needsRecovery {
+                        Button("恢复原网络代理设置") { pac.restoreSystem() }.disabled(model.busy || pac.busy)
+                    }
+                    Button("查看 PAC 设置") { page = .pac }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var setupActions: some View {
+        if model.engine == nil || model.nodes.isEmpty {
+            panel("连接前的准备", symbol: "checklist") {
+                if model.engine == nil {
+                    Text("缺少 Mihomo 内核。请先选择一个可信的可执行文件。").font(.callout).foregroundStyle(.secondary)
+                    Button("选择 Mihomo…") { model.chooseEngine() }.disabled(model.busy || pac.busy)
+                }
+                if model.nodes.isEmpty {
+                    Text("当前没有节点。请添加服务商的订阅，或导入已有节点。").font(.callout).foregroundStyle(.secondary)
+                    HStack {
+                        Button("添加订阅…") { page = .subscriptions; model.presentSubscription = true }
+                            .disabled(model.fetchingSubscription)
+                        Button("导入节点…") { model.presentImport = true }.disabled(model.busy)
+                    }
+                }
+            }
         }
     }
     private var overview: some View {
@@ -213,15 +308,13 @@ private struct Dashboard: View {
                 if let n = model.chosen { Text("\(n.protocolName.uppercased()) · \(n.transport) · \(n.security)").foregroundStyle(.secondary) }
                 if let proxy = model.proxyAddress {
                     HStack { Text(proxy).monospaced().textSelection(.enabled); Button("复制") { model.copy(proxy) } }
-                    Text("HTTP 和 SOCKS5 共用这个端口。需要按规则分流时，可在「PAC 规则」生成本机地址或应用到 macOS。")
+                    Text("HTTP 和 SOCKS5 共用这个端口，可填入需要手动配置的应用。")
                         .font(.callout).foregroundStyle(.secondary)
-                } else { Text("导入节点并启动后，这里会显示独立的回环代理地址。").foregroundStyle(.secondary) }
-            }
-            if model.nodes.isEmpty {
-                HStack {
-                    Button("导入 V2Ray 节点") { model.presentImport = true }
-                    Button("添加订阅…") { page = .subscriptions; model.presentSubscription = true }.disabled(model.fetchingSubscription)
-                }
+                    if pac.systemService == nil && !pac.needsRecovery {
+                        Text("macOS 尚未接入。点「连接 macOS」后，遵循系统代理设置的应用会按 PAC 规则分流。")
+                            .font(.callout).foregroundStyle(.secondary)
+                    }
+                } else { Text("代理启动后，这里会显示本机代理地址。").foregroundStyle(.secondary) }
             }
         }
     }

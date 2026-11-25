@@ -35,7 +35,7 @@ unzip -l CLAY-0.3.0-macos-arm64.zip
 bash scripts/package-macos.sh /绝对路径/mihomo /绝对路径/Mihomo-LICENSE
 ```
 
-本机目录提供 `dist/CLAY.app`、`dist/Dependencies/` 和 `dist/使用手册.md`。Mihomo 保持为独立可执行文件；移动 CLAY 时可通过「设置」重新选择。
+本机目录提供 `dist/CLAY.app`、`dist/Dependencies/` 和 `dist/使用手册.md`。本机预览包也在 App 的资源目录放入同一份独立、带许可证的可执行文件。移动整个 App 后，未选其他内核时可直接使用，启动前仍会核对固定的 SHA-256。
 
 ## English
 

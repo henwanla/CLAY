@@ -131,7 +131,8 @@ import SwiftUI
             }
             return true
         } catch {
-            refreshRecovery()
+            if let systemService { recoveryService = systemService }
+            else { refreshRecovery() }
             display(error.localizedDescription, error: true)
             return false
         }

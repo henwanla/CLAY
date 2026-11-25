@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 if [[ $# != 1 ]]; then
-  printf '%s\n' 'Usage: bash scripts/smoke-workspace.sh PATH_TO_TEST_MIHOMO' >&2
+  printf '%s\n' 'Usage: bash scripts/smoke-workspace.sh PATH_TO_TEST_MIHOMO|--storage-only' >&2
   exit 64
 fi
 scripts/swift-local.sh build -c release
@@ -18,5 +18,9 @@ fi
 swiftc -parse-as-library -O -module-name CLAYWorkspaceChecks -module-cache-path "$PWD/.build/module-cache" \
   -target "$(uname -m)-apple-macosx13.0" "${imports[@]}" "@$scratch/core.rsp" \
   Sources/CLAY/Workspace.swift Sources/CLAY/Subscriptions.swift Sources/CLAY/PACControl.swift \
-  Tests/CLAYWorkspaceChecks/WorkspaceChecks.swift -o "$scratch/CLAYWorkspaceChecks"
+  Tests/CLAYWorkspaceChecks/*.swift -o "$scratch/CLAYWorkspaceChecks"
+if [[ "$1" == --storage-only ]]; then
+  "$scratch/CLAYWorkspaceChecks" --storage-only
+  exit
+fi
 python3 scripts/smoke-subscriptions.py "$scratch/CLAYWorkspaceChecks" --mihomo "$1"

@@ -18,8 +18,6 @@ fi
 version="$(cat VERSION)"
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$(uname -m)" == arm64 ]] || { echo 'A numeric VERSION and Apple silicon build host are required.' >&2; exit 1; }
 build_number=3
-adjacent_mihomo=true
-if $public; then adjacent_mihomo=false; fi
 scripts/swift-local.sh build -c release
 builddir="$(scripts/swift-local.sh build -c release --show-bin-path)"
 stage="$(mktemp -d "$root/.build/package.XXXXXX")"
@@ -43,7 +41,7 @@ cat > "$app/Contents/Info.plist" <<PLIST
 <key>CFBundleVersion</key><string>$build_number</string>
 <key>CFBundleDevelopmentRegion</key><string>zh_CN</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
-<key>CLAYUseAdjacentMihomo</key><$adjacent_mihomo/>
+<key>CLAYUseAdjacentMihomo</key><false/>
 <key>NSHighResolutionCapable</key><true/>
 <key>NSAppTransportSecurity</key><dict>
   <key>NSExceptionDomains</key><dict>
@@ -66,7 +64,7 @@ if $public; then
   mkdir -p "$target" "$stage/content"
   mv "$app" "$stage/content/"
   install -m 644 README.md README.en.md LICENSE CHANGELOG.md "$stage/content/"
-  /usr/bin/ditto -c -k "$stage/content" "$stage/$archive"
+  (cd "$stage/content" && /usr/bin/zip -q -X -r "$stage/$archive" .)
   mv -f "$stage/$archive" "$target/$archive"
   (cd "$target" && shasum -a 256 "$archive" > "$archive.sha256")
   printf '%s\n' "$target/$archive" "$target/$archive.sha256"

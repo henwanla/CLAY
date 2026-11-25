@@ -1,0 +1,31 @@
+name: Linux portable CLI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portable-linux-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-portable:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Build portable CLI
+        run: |
+          swift --version
+          swift build -c release --product clay-portable
+      - name: Run synthetic CLI checks
+        run: python3 scripts/smoke-portable.py .build/release/clay-portable

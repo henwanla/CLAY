@@ -1,25 +1,75 @@
+#if os(macOS)
+import CryptoKit
 import Darwin
 import Foundation
 
 public enum SessionError: String, Error {
     case engineMissing, noNode, portsUnavailable, setupFailed, launchFailed, exitedDuringStart, controlUnavailable, selectionFailed, probeFailed
-    case telemetryUnavailable, closeConnectionsFailed
+    case telemetryUnavailable, closeConnectionsFailed, engineChanged, routingFailed
+}
+
+public enum CoreRoutingMode: String, CaseIterable, Identifiable, Sendable {
+    case rule, global, direct
+    public var id: Self { self }
+}
+
+public enum EngineIdentity {
+    public static func fingerprint(_ executable: URL) throws -> String {
+        guard executable.isFileURL, FileManager.default.isExecutableFile(atPath: executable.path),
+              try executable.resolvingSymlinksInPath().resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else {
+            throw SessionError.engineMissing
+        }
+        let file = try FileHandle(forReadingFrom: executable)
+        defer { try? file.close() }
+        var digest = SHA256()
+        while let chunk = try file.read(upToCount: 1 << 20), !chunk.isEmpty { digest.update(data: chunk) }
+        return digest.finalize().map { String(format: "%02x", $0) }.joined()
+    }
 }
 
 public enum CoreConfig {
-    public static func make(nodes: [NodeProfile], active: NodeProfile, proxyPort: Int, controlPort: Int, secret: String) throws -> Data {
+    public static func make(nodes: [NodeProfile], active: NodeProfile, proxyPort: Int, controlPort: Int, secret: String,
+                            mode: CoreRoutingMode = .rule, policy: PACPolicy? = nil) throws -> Data {
         guard let chosen = nodes.first(where: { $0.id == active.id }) else { throw SessionError.noNode }
         guard (1...65535).contains(proxyPort), (1...65535).contains(controlPort), proxyPort != controlPort, !secret.isEmpty else { throw SessionError.setupFailed }
         let ordered = [chosen] + nodes.filter { $0.id != chosen.id }
         return try JSONSerialization.data(withJSONObject: [
-            "mixed-port": proxyPort, "bind-address": "127.0.0.1", "allow-lan": false, "mode": "rule",
+            "mixed-port": proxyPort, "bind-address": "127.0.0.1", "allow-lan": false, "mode": mode.rawValue,
             "ipv6": false, "log-level": "silent", "external-controller": "127.0.0.1:\(controlPort)", "secret": secret,
             "geo-auto-update": false, "find-process-mode": "off", "profile": ["store-selected": false],
             "tun": ["enable": false],
             "proxies": ordered.map { node in var p = node.options; p["name"] = node.localName; return p },
-            "proxy-groups": [["name": "CLAY", "type": "select", "proxies": ordered.map(\.localName)]],
-            "rules": ["MATCH,CLAY"]
+            "proxy-groups": [
+                ["name": "CLAY", "type": "select", "proxies": ordered.map(\.localName)],
+                ["name": "GLOBAL", "type": "select", "proxies": ["CLAY"]]
+            ],
+            "rules": policy.map(rules(for:)) ?? ["MATCH,CLAY"]
         ], options: [.sortedKeys, .withoutEscapingSlashes])
+    }
+
+    private static func rules(for policy: PACPolicy) -> [String] {
+        func group(_ action: PACDecision) -> String { action == .proxy ? "CLAY" : "DIRECT" }
+        var result = ["DOMAIN-SUFFIX,localhost,DIRECT", "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
+                      "IP-CIDR,0.0.0.0/32,DIRECT,no-resolve", "IP-CIDR6,::/127,DIRECT,no-resolve"]
+        for rule in policy.rules {
+            let action = group(rule.decision)
+            var ipv4 = in_addr(), ipv6 = in6_addr()
+            if rule.kind == .domain, inet_pton(AF_INET, rule.value, &ipv4) == 1 {
+                result.append("IP-CIDR,\(rule.value)/32,\(action),no-resolve")
+            } else if rule.kind == .domain, inet_pton(AF_INET6, rule.value, &ipv6) == 1 {
+                result.append("IP-CIDR6,\(rule.value)/128,\(action),no-resolve")
+            } else {
+                result.append("\(rule.kind.rawValue),\(rule.value),\(action)\(rule.kind == .ipCIDR ? ",no-resolve" : "")")
+            }
+        }
+        if policy.bypassLocal {
+            result += ["DOMAIN-SUFFIX,local,DIRECT", "DOMAIN-REGEX,^[^.]+$,DIRECT"]
+            result += ["10.0.0.0/8", "100.64.0.0/10", "169.254.0.0/16", "172.16.0.0/12", "192.168.0.0/16"]
+                .map { "IP-CIDR,\($0),DIRECT,no-resolve" }
+            result += ["fc00::/7", "fe80::/10"].map { "IP-CIDR6,\($0),DIRECT,no-resolve" }
+        }
+        result.append("MATCH,\(group(policy.defaultDecision))")
+        return result
     }
 }
 
@@ -74,7 +124,8 @@ private final class ControllerRedirectPolicy: NSObject, URLSessionTaskDelegate, 
         client = URLSession(configuration: config, delegate: ControllerRedirectPolicy(), delegateQueue: nil)
     }
 
-    public static func start(engine: URL, nodes: [NodeProfile], active: NodeProfile) async throws -> CoreSession {
+    public static func start(engine: URL, nodes: [NodeProfile], active: NodeProfile, expectedFingerprint: String? = nil,
+                             mode: CoreRoutingMode = .rule, policy: PACPolicy? = nil) async throws -> CoreSession {
         guard engine.isFileURL, FileManager.default.isExecutableFile(atPath: engine.path) else { throw SessionError.engineMissing }
         let ports = try reservePorts()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("clay-runtime-\(UUID().uuidString)", isDirectory: true)
@@ -84,9 +135,22 @@ private final class ControllerRedirectPolicy: NSObject, URLSessionTaskDelegate, 
         do {
             defer { ports.0.release(); ports.1.release() }
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
-            try CoreConfig.make(nodes: nodes, active: active, proxyPort: ports.0.number, controlPort: ports.1.number, secret: secret).write(to: configURL, options: .withoutOverwriting)
+            if let expectedFingerprint {
+                let copy = directory.appendingPathComponent("mihomo")
+                do {
+                    let source = engine.resolvingSymlinksInPath()
+                    guard try source.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else {
+                        throw SessionError.engineChanged
+                    }
+                    try FileManager.default.copyItem(at: source, to: copy)
+                    guard try EngineIdentity.fingerprint(copy) == expectedFingerprint else { throw SessionError.engineChanged }
+                    try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: copy.path)
+                } catch { throw SessionError.engineChanged }
+                process.executableURL = copy
+            } else { process.executableURL = engine }
+            try CoreConfig.make(nodes: nodes, active: active, proxyPort: ports.0.number, controlPort: ports.1.number,
+                                secret: secret, mode: mode, policy: policy).write(to: configURL, options: .withoutOverwriting)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configURL.path)
-            process.executableURL = engine
             process.arguments = ["-d", directory.path, "-f", configURL.path]
             process.currentDirectoryURL = directory
             process.environment = ["HOME": directory.path, "TMPDIR": directory.path, "PATH": "/usr/bin:/bin"]
@@ -104,7 +168,7 @@ private final class ControllerRedirectPolicy: NSObject, URLSessionTaskDelegate, 
                 try Task.checkCancellation()
                 guard process.isRunning else { throw SessionError.exitedDuringStart }
                 if let version = try? await s.call("/version"), let object = try? JSONSerialization.jsonObject(with: version) as? [String: Any],
-                   object["version"] is String, s.ownsProxyPort() { return s }
+                   object["version"] is String, await s.ownsListener(s.proxyPort) { return s }
                 try await Task.sleep(for: .milliseconds(120))
             }
             throw SessionError.controlUnavailable
@@ -116,12 +180,16 @@ private final class ControllerRedirectPolicy: NSObject, URLSessionTaskDelegate, 
         do { return (proxy, try PortReservation()) } catch { proxy.release(); throw error }
     }
 
-    private func ownsProxyPort() -> Bool {
-        let check = Process()
-        check.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-        check.arguments = ["-nP", "-a", "-p", String(process.processIdentifier), "-iTCP@127.0.0.1:\(proxyPort)", "-sTCP:LISTEN", "-t"]
-        check.standardOutput = FileHandle.nullDevice; check.standardError = FileHandle.nullDevice
-        do { try check.run(); check.waitUntilExit(); return check.terminationStatus == 0 } catch { return false }
+    private func ownsListener(_ port: Int) async -> Bool {
+        guard process.isRunning else { return false }
+        let pid = process.processIdentifier
+        return await Task.detached(priority: .utility) {
+            let check = Process()
+            check.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+            check.arguments = ["-nP", "-a", "-p", String(pid), "-iTCP@127.0.0.1:\(port)", "-sTCP:LISTEN", "-t"]
+            check.standardOutput = FileHandle.nullDevice; check.standardError = FileHandle.nullDevice
+            do { try check.run(); check.waitUntilExit(); return check.terminationStatus == 0 } catch { return false }
+        }.value && process.isRunning
     }
 
     public func stopAndWait() {
@@ -133,7 +201,7 @@ private final class ControllerRedirectPolicy: NSObject, URLSessionTaskDelegate, 
     }
 
     private func call(_ path: String, method: String = "GET", body: Data? = nil, query: [URLQueryItem] = [], maxBytes: Int = 65_536) async throws -> Data {
-        guard process.isRunning else { throw SessionError.controlUnavailable }
+        guard !Task.isCancelled, await ownsListener(controlPort), !Task.isCancelled else { throw SessionError.controlUnavailable }
         var parts = URLComponents(); parts.scheme = "http"; parts.host = "127.0.0.1"; parts.port = controlPort; parts.path = path
         if !query.isEmpty { parts.queryItems = query }
         guard let url = parts.url else { throw SessionError.controlUnavailable }
@@ -187,6 +255,11 @@ private final class ControllerRedirectPolicy: NSObject, URLSessionTaskDelegate, 
         catch { throw SessionError.selectionFailed }
     }
 
+    public func setRoutingMode(_ mode: CoreRoutingMode) async throws {
+        do { _ = try await call("/configs", method: "PATCH", body: JSONEncoder().encode(["mode": mode.rawValue])) }
+        catch { throw SessionError.routingFailed }
+    }
+
     public func delay(_ node: NodeProfile, target: URL) async throws -> Int {
         guard ["http", "https"].contains(target.scheme ?? ""), target.host != nil else { throw SessionError.probeFailed }
         do {
@@ -196,3 +269,4 @@ private final class ControllerRedirectPolicy: NSObject, URLSessionTaskDelegate, 
         } catch { throw SessionError.probeFailed }
     }
 }
+#endif

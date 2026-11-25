@@ -31,6 +31,8 @@ jobs:
         run: .build/release/CLAYCoreChecks --pac-fixture
       - name: Check subscription downloads
         run: python3 scripts/smoke-subscriptions.py .build/release/CLAYCoreChecks
+      - name: Check encrypted subscription storage and migration
+        run: bash scripts/smoke-workspace.sh --storage-only
       - name: Build and verify the public Apple Silicon package
         shell: bash
         run: |

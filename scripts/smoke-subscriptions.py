@@ -64,6 +64,12 @@ proxy-providers:
             self.redirect("/plain")
         elif route == "/bad-redirect":
             self.redirect("file:///clay-synthetic-subscription-do-not-read")
+        elif route == "/cross-origin":
+            self.redirect(f"http://localhost:{self.server.server_port}/unexpected-redirect")
+        elif route == "/unexpected-redirect":
+            with self.server.revision_lock:
+                self.server.redirect_downloads += 1
+            self.send_body(LINK)
         else:
             self.send_body(b"unknown route", status=404)
 
@@ -103,6 +109,7 @@ def main():
         server.revision = 0
         server.yaml_downloads = 0
         server.provider_downloads = 0
+        server.redirect_downloads = 0
         server.revision_lock = threading.Lock()
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -117,6 +124,8 @@ def main():
                     raise RuntimeError("Subscription checks did not download the Clash YAML fixture exactly once.")
             if server.provider_downloads:
                 raise RuntimeError("Subscription checks unexpectedly downloaded an embedded provider.")
+            if server.redirect_downloads:
+                raise RuntimeError("Subscription checks unexpectedly followed a cross-origin redirect.")
             if server.revision != 3:
                 raise RuntimeError("Subscription checks did not make three fresh requests; rebuild CLAYCoreChecks.")
         finally:

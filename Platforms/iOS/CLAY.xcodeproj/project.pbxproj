@@ -1,0 +1,209 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 60;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A00100000000000000000001 /* CLAYOfflineApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000001 /* CLAYOfflineApp.swift */; };
+		A00100000000000000000002 /* OfflineSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000002 /* OfflineSummary.swift */; };
+		A00100000000000000000003 /* CLAYCore in Frameworks */ = {isa = PBXBuildFile; productRef = A00800000000000000000002 /* CLAYCore */; };
+		A00100000000000000000004 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = A00300000000000000000005 /* Localizable.strings */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A00200000000000000000001 /* CLAYOfflineApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLAYOfflineApp.swift; sourceTree = "<group>"; };
+		A00200000000000000000002 /* OfflineSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineSummary.swift; sourceTree = "<group>"; };
+		A00200000000000000000003 /* CLAY.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CLAY.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A00200000000000000000004 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
+		A00200000000000000000005 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Localizable.strings"; sourceTree = "<group>"; };
+		A00200000000000000000006 /* ja */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ja; path = ja.lproj/Localizable.strings; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A00400000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (A00100000000000000000003 /* CLAYCore in Frameworks */,);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A00300000000000000000001 = {
+			isa = PBXGroup;
+			children = (A00300000000000000000002 /* CLAY */, A00300000000000000000003 /* Products */,);
+			sourceTree = "<group>";
+		};
+		A00300000000000000000002 /* CLAY */ = {
+			isa = PBXGroup;
+			children = (A00200000000000000000001 /* CLAYOfflineApp.swift */, A00200000000000000000002 /* OfflineSummary.swift */, A00300000000000000000004 /* Resources */,);
+			path = CLAY;
+			sourceTree = "<group>";
+		};
+		A00300000000000000000003 /* Products */ = {
+			isa = PBXGroup;
+			children = (A00200000000000000000003 /* CLAY.app */,);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		A00300000000000000000004 /* Resources */ = {
+			isa = PBXGroup;
+			children = (A00300000000000000000005 /* Localizable.strings */,);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A00500000000000000000001 /* CLAYiOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A00700000000000000000006 /* Build configuration list for PBXNativeTarget "CLAYiOS" */;
+			buildPhases = (A00400000000000000000002 /* Sources */, A00400000000000000000001 /* Frameworks */, A00400000000000000000003 /* Resources */,);
+			buildRules = ();
+			dependencies = ();
+			name = CLAYiOS;
+			packageProductDependencies = (A00800000000000000000002 /* CLAYCore */,);
+			productName = CLAY;
+			productReference = A00200000000000000000003 /* CLAY.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A00600000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {LastSwiftUpdateCheck = 1600; LastUpgradeCheck = 1600; };
+			buildConfigurationList = A00700000000000000000005 /* Build configuration list for PBXProject "CLAY" */;
+			compatibilityVersion = "Xcode 15.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (en, "zh-Hans", ja, Base,);
+			mainGroup = A00300000000000000000001;
+			packageReferences = (A00800000000000000000001 /* XCLocalSwiftPackageReference "../.." */,);
+			productRefGroup = A00300000000000000000003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (A00500000000000000000001 /* CLAYiOS */,);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A00400000000000000000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (A00100000000000000000004 /* Localizable.strings in Resources */,);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A00400000000000000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (A00100000000000000000001 /* CLAYOfflineApp.swift in Sources */, A00100000000000000000002 /* OfflineSummary.swift in Sources */,);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXVariantGroup section */
+		A00300000000000000000005 /* Localizable.strings */ = {
+			isa = PBXVariantGroup;
+			children = (A00200000000000000000004 /* en */, A00200000000000000000005 /* zh-Hans */, A00200000000000000000006 /* ja */,);
+			name = Localizable.strings;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
+
+/* Begin XCBuildConfiguration section */
+		A00700000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				ENABLE_TESTABILITY = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		A00700000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		A00700000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = CLAY;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.clay.offline;
+				PRODUCT_NAME = CLAY;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A00700000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = CLAY;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.clay.offline;
+				PRODUCT_NAME = CLAY;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A00700000000000000000005 /* Build configuration list for PBXProject "CLAY" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (A00700000000000000000001 /* Debug */, A00700000000000000000002 /* Release */,);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A00700000000000000000006 /* Build configuration list for PBXNativeTarget "CLAYiOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (A00700000000000000000003 /* Debug */, A00700000000000000000004 /* Release */,);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		A00800000000000000000001 /* XCLocalSwiftPackageReference "../.." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../..;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A00800000000000000000002 /* CLAYCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A00800000000000000000001 /* XCLocalSwiftPackageReference "../.." */;
+			productName = CLAYCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = A00600000000000000000001 /* Project object */;
+}

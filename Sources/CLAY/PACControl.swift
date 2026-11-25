@@ -42,7 +42,7 @@ import SwiftUI
     var modeLabel: String {
         if needsRecovery { return "PAC 待恢复" }
         if let systemService { return "系统 PAC · \(systemService.name)" }
-        return localURL == nil ? "独立代理" : "本机 PAC"
+        return localURL == nil ? "手动接入" : "本机 PAC"
     }
 
     func refreshServices() {

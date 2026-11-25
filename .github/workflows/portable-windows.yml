@@ -1,0 +1,76 @@
+name: Windows portable CLI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portable-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-portable:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      SWIFT_VERSION: '6.4.3'
+      # Microsoft WinGet catalog: Swift.Toolchain 6.4.3, x64 installer.
+      SWIFT_INSTALLER_SHA256: A4F1369833F77DE28DBAC998C8DEBE1C1D6044410DC6380238AE61A0D7CE5F77
+    steps:
+      - name: Check out source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Install the verified swift.org toolchain
+        run: |
+          $version = $env:SWIFT_VERSION
+          $release = "swift-$version-RELEASE"
+          $installer = Join-Path $env:RUNNER_TEMP "$release-windows10.exe"
+          $url = "https://download.swift.org/swift-$version-release/windows10/$release/$release-windows10.exe"
+          curl.exe --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --retry 2 --max-time 360 --output $installer $url
+          if ($LASTEXITCODE -ne 0) { throw "Swift toolchain download failed: $LASTEXITCODE" }
+          if ((Get-FileHash -Algorithm SHA256 -LiteralPath $installer).Hash -ne $env:SWIFT_INSTALLER_SHA256) {
+            throw 'Swift installer checksum does not match the x64 WinGet manifest'
+          }
+          $log = Join-Path $env:RUNNER_TEMP 'swift-install.log'
+          $install = Start-Process -FilePath $installer -ArgumentList @('/install', '/quiet', '/norestart', '/log', ('"' + $log + '"'), 'OptionsInstallDBG=0', 'OptionsInstallPy=0', 'OptionsInstallAndroidPlatform=0') -Wait -PassThru
+          if ($install.ExitCode -notin @(0, 3010)) {
+            if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log -Tail 40 }
+            throw "Swift installer failed: $($install.ExitCode)"
+          }
+          $root = Join-Path $env:LOCALAPPDATA 'Programs\Swift'
+          $versionPattern = '^' + [regex]::Escape($version) + '(\+\w+)?$'
+          $toolchains = @(Get-ChildItem -LiteralPath (Join-Path $root 'Toolchains') -Directory | Where-Object Name -Match $versionPattern)
+          if ($toolchains.Count -ne 1) { throw "Expected one Swift $version toolchain" }
+          $bin = Join-Path $toolchains[0].FullName 'usr\bin'
+          $runtime = Join-Path $root "Runtimes\$version\usr\bin"
+          $sdk = Join-Path $root "Platforms\$version\Windows.platform\Developer\SDKs\Windows.sdk"
+          foreach ($path in @((Join-Path $bin 'swift.exe'), (Join-Path $runtime 'swiftCore.dll'), $sdk)) {
+            if (-not (Test-Path -LiteralPath $path)) { throw "Swift install is missing: $path" }
+          }
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value @($runtime, $bin)
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "SDKROOT=$sdk"
+      - name: Build portable CLI
+        run: |
+          $installed = swift --version
+          if ($LASTEXITCODE -ne 0) { throw "Swift version check failed: $LASTEXITCODE" }
+          $installed
+          if (($installed -join " ") -notmatch ("Swift version " + [regex]::Escape($env:SWIFT_VERSION) + "\b")) {
+            throw "Expected Swift $env:SWIFT_VERSION"
+          }
+          swift build -c release --product clay-portable
+      - name: Run offline inspection and PAC checks
+        run: |
+          $buildDir = swift build -c release --show-bin-path
+          if ($LASTEXITCODE -ne 0) { throw "Swift binary path lookup failed: $LASTEXITCODE" }
+          $binary = Join-Path $buildDir 'clay-portable.exe'
+          python scripts/smoke-portable.py $binary --offline-only

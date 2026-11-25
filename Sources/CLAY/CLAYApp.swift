@@ -1,4 +1,5 @@
 import AppKit
+import CLAYCore
 import SwiftUI
 
 @main struct CLAYApp: App {
@@ -53,7 +54,7 @@ import SwiftUI
 private struct StatusIndicator: View {
     @ObservedObject var model: Workspace
     var body: some View {
-        Image(systemName: model.running ? "cube.fill" : "cube")
+        Image(systemName: model.busy && !model.running ? "cube.transparent" : model.running ? "cube.fill" : "cube")
             .accessibilityLabel(Text("CLAY · \(model.menuStatus)"))
     }
 }
@@ -66,8 +67,25 @@ private struct StatusMenu: View {
     var body: some View {
         Text("CLAY · \(model.menuStatus)")
         if model.running || pac.needsRecovery { Text(pac.modeLabel) }
+        Menu("流量模式：\(model.routingMode.label)") {
+            ForEach(CoreRoutingMode.allCases) { mode in
+                Button { model.selectRoutingMode(mode) } label: {
+                    if mode == model.routingMode { Label(mode.label, systemImage: "checkmark") }
+                    else { Text(mode.label) }
+                }
+            }
+        }.disabled(model.busy)
+        if !model.nodes.isEmpty {
+            Menu("节点：\(model.chosen?.name ?? "未选")") {
+                ForEach(model.nodes) { node in
+                    Button { model.select(node) } label: {
+                        if node.id == model.active { Label(node.name, systemImage: "checkmark") }
+                        else { Text(node.name) }
+                    }.disabled(node.id == model.active)
+                }
+            }.disabled(model.busy)
+        }
         if let address = model.proxyAddress {
-            if let node = model.chosen { Text(node.name) }
             Button("复制代理地址") { model.copy(address) }
         }
         if let url = pac.localURL { Button("复制 PAC 地址") { model.copy(url.absoluteString) } }
@@ -99,6 +117,7 @@ private struct Dashboard: View {
     @State private var input = ""
     @State private var subscriptionName = ""
     @State private var subscriptionURL = ""
+    @State private var nodeSearch = ""
     private let clay = Color(red: 0.86, green: 0.40, blue: 0.23)
 
     var body: some View {
@@ -144,6 +163,16 @@ private struct Dashboard: View {
     private var overview: some View {
         VStack(alignment: .leading, spacing: 16) {
             TrafficDashboard(model: model)
+            panel("流量模式", symbol: "arrow.triangle.branch") {
+                Picker("流量模式", selection: Binding(get: { model.routingMode }, set: model.selectRoutingMode)) {
+                    ForEach(CoreRoutingMode.allCases) { mode in Text(mode.label).tag(mode) }
+                }.pickerStyle(.segmented).labelsHidden().disabled(model.busy)
+                Text(routingExplanation).font(.callout).foregroundStyle(.secondary)
+                if model.routingMode == .rule && model.runningRules.map({ $0 != pac.policy }) == true {
+                    Text("规则有未应用的改动。重启内核后用于手动接入的流量；PAC 仍按自己的发布状态更新。")
+                        .font(.callout).foregroundStyle(.orange)
+                }
+            }
             panel("当前节点", symbol: "arrow.triangle.branch") {
                 HStack {
                     Text(model.chosen?.name ?? "尚未选择节点").font(.headline).lineLimit(1)
@@ -165,18 +194,36 @@ private struct Dashboard: View {
             }
         }
     }
+    private var routingExplanation: String {
+        switch model.routingMode {
+        case .rule: return "进入本机代理的流量按「PAC 规则」中的规则及未命中行为分流。"
+        case .global: return "进入本机代理的流量全部走当前节点。"
+        case .direct: return "进入本机代理的流量直接连接目标，不走当前节点。"
+        }
+    }
     private var nodes: some View {
-        VStack(alignment: .leading, spacing: 13) {
+        let query = nodeSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        let visibleNodes = model.nodes.filter { node in
+            query.isEmpty || [node.name, node.protocolName, node.transport, node.security].contains { $0.localizedCaseInsensitiveContains(query) }
+        }
+        return VStack(alignment: .leading, spacing: 13) {
             HStack { Button("粘贴导入") { model.presentImport = true }.disabled(model.running || model.busy)
                 Button("选择文件…") { _ = model.importFile() }.disabled(model.running || model.busy)
                 if model.canUseManual { Button("使用手动列表") { model.chooseSource(nil) } }
                 Spacer(); Text("\(model.nodes.count) 个节点").foregroundStyle(.secondary) }
             if model.sourceChangePending { stagedNotice }
             if model.nodes.isEmpty {
-                Text("可导入 VMess / VLESS 分享链接、V2Ray/Xray JSON 或 Clash 配置，也可以从订阅载入。").foregroundStyle(.secondary)
+                Text("支持 VMess、VLESS、Shadowsocks 和 Trojan 分享链接，也可以导入兼容的 V2Ray/Xray 或 Clash 配置及订阅。").foregroundStyle(.secondary)
                 Button("管理订阅") { page = .subscriptions }
+            } else {
+                HStack {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("搜索节点名称或协议", text: $nodeSearch).textFieldStyle(.roundedBorder)
+                    if !nodeSearch.isEmpty { Button("清除") { nodeSearch = "" } }
+                }
+                if visibleNodes.isEmpty { Text("没有匹配的节点。").foregroundStyle(.secondary) }
             }
-            ForEach(model.nodes) { n in
+            ForEach(visibleNodes) { n in
                 HStack(spacing: 13) {
                     Image(systemName: model.active == n.id ? "largecircle.fill.circle" : "circle").foregroundStyle(model.active == n.id ? clay : .secondary)
                     VStack(alignment: .leading, spacing: 3) {

@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 
 public enum PACDecision: String, CaseIterable, Codable, Sendable {
@@ -261,7 +260,7 @@ public struct PACPolicy: Equatable, Codable, Sendable {
     """#
 }
 
-private struct PACTarget {
+struct PACTarget {
     let host: String
     let ipv4: UInt32?
     let ipv6: [UInt16]?
@@ -278,11 +277,7 @@ private struct PACTarget {
         if value.contains(":") {
             let unscoped = value.split(separator: "%", maxSplits: 1, omittingEmptySubsequences: false)
             if unscoped.count == 2, unscoped[1].isEmpty || !unscoped[1].utf8.allSatisfy({ Self.isDomainCharacter($0) || $0 == 46 }) { return nil }
-            var address = in6_addr()
-            guard String(unscoped[0]).withCString({ inet_pton(AF_INET6, $0, &address) }) == 1 else { return nil }
-            let groups = withUnsafeBytes(of: &address) { bytes in
-                stride(from: 0, to: 16, by: 2).map { UInt16(bytes[$0]) << 8 | UInt16(bytes[$0 + 1]) }
-            }
+            guard let groups = Self.parseIPv6(String(unscoped[0])) else { return nil }
             host = groups.map { String($0, radix: 16) }.joined(separator: ":")
             ipv6 = groups
             ipv4 = nil
@@ -306,6 +301,34 @@ private struct PACTarget {
     }
 
     fileprivate static func isDomainCharacter(_ byte: UInt8) -> Bool { (97...122).contains(byte) || (48...57).contains(byte) || byte == 45 || byte == 95 }
+
+    // Parse IPv6 text without platform networking APIs. Keep normalization in
+    // sync with clayIPv6, including IPv4-mapped addresses and strict octets.
+    static func parseIPv6(_ input: String) -> [UInt16]? {
+        guard !input.isEmpty, input.utf8.count <= 45 else { return nil }
+        var value = input
+        if value.contains(".") {
+            guard let lastColon = value.lastIndex(of: ":"),
+                  let ipv4 = parseIPv4(String(value[value.index(after: lastColon)...]), strict: true) else { return nil }
+            value = String(value[...lastColon]) + String(ipv4 >> 16, radix: 16) + ":" + String(ipv4 & 0xffff, radix: 16)
+        }
+        func groups(_ slice: String) -> [UInt16]? {
+            if slice.isEmpty { return [] }
+            var result: [UInt16] = []
+            for group in slice.split(separator: ":", omittingEmptySubsequences: false) {
+                guard (1...4).contains(group.utf8.count),
+                      group.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
+                      let number = UInt16(group, radix: 16) else { return nil }
+                result.append(number)
+            }
+            return result
+        }
+        let halves = value.components(separatedBy: "::")
+        guard halves.count <= 2, let left = groups(halves[0]) else { return nil }
+        if halves.count == 1 { return left.count == 8 ? left : nil }
+        guard let right = groups(halves[1]), left.count + right.count < 8 else { return nil }
+        return left + Array(repeating: 0, count: 8 - left.count - right.count) + right
+    }
 
     static func parseIPv4(_ host: String, strict: Bool = false) -> UInt32? {
         let parts = host.split(separator: ".", omittingEmptySubsequences: false)

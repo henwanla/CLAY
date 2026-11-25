@@ -20,6 +20,9 @@ import Darwin
         try tests.testImportVmessWs()
         try tests.testVlessRejectsSilentDowngradeOfUnsupportedOptions()
         try tests.testVlessRealityMappingRequiresExplicitKeyAndSNI()
+        try tests.testPasswordShareLinks()
+        try tests.testClashPasswordNodes()
+        tests.testPasswordNodesRejectUnsupportedOrAmbiguousInput()
         try tests.testFullConfigurationImportsOutboundButNotSystemInputs()
         tests.testOfflineSubscriptionTextNeverFetchesURLs()
         try tests.testDistinctEngineNodeNames()
@@ -67,6 +70,101 @@ import Darwin
         XCTAssertEqual((options["reality-opts"] as? [String: Any])?["short-id"] as? String, "01ab")
         XCTAssertEqual((options["reality-opts"] as? [String: Any])?["support-x25519mlkem768"] as? Bool, true)
     }
+    func testPasswordShareLinks() throws {
+        let userinfo = Data("aes-128-gcm:p+:/z".utf8).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+        let base64 = "ss://\(userinfo)@[::1]:443#%E6%B5%8B%E8%AF%95"
+        let clear = "ss://aes-128-gcm:p%2B%3A%2Fz@[::1]:443/"
+        let trojan = "trojan://p%3Aass%40word+%252F@127.0.0.1:443?type=tcp&security=tls&sni=example.test&alpn=h2,http%2F1.1&allowInsecure=0#Trojan"
+        let result = ProfileImporter.read(Data([base64, clear, trojan].joined(separator: "\n").utf8).base64EncodedString())
+        XCTAssertTrue(result.issues.isEmpty)
+        XCTAssertEqual(result.profiles.map(\.name), ["测试", "Shadowsocks", "Trojan"])
+        XCTAssertEqual(result.profiles.map(\.protocolName), ["ss", "ss", "trojan"])
+        XCTAssertEqual(result.profiles.map(\.security), ["aead", "aead", "tls"])
+        XCTAssertTrue(result.profiles[0].hasSameConnection(as: result.profiles[1]))
+        let shadow = try fields(result.profiles[0])
+        XCTAssertEqual(shadow["server"] as? String, "::1")
+        XCTAssertEqual(shadow["cipher"] as? String, "aes-128-gcm")
+        XCTAssertEqual(shadow["password"] as? String, "p+:/z")
+        let options = try fields(result.profiles[2])
+        XCTAssertEqual(options["password"] as? String, "p:ass@word+%2F")
+        XCTAssertEqual(options["network"] as? String, "tcp")
+        XCTAssertEqual(options["sni"] as? String, "example.test")
+        XCTAssertEqual(options["alpn"] as? [String], ["h2", "http/1.1"])
+        XCTAssertEqual(options["skip-cert-verify"] as? Bool, false)
+    }
+
+    func testClashPasswordNodes() throws {
+        let yaml = """
+        proxies:
+          - {name: SS, type: ss, server: localhost, port: 1080, cipher: chacha20-ietf-poly1305, password: 001230, udp: false}
+          - {name: Trojan, type: trojan, server: '::1', port: 8443, password: '  Hi: there #1  ', sni: example.test, alpn: [h2, http/1.1], skip-cert-verify: false, udp: true}
+          - {name: Existing, type: vless, server: 127.0.0.1, port: 443, uuid: \(uuid)}
+        """
+        let json = """
+        {"proxies":[
+          {"name":"SS","type":"ss","server":"localhost","port":1080,"cipher":"chacha20-ietf-poly1305","password":"001230","udp":false},
+          {"name":"Trojan","type":"trojan","server":"::1","port":8443,"password":"  Hi: there #1  ","network":"tcp","tls":true,"sni":"example.test","alpn":["h2","http/1.1"],"skip-cert-verify":false,"udp":true},
+          {"name":"Existing","type":"vless","server":"127.0.0.1","port":443,"uuid":"\(uuid)"}
+        ]}
+        """
+        let a = ProfileImporter.read(yaml), b = ProfileImporter.read(json)
+        XCTAssertTrue(a.issues.isEmpty && b.issues.isEmpty)
+        XCTAssertEqual(a.profiles.map(\.name), ["SS", "Trojan", "Existing"])
+        XCTAssertEqual(b.profiles.map(\.name), a.profiles.map(\.name))
+        XCTAssertTrue(zip(a.profiles, b.profiles).allSatisfy { $0.hasSameConnection(as: $1) })
+        let shadow = try fields(a.profiles[0]), trojan = try fields(a.profiles[1])
+        XCTAssertEqual(shadow["password"] as? String, "001230")
+        XCTAssertEqual(shadow["udp"] as? Bool, false)
+        XCTAssertEqual(trojan["password"] as? String, "  Hi: there #1  ")
+        XCTAssertEqual(trojan["udp"] as? Bool, true)
+        XCTAssertEqual(trojan["skip-cert-verify"] as? Bool, false)
+    }
+
+    func testPasswordNodesRejectUnsupportedOrAmbiguousInput() {
+        let invalid: [(String, ImportError)] = [
+            ("ss://", .malformed),
+            ("trojan://#tag", .malformed),
+            ("ss://aes-128-gcm:pw@127.0.0.1:443/?plugin=v2ray-plugin", .unsupportedOption),
+            ("ss://aes-256-cfb:pw@127.0.0.1:443", .unsupportedOption),
+            ("ss://2022-blake3-aes-128-gcm:pw@127.0.0.1:443", .unsupportedOption),
+            ("ss://aes-128-gcm:pw%XX@127.0.0.1:443", .malformed),
+            ("ss://aes-128-gcm:pw@127.0.0.1:443/path", .invalidAccount),
+            ("ss://aes-128-gcm:pw@[::::]:443", .invalidAccount),
+            ("ss://aes-128-gcm:pw@::1:443", .malformed),
+            ("ss://aes-128-gcm:pw@[127.0.0.1]:443", .invalidAccount),
+            ("ss://aes-128-gcm:pw@127.0.0.1:65536", .invalidAccount),
+            ("ss://aes-128-gcm:@127.0.0.1:443", .invalidAccount),
+            ("trojan://pw%00@127.0.0.1:443", .invalidAccount),
+            ("trojan://p@ss@127.0.0.1:443", .malformed),
+            ("trojan://pw@127.0.0.1:443?security=none", .unsupportedOption),
+            ("trojan://pw@127.0.0.1:443?allowInsecure=1", .unsupportedOption),
+            ("trojan://pw@127.0.0.1:443?type=ws", .unsupportedTransport),
+            ("trojan://pw@127.0.0.1:443?sni=x.example&s%6Ei=y.example", .malformed),
+            ("trojan://pw@127.0.0.1:443?sni=bad/name", .unsupportedOption),
+            ("trojan://pw@127.0.0.1:443?alpn=h2,,http/1.1", .unsupportedOption),
+            ("trojan://pw@127.0.0.1:443?fp=chrome", .unsupportedOption),
+        ]
+        for (input, error) in invalid {
+            let parsed = ProfileImporter.read(input)
+            XCTAssertTrue(parsed.profiles.isEmpty, "accepted invalid synthetic link")
+            XCTAssertEqual(parsed.issues, [error: 1])
+        }
+
+        let yaml = """
+        proxies:
+          - {type: ss, server: localhost, port: 1080, cipher: aes-128-gcm, password: pw, plugin: obfs}
+          - {type: trojan, server: localhost, port: 443, password: pw, dialer-proxy: other}
+          - {type: trojan, server: localhost, port: 443, password: pw, skip-cert-verify: true}
+          - {type: trojan, server: localhost, port: 443, password: pw, tls: false}
+          - {type: trojan, server: localhost, port: 443, password: pw, network: grpc}
+          - {type: trojan, server: localhost, port: 443, password: pw, skip-cert-verify: 0}
+        """
+        let parsed = ProfileImporter.read(yaml)
+        XCTAssertTrue(parsed.profiles.isEmpty)
+        XCTAssertEqual(parsed.issues, [.unsupportedTransport: 1, .unsupportedOption: 4, .malformed: 1])
+    }
+
     func testFullConfigurationImportsOutboundButNotSystemInputs() throws {
         let raw = """
         {"tun":{"enable":true},"inbounds":[{"listen":"0.0.0.0","port":1080}],"outbounds":[{"protocol":"freedom"},{"tag":"User-set name","protocol":"vless","settings":{"vnext":[{"address":"127.0.0.1","port":8080,"users":[{"id":"\(uuid)","encryption":"none"}]}]}}]}
@@ -123,7 +221,7 @@ import Darwin
         let body = """
         {"allow-lan":true,"mixed-port":7000,"external-controller":"0.0.0.0:7001","proxy-providers":{"outside":{"type":"http","url":"https://example.test/ignored"}},"rules":["MATCH,DIRECT"],"proxies":[
           {"name":"Clash Node","type":"vless","server":"127.0.0.1","port":443,"uuid":"\(uuid)","network":"ws","tls":true,"udp":false,"servername":"example.test","ws-opts":{"path":"/clay","headers":{"Host":"example.test"}}},
-          {"name":"Other type","type":"ss","server":"127.0.0.1","port":443},
+          {"name":"Other type","type":"hysteria2","server":"127.0.0.1","port":443},
           {"name":"Chained node","type":"vless","server":"127.0.0.1","port":443,"uuid":"\(uuid)","dialer-proxy":"outside"}
         ]}
         """
@@ -170,7 +268,7 @@ import Darwin
           - { <<: *sample, name: merged }
           - {name: !custom Tag, type: vless, server: 127.0.0.1, port: 443, uuid: \(uuid)}
           - {name: duplicate, type: vless, server: 127.0.0.1, port: 443, port: 1234, uuid: \(uuid)}
-          - {name: other protocol, type: ss, server: 127.0.0.1, port: 443}
+          - {name: other protocol, type: hysteria2, server: 127.0.0.1, port: 443}
           - {name: Reality, type: vless, server: 127.0.0.1, port: 443, uuid: \(uuid), tls: true, servername: example.test, client-fingerprint: chrome, reality-opts: { public-key: \(key), short-id: 001230 }}
         rules:
           - MATCH,DIRECT
@@ -240,6 +338,12 @@ import Darwin
         } catch let error as SubscriptionError {
             XCTAssertTrue(error == .insecureRedirect || error == .network)
             XCTAssertFalse(error.localizedDescription.contains("file://"))
+        }
+        do {
+            _ = try await load("cross-origin")
+            XCTAssertTrue(false, "followed a cross-origin redirect")
+        } catch let error as SubscriptionError {
+            XCTAssertTrue(error == .insecureRedirect || error == .network)
         }
         let first = try await load("changing")
         let refreshed = try await load("changing")

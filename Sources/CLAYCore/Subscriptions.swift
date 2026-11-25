@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 
 public enum SubscriptionError: LocalizedError, Equatable {
@@ -11,7 +12,7 @@ public enum SubscriptionError: LocalizedError, Equatable {
         case .httpStatus(let status): return "订阅服务返回 HTTP \(status)，请检查地址是否仍有效。"
         case .tooLarge: return "订阅内容超过 2 MiB，无法导入。"
         case .invalidEncoding: return "订阅内容不是有效的 UTF-8 文本。"
-        case .noSupportedProfiles: return "订阅中没有可用的 VMess 或 VLESS 节点。"
+        case .noSupportedProfiles: return "订阅中没有 CLAY 能导入的节点。"
         }
     }
 }
@@ -43,6 +44,7 @@ public enum SubscriptionImporter {
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.urlCache = nil
         configuration.httpCookieStorage = nil
+        configuration.httpShouldSetCookies = false
         configuration.urlCredentialStorage = nil
         let session = URLSession(configuration: configuration, delegate: SubscriptionRedirects(), delegateQueue: nil)
         defer { session.invalidateAndCancel() }
@@ -85,10 +87,13 @@ private final class SubscriptionRedirects: NSObject, URLSessionTaskDelegate, @un
         newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void
     ) {
         guard let address = request.url?.absoluteString, let destination = try? SubscriptionImporter.validatedURL(address),
-              response.url?.scheme?.lowercased() != "https" || destination.scheme?.lowercased() == "https" else {
+              let source = response.url, let scheme = source.scheme?.lowercased(), scheme == destination.scheme?.lowercased(),
+              source.host?.lowercased() == destination.host?.lowercased(),
+              (source.port ?? (scheme == "https" ? 443 : 80)) == (destination.port ?? (scheme == "https" ? 443 : 80)) else {
             completionHandler(nil)
             return
         }
         completionHandler(request)
     }
 }
+#endif

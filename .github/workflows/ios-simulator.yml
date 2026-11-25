@@ -1,0 +1,53 @@
+name: iOS Simulator build
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - Package.swift
+      - 'Sources/CLAYCore/**'
+      - 'Vendor/Yams/**'
+      - 'Platforms/iOS/**'
+      - .github/workflows/ios-simulator.yml
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - Package.swift
+      - 'Sources/CLAYCore/**'
+      - 'Vendor/Yams/**'
+      - 'Platforms/iOS/**'
+      - .github/workflows/ios-simulator.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-simulator-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Build and check the iOS Simulator app
+        shell: bash
+        run: |
+          set -euo pipefail
+          derived_data="$RUNNER_TEMP/clay-ios-build"
+          xcodebuild -version
+          xcodebuild -project Platforms/iOS/CLAY.xcodeproj -scheme CLAY \
+            -configuration Debug -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$derived_data" CODE_SIGNING_ALLOWED=NO build
+          app="$derived_data/Build/Products/Debug-iphonesimulator/CLAY.app"
+          test -x "$app/CLAY"
+          [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")" == app.clay.offline ]]
+          [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleSupportedPlatforms:0' "$app/Info.plist")" == iPhoneSimulator ]]
+          for locale in en zh-Hans ja; do
+            test -s "$app/$locale.lproj/Localizable.strings"
+          done

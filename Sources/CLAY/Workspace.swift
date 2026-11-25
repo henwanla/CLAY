@@ -30,7 +30,9 @@ enum Probe {
 @MainActor final class Workspace: ObservableObject {
     @Published var nodes: [NodeProfile] = []
     @Published var active: UUID?
-    @Published var engine: URL?
+    @Published private(set) var engine: URL?
+    @Published private(set) var routingMode: CoreRoutingMode = .global
+    @Published private(set) var runningRules: PACPolicy?
     @Published var issues: [ImportError: Int] = [:]
     @Published var hasImported = false
     @Published var proxyAddress: String?
@@ -63,30 +65,37 @@ enum Probe {
     private var connectionTask: Task<Void, Never>?
     private var trafficSegment = 0
     private let store: SubscriptionStore
+    private let preferences: UserDefaults
     private var catalog = SubscriptionCatalog()
     private var subscriptionResults: [UUID: ImportResult] = [:]
     private var manualResults: ImportResult?
     private var liveSource: UUID?
     private var shuttingDown = false
-    private static let enginePreference = "mihomoExecutablePath"
+    private struct TrustedEngine: Codable {
+        let path: String
+        let fingerprint: String
+    }
+    private static let enginePreference = "clay.trusted-mihomo.v1"
+    private static let routingPreference = "clay.routing-mode.v1"
+    private var trustedEngine: TrustedEngine?
 
-    init(store: SubscriptionStore = SubscriptionStore(), pac: PACControl? = nil) {
+    init(store: SubscriptionStore = SubscriptionStore(), pac: PACControl? = nil, preferences: UserDefaults = .standard) {
         self.store = store
+        self.preferences = preferences
         self.pac = pac ?? PACControl()
-        let nearby = Bundle.main.bundleURL.deletingLastPathComponent().appendingPathComponent("Dependencies/mihomo")
-        if let path = UserDefaults.standard.string(forKey: Self.enginePreference),
-           FileManager.default.isExecutableFile(atPath: path) {
-            engine = URL(fileURLWithPath: path)
-        } else if Bundle.main.object(forInfoDictionaryKey: "CLAYUseAdjacentMihomo") as? Bool == true,
-                  FileManager.default.isExecutableFile(atPath: nearby.path) {
-            engine = nearby
+        if let data = preferences.data(forKey: Self.enginePreference),
+           let saved = try? JSONDecoder().decode(TrustedEngine.self, from: data),
+           FileManager.default.isExecutableFile(atPath: saved.path) {
+            trustedEngine = saved
+            engine = URL(fileURLWithPath: saved.path)
         }
+        routingMode = preferences.string(forKey: Self.routingPreference).flatMap(CoreRoutingMode.init(rawValue:)) ?? .global
         do {
             catalog = try store.load()
             for entry in catalog.entries { subscriptionResults[entry.id] = SubscriptionImporter.parse(entry.content) }
             publishCatalog()
             if selectedSubscription != nil { applySelectedSource() }
-        } catch { subscriptionMessage = "无法读取本地订阅记录。" }
+        } catch { subscriptionMessage = (error as? SubscriptionStorageError)?.localizedDescription ?? "无法读取本地订阅记录。" }
     }
     var chosen: NodeProfile? { nodes.first { $0.id == active } }
     var running: Bool { proxyAddress != nil }
@@ -155,9 +164,17 @@ enum Probe {
         let picker = NSOpenPanel(); picker.canChooseDirectories = false; picker.allowsMultipleSelection = false
         picker.message = "选择你信任的 Mihomo 可执行文件"
         guard picker.runModal() == .OK, let file = picker.url else { return }
-        guard FileManager.default.isExecutableFile(atPath: file.path) else { status = "所选文件不可执行"; return }
-        UserDefaults.standard.set(file.path, forKey: Self.enginePreference)
-        engine = file; status = nodes.isEmpty ? "等待导入节点" : "可启动"
+        do { try trustEngine(file) }
+        catch { status = "无法读取或验证所选的可执行文件" }
+    }
+
+    func trustEngine(_ selected: URL, persist: Bool = true) throws {
+        let file = selected.resolvingSymlinksInPath()
+        let trusted = TrustedEngine(path: file.path, fingerprint: try EngineIdentity.fingerprint(file))
+        if persist { preferences.set(try JSONEncoder().encode(trusted), forKey: Self.enginePreference) }
+        trustedEngine = trusted
+        engine = file
+        status = nodes.isEmpty ? "等待导入节点" : "可启动"
     }
     func importFile() -> Bool {
         let picker = NSOpenPanel(); picker.canChooseDirectories = false
@@ -249,7 +266,10 @@ enum Probe {
 
     private func saveCatalog(_ next: SubscriptionCatalog) -> Bool {
         do { try store.save(next); catalog = next; return true }
-        catch { subscriptionMessage = "无法保存本地订阅记录。原列表保持不变。"; return false }
+        catch {
+            subscriptionMessage = (error as? SubscriptionStorageError)?.localizedDescription ?? "无法保存本地订阅记录。原列表保持不变。"
+            return false
+        }
     }
 
     private func publishCatalog() {
@@ -276,13 +296,38 @@ enum Probe {
 
     func toggleProxy() { if running { stop() } else { start() } }
 
+    func selectRoutingMode(_ mode: CoreRoutingMode) {
+        guard !busy, mode != routingMode else { return }
+        guard let core else { rememberRoutingMode(mode); return }
+        busy = true
+        sessionTask = Task {
+            defer { busy = false; sessionTask = nil }
+            do {
+                try await core.setRoutingMode(mode)
+                guard self.core === core, !Task.isCancelled else { return }
+                rememberRoutingMode(mode)
+                status = "流量模式已切换为\(mode.label)"
+            } catch {
+                guard self.core === core, !Task.isCancelled else { return }
+                status = "切换流量模式失败；请检查会话或重新启动。"
+                checkHealth()
+            }
+        }
+    }
+
+    private func rememberRoutingMode(_ mode: CoreRoutingMode) {
+        routingMode = mode
+        preferences.set(mode.rawValue, forKey: Self.routingPreference)
+    }
+
     func publishPAC(toSystem: Bool) {
         guard !shuttingDown, let core, core.isRunning else { return }
         pac.publish(port: core.proxyPort, toSystem: toSystem)
     }
 
     func start() {
-        guard !shuttingDown, !busy, !running, !pac.hasLiveOwnership, let engine, let selected = chosen else { return }
+        guard !shuttingDown, !busy, !running, !pac.hasLiveOwnership, let engine, let trustedEngine, let selected = chosen else { return }
+        let policy = pac.policy
         busy = true; status = "正在启动 Mihomo…"
         pendingStart = Task { [weak self] in
             guard let self else { return }
@@ -295,11 +340,20 @@ enum Probe {
                 }
             }
             do {
-                let session = try await CoreSession.start(engine: engine, nodes: nodes, active: selected)
+                let session = try await CoreSession.start(engine: engine, nodes: nodes, active: selected,
+                                                          expectedFingerprint: trustedEngine.fingerprint,
+                                                          mode: routingMode, policy: policy)
                 if Task.isCancelled { session.stopAndWait(); return }
                 core = session; proxyAddress = session.proxyAddress; status = "本机代理运行中"
+                runningRules = policy
                 monitorTraffic(session)
-            } catch let error as SessionError { status = Self.sessionMessage(error) }
+            } catch let error as SessionError {
+                if error == .engineChanged {
+                    self.engine = nil
+                    self.trustedEngine = nil
+                }
+                status = Self.sessionMessage(error)
+            }
             catch { status = "启动已取消或失败" }
         }
     }
@@ -318,7 +372,7 @@ enum Probe {
         telemetryTask?.cancel(); telemetryTask = nil
         connectionTask?.cancel(); connectionTask = nil; connectionActionBusy = false; connectionMessage = ""
         telemetry = nil; trafficHistory = []; telemetryStale = false; trafficSegment = 0
-        core?.stopAndWait(); core = nil; proxyAddress = nil
+        core?.stopAndWait(); core = nil; proxyAddress = nil; runningRules = nil
         if sourceChangePending { applySelectedSource() }
     }
     @discardableResult func shutdown() async -> Bool {
@@ -397,7 +451,7 @@ enum Probe {
     }
     static func issue(_ e: ImportError) -> String {
         switch e { case .malformed: return "文件或分享链接格式不正确"
-        case .unsupportedProtocol: return "节点协议不支持（目前支持 VMess / VLESS）"
+        case .unsupportedProtocol: return "节点协议不支持（目前支持 VMess、VLESS、Shadowsocks 和 Trojan）"
         case .unsupportedTransport: return "传输方式不支持"
         case .unsupportedOption: return "有无法迁移的选项，或超过节点上限"
         case .invalidAccount: return "地址、端口、UUID 或 REALITY 参数无效"
@@ -405,10 +459,21 @@ enum Probe {
     }
     private static func sessionMessage(_ e: SessionError) -> String {
         switch e { case .engineMissing: return "未找到可执行的 Mihomo"
+        case .engineChanged: return "Mihomo 文件已变更或无法验证。请核对来源后重新选择。"
         case .exitedDuringStart: return "Mihomo 启动后立即退出，请检查内核版本和节点格式"
         case .controlUnavailable: return "未能确认 Mihomo 控制接口或代理端口已就绪"
         case .portsUnavailable: return "无法为本机代理分配独立端口"
         case .setupFailed: return "无法创建本次运行配置"
         default: return "Mihomo 会话启动失败" }
+    }
+}
+
+extension CoreRoutingMode {
+    var label: String {
+        switch self {
+        case .rule: return "规则"
+        case .global: return "全局"
+        case .direct: return "直连"
+        }
     }
 }

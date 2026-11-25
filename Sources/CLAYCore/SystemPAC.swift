@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import Security
 import SystemConfiguration
@@ -331,3 +332,4 @@ private struct MacSystemPACSession: SystemPACSession {
         return SCNetworkServiceCopyProtocol(service, kSCNetworkProtocolTypeProxies)
     }
 }
+#endif

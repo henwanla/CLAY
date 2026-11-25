@@ -1,3 +1,4 @@
+#if os(macOS)
 import Foundation
 import Network
 
@@ -167,3 +168,4 @@ private final class PACListener: @unchecked Sendable {
         client.connection.cancel()
     }
 }
+#endif

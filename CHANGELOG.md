@@ -1,5 +1,15 @@
 # 更新记录 / Changelog
 
+## 开发中 / Unreleased
+
+- 菜单栏可切换节点与规则、全局、直连模式；手动接入、本机 PAC 和系统 PAC 仍独立设置。
+- 扩大 Shadowsocks、Trojan 导入；订阅缓存加密，Mihomo 启动时复核已选择文件的指纹。
+- 添加便携 CLI，可在本地验证节点和 PAC 规则；原生构建与验收状态见[跨平台路线](docs/跨平台路线.md)。
+
+- Switch nodes and Rule, Global, or Direct from the menu bar. Manual connection, local PAC, and system PAC remain separately configured.
+- Import a supported subset of Shadowsocks and Trojan profiles. The subscription cache is encrypted, and the app rechecks the selected Mihomo executable's fingerprint before launching it.
+- Add a portable CLI for local profile and PAC validation. See the [platform roadmap](docs/跨平台路线.md) for build and verification status.
+
 ## 0.3.0 · 预览版 / Preview
 
 - 新增独立代理、本机 PAC、系统 PAC 三种启用方式。PAC 支持按顺序编辑和批量导入规则、测试规则命中、设置默认行为；系统 PAC 可在停止、退出或重开后恢复原网络服务的代理设置。

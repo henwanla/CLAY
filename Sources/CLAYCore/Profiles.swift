@@ -4,6 +4,11 @@ public enum ImportError: String, Error {
     case malformed, unsupportedProtocol, unsupportedTransport, unsupportedOption, invalidAccount, notProxyOutbound
 }
 
+private enum PasswordProtocol {
+    case shadowsocks(cipher: String)
+    case trojan(sni: String, alpn: [String]?)
+}
+
 public struct NodeProfile: Identifiable {
     public let id = UUID()
     public let name: String
@@ -15,6 +20,11 @@ public struct NodeProfile: Identifiable {
 
     public func hasSameConnection(as other: NodeProfile) -> Bool {
         NSDictionary(dictionary: options).isEqual(to: other.options)
+    }
+
+    private static func title(_ name: String, fallback: String) -> String {
+        let title = name.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }
+        return title.isEmpty ? fallback : String(String.UnicodeScalarView(title)).prefix(140).description
     }
 
     init(name: String, kind: String, server: String, port: Int, account: String, network: String, security: String,
@@ -37,8 +47,7 @@ public struct NodeProfile: Identifiable {
             guard !sni.isEmpty, !fingerprint.isEmpty, !insecure, Base64.decode(key)?.count == 32,
                   shortID.count <= 16, shortID.count % 2 == 0, shortID.utf8.allSatisfy({ (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0) }) else { throw ImportError.invalidAccount }
         }
-        let title = name.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }
-        self.name = title.isEmpty ? kind.uppercased() : String(String.UnicodeScalarView(title)).prefix(140).description
+        self.name = Self.title(name, fallback: kind.uppercased())
         self.protocolName = kind; self.transport = network == "raw" ? "tcp" : network; self.security = security
         var fields: [String: Any] = ["type": kind, "server": server, "port": port, "uuid": account.lowercased(), "network": self.transport, "udp": udp]
         if !packetEncoding.isEmpty { fields["packet-encoding"] = packetEncoding }
@@ -61,6 +70,52 @@ public struct NodeProfile: Identifiable {
         }
         if network == "grpc" && !path.isEmpty { fields["grpc-opts"] = ["grpc-service-name": path] }
         self.options = fields
+    }
+
+    fileprivate init(name: String, server: String, port: Int, password: String, udp: Bool, mode: PasswordProtocol) throws {
+        guard Self.validPasswordNodeHost(server), (1...65535).contains(port), !password.isEmpty,
+              !password.utf8.contains(where: { $0 < 32 || $0 == 127 }) else { throw ImportError.invalidAccount }
+        var fields: [String: Any] = ["server": server, "port": port, "password": password, "udp": udp]
+        switch mode {
+        case .shadowsocks(let cipher):
+            guard ["aes-128-gcm", "aes-192-gcm", "aes-256-gcm", "chacha20-ietf-poly1305", "xchacha20-ietf-poly1305"].contains(cipher)
+            else { throw ImportError.unsupportedOption }
+            self.protocolName = "ss"
+            self.security = "aead"
+            fields["cipher"] = cipher
+        case .trojan(let sni, let alpn):
+            guard sni.isEmpty || Self.validPasswordNodeHost(sni) else { throw ImportError.unsupportedOption }
+            if let alpn {
+                guard alpn.allSatisfy({ (1...255).contains($0.utf8.count) && $0.utf8.allSatisfy { (33...126).contains($0) } }),
+                      alpn.reduce(0, { $0 + $1.utf8.count + 1 }) <= 65_535 else { throw ImportError.unsupportedOption }
+                fields["alpn"] = alpn
+            }
+            self.protocolName = "trojan"
+            self.security = "tls"
+            fields["network"] = "tcp"
+            fields["skip-cert-verify"] = false
+            if !sni.isEmpty { fields["sni"] = sni }
+        }
+        self.name = Self.title(name, fallback: protocolName == "ss" ? "Shadowsocks" : "Trojan")
+        self.transport = "tcp"
+        fields["type"] = protocolName
+        self.options = fields
+    }
+
+    private static func validPasswordNodeHost(_ host: String) -> Bool {
+        guard !host.isEmpty, host.utf8.count <= 253, !host.utf8.contains(0) else { return false }
+        if host.contains(":") {
+            return PACTarget.parseIPv6(host.lowercased()) != nil
+        }
+        let name = host.hasSuffix(".") ? host.dropLast() : host[...]
+        if name.utf8.allSatisfy({ (48...57).contains($0) || $0 == 46 }) {
+            return PACTarget.parseIPv4(host, strict: true) != nil
+        }
+        return name.split(separator: ".", omittingEmptySubsequences: false).allSatisfy { label in
+            (1...63).contains(label.utf8.count) && label.first != "-" && label.last != "-" && label.utf8.allSatisfy {
+                (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || $0 == 45
+            }
+        }
     }
 }
 
@@ -105,7 +160,7 @@ public enum ProfileImporter {
                 for item in outbounds { result.add { try fromOutbound(item) } }
             }
         } else {
-            if raw.contains(":"), !raw.hasPrefix("vmess://"), !raw.hasPrefix("vless://") {
+            if raw.contains(":"), !["vmess://", "vless://", "ss://", "trojan://"].contains(where: { raw.hasPrefix($0) }) {
                 do {
                     if let yaml = try ClashYAML.read(raw, profile: fromClashProxy) { return yaml }
                 } catch {
@@ -142,6 +197,7 @@ public enum ProfileImporter {
 
     private static func fromClashProxy(_ item: Any) throws -> NodeProfile {
         guard let p = item as? [String: Any], let kind = p["type"] as? String else { throw ImportError.malformed }
+        if kind == "ss" || kind == "trojan" { return try fromClashPasswordProxy(p, kind: kind) }
         guard ["vless", "vmess"].contains(kind) else { throw ImportError.unsupportedProtocol }
         guard let server = p["server"] as? String, let port = int(p["port"]), let account = p["uuid"] as? String else {
             throw ImportError.invalidAccount
@@ -182,7 +238,96 @@ public enum ProfileImporter {
                                packetEncoding: clashValue(p, "packet-encoding", as: String.self) ?? "")
     }
 
+    private static func fromClashPasswordProxy(_ p: [String: Any], kind: String) throws -> NodeProfile {
+        let common: Set<String> = ["type", "name", "server", "port", "password", "udp"]
+        let extra: Set<String> = kind == "ss" ? ["cipher"] : ["network", "tls", "sni", "alpn", "skip-cert-verify"]
+        guard Set(p.keys).isSubset(of: common.union(extra)) else { throw ImportError.unsupportedOption }
+        guard let server = p["server"] as? String, let port = int(p["port"]), let password = p["password"] as? String
+        else { throw ImportError.invalidAccount }
+        let mode: PasswordProtocol
+        if kind == "ss" {
+            guard let cipher = try clashValue(p, "cipher", as: String.self) else { throw ImportError.unsupportedOption }
+            mode = .shadowsocks(cipher: cipher)
+        } else {
+            guard (try clashValue(p, "network", as: String.self) ?? "tcp") == "tcp" else { throw ImportError.unsupportedTransport }
+            guard try clashValue(p, "tls", as: Bool.self) != false, try clashValue(p, "skip-cert-verify", as: Bool.self) != true
+            else { throw ImportError.unsupportedOption }
+            mode = .trojan(sni: try clashValue(p, "sni", as: String.self) ?? "", alpn: try clashValue(p, "alpn", as: [String].self))
+        }
+        return try NodeProfile(name: clashValue(p, "name", as: String.self) ?? "", server: server, port: port,
+                               password: password, udp: clashValue(p, "udp", as: Bool.self) ?? false, mode: mode)
+    }
+
+    private static func fromPasswordLink(_ payload: String, kind: String) throws -> NodeProfile {
+        // Parse the raw delimiters before percent decoding. URLComponents repairs malformed escapes.
+        let tagged = payload.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)
+        guard let untagged = tagged.first else { throw ImportError.malformed }
+        let queried = untagged.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
+        guard let address = queried.first else { throw ImportError.malformed }
+        let authority = address.split(separator: "@", omittingEmptySubsequences: false)
+        guard authority.count == 2, !authority[0].isEmpty, !authority[1].isEmpty,
+              authority[0].utf8.allSatisfy({ (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0)
+                  || "-._~!$&'()*+,;=:%".utf8.contains($0) }) else { throw ImportError.malformed }
+        let name: String
+        if tagged.count == 2 {
+            guard !tagged[1].contains("#"), let decoded = tagged[1].removingPercentEncoding else { throw ImportError.malformed }
+            name = decoded
+        } else { name = "" }
+
+        let endpoint = authority[1].hasSuffix("/") ? authority[1].dropLast() : authority[1]
+        guard let colon = endpoint.lastIndex(of: ":") else { throw ImportError.malformed }
+        let host = endpoint[..<colon], portText = endpoint[endpoint.index(after: colon)...]
+        guard !portText.isEmpty, portText.utf8.allSatisfy({ (48...57).contains($0) }), let port = Int(portText)
+        else { throw ImportError.invalidAccount }
+        let server: String
+        if host.hasPrefix("["), host.hasSuffix("]"), host.contains(":") {
+            server = String(host.dropFirst().dropLast())
+        } else {
+            guard !host.contains(":") else { throw ImportError.malformed }
+            server = String(host)
+        }
+
+        let password: String, mode: PasswordProtocol
+        if kind == "ss" {
+            guard queried.count == 1 else { throw ImportError.unsupportedOption }
+            if authority[0].contains(":") {
+                let parts = authority[0].split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+                guard parts.count == 2, let cipher = parts[0].removingPercentEncoding, let decoded = parts[1].removingPercentEncoding
+                else { throw ImportError.malformed }
+                mode = .shadowsocks(cipher: cipher)
+                password = decoded
+            } else {
+                guard let encoded = authority[0].removingPercentEncoding, let bytes = Base64.decode(encoded),
+                      let userinfo = String(data: bytes, encoding: .utf8) else { throw ImportError.malformed }
+                let parts = userinfo.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+                guard parts.count == 2 else { throw ImportError.malformed }
+                mode = .shadowsocks(cipher: String(parts[0]))
+                password = String(parts[1])
+            }
+        } else {
+            guard let decoded = authority[0].removingPercentEncoding else { throw ImportError.malformed }
+            password = decoded
+            var query: [String: String] = [:]
+            if queried.count == 2 {
+                for entry in queried[1].split(separator: "&", omittingEmptySubsequences: false) {
+                    let pair = entry.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+                    guard pair.count == 2, let key = pair[0].removingPercentEncoding, let value = pair[1].removingPercentEncoding,
+                          query[key] == nil else { throw ImportError.malformed }
+                    query[key] = value
+                }
+            }
+            guard Set(query.keys).isSubset(of: ["type", "security", "sni", "alpn", "allowInsecure"]),
+                  (query["security"] ?? "tls") == "tls", ["0", "false"].contains(query["allowInsecure"] ?? "0")
+            else { throw ImportError.unsupportedOption }
+            guard (query["type"] ?? "tcp") == "tcp" else { throw ImportError.unsupportedTransport }
+            mode = .trojan(sni: query["sni"] ?? "", alpn: query["alpn"].map { $0.components(separatedBy: ",") })
+        }
+        return try NodeProfile(name: name, server: server, port: port, password: password, udp: true, mode: mode)
+    }
+
     private static func fromLink(_ link: String) throws -> NodeProfile {
+        if link.hasPrefix("ss://") { return try fromPasswordLink(String(link.dropFirst(5)), kind: "ss") }
+        if link.hasPrefix("trojan://") { return try fromPasswordLink(String(link.dropFirst(9)), kind: "trojan") }
         if link.hasPrefix("vmess://") {
             guard let data = Base64.decode(String(link.dropFirst(8))), let p = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let server = p["add"] as? String, let account = p["id"] as? String, let port = int(p["port"]) else { throw ImportError.malformed }

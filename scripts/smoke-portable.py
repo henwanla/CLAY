@@ -68,6 +68,20 @@ proxies:
     name: Ignored
 """, encoding="utf-8")
     assert run("inspect", yaml) == b"nodes=3\nss/tcp/aead=1\ntrojan/tcp/tls=1\nvless/tcp/tls=1\nskipped.unsupportedProtocol=1\n"
+
+    # JSON numbers 0/1 do not stand in for true/false, or vice versa.
+    json_file = directory / "typed-fields.json"
+    base = {"type": "vless", "server": NODE_HOST, "uuid": NODE_ID}
+    json_file.write_text(json.dumps({"proxies": [
+        {**base, "port": 1, "tls": False},
+        {**base, "port": 443, "tls": True},
+        {**base, "port": True},
+        {**base, "port": False},
+        {**base, "port": 443, "tls": 0},
+        {**base, "port": 443, "tls": 1},
+    ]}), encoding="utf-8")
+    assert run("inspect", json_file) == (b"nodes=2\nvless/tcp/none=1\nvless/tcp/tls=1\n"
+                                         b"skipped.invalidAccount=2\nskipped.malformed=2\n")
     invalid = directory / f"{NODE_LABEL}.txt"
     invalid.write_bytes(b"\xff\xfe")
     run("inspect", invalid, code=65)

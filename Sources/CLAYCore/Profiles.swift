@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(CoreFoundation)
+import CoreFoundation
+#endif
 
 public enum ImportError: String, Error {
     case malformed, unsupportedProtocol, unsupportedTransport, unsupportedOption, invalidAccount, notProxyOutbound
@@ -184,13 +187,13 @@ public enum ProfileImporter {
 
     private static func int(_ value: Any?) -> Int? {
         if let s = value as? String { return Int(s) }
-        if let n = value as? NSNumber, CFNumberValue.isNumber(n) { return Int(n.stringValue) }
+        if let n = value as? NSNumber, JSONNumberValue.isNumber(n) { return Int(n.stringValue) }
         return nil
     }
 
     private static func clashValue<T>(_ object: [String: Any], _ key: String, as type: T.Type) throws -> T? {
         guard let value = object[key] else { return nil }
-        if type == Bool.self, let number = value as? NSNumber, CFNumberValue.isNumber(number) { throw ImportError.malformed }
+        if type == Bool.self, let number = value as? NSNumber, JSONNumberValue.isNumber(number) { throw ImportError.malformed }
         guard let typed = value as? T else { throw ImportError.malformed }
         return typed
     }
@@ -376,7 +379,14 @@ public enum ProfileImporter {
     }
 }
 
-import CoreFoundation
-private enum CFNumberValue {
-    static func isNumber(_ n: NSNumber) -> Bool { CFGetTypeID(n) != CFBooleanGetTypeID() }
+private enum JSONNumberValue {
+    static func isNumber(_ number: NSNumber) -> Bool {
+        #if canImport(CoreFoundation)
+        return CFGetTypeID(number) != CFBooleanGetTypeID()
+        #else
+        // Foundation boxes JSON and Swift booleans as the same two singleton numbers.
+        // Numeric equality and casting to Bool can also accept integer 0 and 1.
+        return number !== NSNumber(value: true) && number !== NSNumber(value: false)
+        #endif
+    }
 }

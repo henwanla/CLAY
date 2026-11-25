@@ -1,0 +1,74 @@
+name: Android arm64 portable CLI build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, develop]
+    paths:
+      - Package.swift
+      - 'Sources/CLAYCore/**'
+      - 'Sources/clay-portable/**'
+      - 'Vendor/Yams/**'
+      - 'Platforms/Android/**'
+      - .github/workflows/portable-android.yml
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - Package.swift
+      - 'Sources/CLAYCore/**'
+      - 'Sources/clay-portable/**'
+      - 'Vendor/Yams/**'
+      - 'Platforms/Android/**'
+      - .github/workflows/portable-android.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: portable-android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile-arm64:
+    runs-on: macos-15
+    timeout-minutes: 25
+    env:
+      SWIFT_MACOS_SHA256: ccbfc46b166625613286abfa63b6e974b5b6a7c2205e5bc9e52d09f6e051e859
+      SWIFT_ANDROID_SHA256: a78839edf4ec161e03b9f1e22a0ef94e565ece3f3ce5c03e3c79246c6b71f0a9
+      GOOGLE_NDK_SHA1: c060be96767eefbb8e0a27796d6f43115fc1a0c4
+      GOOGLE_NDK_SHA256: d125634de97b26deb1e1bb1a562f9d839aa5803d1784a1e414485f5ccbe6739f
+    steps:
+      - name: Check out source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Download and verify the Swift and Android build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/clay-android"
+          mkdir -p "$root/swift-sdks"
+          cd "$root"
+          release='https://download.swift.org/swift-6.4.3-release'
+          curl=(curl --disable --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --retry 2 --connect-timeout 15 --max-time 600)
+          "${curl[@]}" -o swift.pkg "$release/xcode/swift-6.4.3-RELEASE/swift-6.4.3-RELEASE-osx.pkg" & swift_pid=$!
+          "${curl[@]}" -o swift-android.tar.gz "$release/android-sdk/swift-6.4.3-RELEASE/swift-6.4.3-RELEASE_android.artifactbundle.tar.gz" & sdk_pid=$!
+          "${curl[@]}" -o android-ndk.zip 'https://dl.google.com/android/repository/android-ndk-r30-darwin.zip' & ndk_pid=$!
+          wait "$swift_pid"
+          wait "$sdk_pid"
+          wait "$ndk_pid"
+          printf '%s  %s\n' "$SWIFT_MACOS_SHA256" swift.pkg "$SWIFT_ANDROID_SHA256" swift-android.tar.gz "$GOOGLE_NDK_SHA256" android-ndk.zip | shasum -a 256 -c
+          printf '%s  %s\n' "$GOOGLE_NDK_SHA1" android-ndk.zip | shasum -a 1 -c
+          pkgutil --check-signature swift.pkg > swift-signature.txt
+          cat swift-signature.txt
+          grep -Fq 'Developer ID Installer: Swift Open Source (V9AUD2URP3)' swift-signature.txt
+          pkgutil --expand-full swift.pkg swift-expanded
+          tar -xzf swift-android.tar.gz -C swift-sdks
+          unzip -q android-ndk.zip
+          printf 'SWIFT_BIN=%s\n' "$root/swift-expanded/swift-6.4.3-RELEASE-osx-package.pkg/Payload/usr/bin/swift" >> "$GITHUB_ENV"
+          printf 'SWIFT_SDKS_PATH=%s\n' "$root/swift-sdks" >> "$GITHUB_ENV"
+          printf 'ANDROID_NDK_HOME=%s\n' "$root/android-ndk-r30" >> "$GITHUB_ENV"
+          printf 'CLAY_ANDROID_BUILD_DIR=%s\n' "$root/build-arm64" >> "$GITHUB_ENV"
+      - name: Compile and verify the Android arm64 ELF
+        shell: bash
+        run: bash Platforms/Android/build-portable.sh

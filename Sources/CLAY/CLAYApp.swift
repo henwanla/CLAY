@@ -4,12 +4,13 @@ import SwiftUI
 
 @main struct CLAYApp: App {
     @NSApplicationDelegateAdaptor(ExitHandler.self) private var exitHandler
+    @StateObject private var navigation = DashboardNavigation()
     private var model: Workspace { exitHandler.model }
     fileprivate static let dashboardID = "dashboard"
 
     var body: some Scene {
         WindowGroup("CLAY", id: Self.dashboardID, for: String.self) { _ in
-            Dashboard(model: model, pac: model.pac).frame(minWidth: 740, minHeight: 550)
+            Dashboard(model: model, pac: model.pac, navigation: navigation).frame(minWidth: 740, minHeight: 550)
         } defaultValue: {
             Self.dashboardID
         }
@@ -17,7 +18,7 @@ import SwiftUI
         .commands { CommandGroup(replacing: .newItem) {} }
 
         MenuBarExtra {
-            StatusMenu(model: model, pac: model.pac)
+            StatusMenu(model: model, pac: model.pac, navigation: navigation)
         } label: {
             StatusIndicator(model: model)
         }
@@ -62,7 +63,16 @@ private struct StatusIndicator: View {
 private struct StatusMenu: View {
     @ObservedObject var model: Workspace
     @ObservedObject var pac: PACControl
+    @ObservedObject var navigation: DashboardNavigation
     @Environment(\.openWindow) private var openWindow
+
+    private var quickNodes: [NodeProfile] {
+        let nodes = model.nodes.prefix(12)
+        if let current = model.chosen, !nodes.contains(where: { $0.id == current.id }) {
+            return Array(nodes.prefix(11)) + [current]
+        }
+        return Array(nodes)
+    }
 
     var body: some View {
         Text("CLAY · \(model.menuStatus)")
@@ -76,14 +86,16 @@ private struct StatusMenu: View {
             }
         }.disabled(model.busy)
         if !model.nodes.isEmpty {
-            Menu("节点：\(model.chosen?.name ?? "未选")") {
-                ForEach(model.nodes) { node in
+            Menu("节点：\(model.chosen.map(nodeMenuTitle) ?? "未选")") {
+                ForEach(quickNodes) { node in
                     Button { model.select(node) } label: {
-                        if node.id == model.active { Label(node.name, systemImage: "checkmark") }
-                        else { Text(node.name) }
-                    }.disabled(node.id == model.active)
+                        if node.id == model.active { Label(nodeMenuTitle(node), systemImage: "checkmark") }
+                        else { Text(nodeMenuTitle(node)) }
+                    }.disabled(model.busy || node.id == model.active)
                 }
-            }.disabled(model.busy)
+                Divider()
+                Button("查看全部 \(model.nodes.count) 个节点…") { showDashboard(.nodes) }
+            }
         }
         if let address = model.proxyAddress {
             Button("复制代理地址") { model.copy(address) }
@@ -93,14 +105,25 @@ private struct StatusMenu: View {
             Button("恢复原网络代理设置") { pac.restoreSystem() }.disabled(pac.busy)
         }
         Divider()
-        Button("打开 CLAY") {
-            openWindow(id: CLAYApp.dashboardID, value: CLAYApp.dashboardID)
-            if #available(macOS 14.0, *) { NSApp.activate() }
-            else { NSApp.activate(ignoringOtherApps: true) }
-        }
+        Button("打开 CLAY") { showDashboard() }
         Button(model.running ? "停止代理" : "启动代理") { model.toggleProxy() }.disabled(!model.canToggleProxy)
         Divider()
         Button("退出 CLAY") { NSApp.terminate(nil) }
+    }
+
+    private func nodeMenuTitle(_ node: NodeProfile) -> String {
+        let name = node.name.components(separatedBy: .controlCharacters.union(.newlines))
+            .joined(separator: " ").trimmingCharacters(in: .whitespaces)
+        if name.isEmpty { return "未命名节点" }
+        let prefix = name.prefix(42)
+        return prefix.endIndex == name.endIndex ? name : String(prefix) + "…"
+    }
+
+    private func showDashboard(_ page: Page? = nil) {
+        if let page { navigation.page = page }
+        openWindow(id: CLAYApp.dashboardID, value: CLAYApp.dashboardID)
+        if #available(macOS 14.0, *) { NSApp.activate() }
+        else { NSApp.activate(ignoringOtherApps: true) }
     }
 }
 
@@ -110,10 +133,18 @@ private enum Page: String, CaseIterable, Identifiable {
     var icon: String { switch self { case .overview: return "square.grid.2"; case .connections: return "arrow.left.arrow.right"; case .pac: return "arrow.triangle.branch"; case .nodes: return "point.3.connected.trianglepath.dotted"; case .subscriptions: return "link"; case .diagnostics: return "waveform.path.ecg"; case .settings: return "gearshape" } }
 }
 
+private final class DashboardNavigation: ObservableObject {
+    @Published var page: Page? = .overview
+}
+
 private struct Dashboard: View {
     @ObservedObject var model: Workspace
     @ObservedObject var pac: PACControl
-    @State private var page: Page? = .overview
+    @ObservedObject var navigation: DashboardNavigation
+    private var page: Page? {
+        get { navigation.page }
+        nonmutating set { navigation.page = newValue }
+    }
     @State private var input = ""
     @State private var subscriptionName = ""
     @State private var subscriptionURL = ""
@@ -127,7 +158,7 @@ private struct Dashboard: View {
                     Image(systemName: "cube.fill").font(.title2).foregroundStyle(clay)
                     Text("CLAY").font(.system(size: 25, weight: .bold, design: .rounded)).tracking(2)
                 }.padding(.leading, 13).padding(.top, 12)
-                List(selection: $page) {
+                List(selection: $navigation.page) {
                     ForEach(Page.allCases) { item in Label(item.rawValue, systemImage: item.icon).tag(item) }
                 }.listStyle(.sidebar)
                 Label(model.running ? "本机代理运行中" : "本机代理已停止", systemImage: "circle.fill")
@@ -206,7 +237,7 @@ private struct Dashboard: View {
         let visibleNodes = model.nodes.filter { node in
             query.isEmpty || [node.name, node.protocolName, node.transport, node.security].contains { $0.localizedCaseInsensitiveContains(query) }
         }
-        return VStack(alignment: .leading, spacing: 13) {
+        return LazyVStack(alignment: .leading, spacing: 13) {
             HStack { Button("粘贴导入") { model.presentImport = true }.disabled(model.running || model.busy)
                 Button("选择文件…") { _ = model.importFile() }.disabled(model.running || model.busy)
                 if model.canUseManual { Button("使用手动列表") { model.chooseSource(nil) } }

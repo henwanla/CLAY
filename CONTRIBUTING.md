@@ -8,6 +8,8 @@
 - 从当前 `main` 切主题分支，PR 通常提交给 `develop`。PR 写明用户可见的变化、范围和验证结果。维护者验收后将对应版本的变更合入 `main`。
 - 维护提交使用 `feat（0.3.0）：新增 PAC 规则预览`、`fix（0.3.0）：恢复代理设置失败时保留回环服务` 或 `upd（0.3.0）：补充公开安装说明` 这样的标题。请选择对应的版本和类型，用自己的 Git 身份提交。
 
+维护者换机器或新克隆仓库时，请在本仓库的本地 Git 配置中设置 `user.name` 和 `user.email`。邮箱请从自己 GitHub 账号的 Emails 设置复制 GitHub 提供的 noreply 地址，避免将个人邮箱写入公开提交。提交前用 `git var GIT_AUTHOR_IDENT` 和 `git var GIT_COMMITTER_IDENT` 核对实际使用的身份；这些命令的输出请只在本机查看。
+
 ## 验证
 
 需要 macOS、Swift 5.9+ 和 Python 3。在仓库根目录运行：
@@ -24,3 +26,5 @@ python3 scripts/smoke-subscriptions.py .build/release/CLAYCoreChecks
 ## English
 
 `main` holds reviewed releases; `develop` is the integration branch. Create a topic branch based on `main` and normally open a PR into `develop`. Describe the behavior change and the checks you ran. Use your own Git identity. The commands above build the app and run static and loopback checks on macOS. Live authorization prompts and desktop interaction require a separate manual test. Please use synthetic or redacted data in issues, PRs, and screenshots; never post subscription URLs, node credentials, or raw configurations.
+
+On a new clone, set `user.name` and `user.email` in the repository's local Git configuration. Use the GitHub-provided noreply address from your account's email settings to keep your personal address out of public commits. Before committing, check the effective identity locally with `git var GIT_AUTHOR_IDENT` and `git var GIT_COMMITTER_IDENT`.

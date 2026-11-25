@@ -29,3 +29,5 @@ jobs:
           swift build -c release --product clay-portable
       - name: Run synthetic CLI checks
         run: python3 scripts/smoke-portable.py .build/release/clay-portable
+      - name: Verify foreground runtime and loopback ownership
+        run: python3 scripts/smoke-linux-runtime.py .build/release/clay-portable

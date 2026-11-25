@@ -68,7 +68,7 @@ bash scripts/swift-local.sh build -c release
 python3 scripts/smoke-subscriptions.py .build/release/CLAYCoreChecks
 ```
 
-便携工具 `clay-portable` 可检查本地节点文件和生成 PAC；macOS/Linux 还可查看指定本机 Mihomo 的流量汇总。它不接管系统网络，也不执行输入文件里的订阅或规则提供器链接。各平台验证进度见[跨平台计划](docs/跨平台路线.md)。
+便携工具 `clay-portable` 可检查本地节点文件和生成 PAC；macOS/Linux 还可查看指定本机 Mihomo 的流量汇总。开发版在 Linux 可前台运行经 SHA-256 核对的 Mihomo，供应用手动接入。它不会修改系统代理或执行输入文件里的订阅与规则提供器链接。使用方法和验证范围见[跨平台计划](docs/跨平台路线.md)。
 
 [参与开发](CONTRIBUTING.md) · [架构调研](docs/架构调研.md) · [验收记录](docs/验收记录.md) · [打包及发布](docs/RELEASING.md) · [安全维护](docs/安全维护.md)
 

@@ -68,7 +68,7 @@ bash scripts/swift-local.sh build -c release
 python3 scripts/smoke-subscriptions.py .build/release/CLAYCoreChecks
 ```
 
-`clay-portable` validates local node files, generates PAC, and can read summary counters from a specified local Mihomo controller. It does not take over system networking or fetch provider URLs embedded in input. See the [platform roadmap](docs/跨平台路线.md) for build status and remaining work.
+`clay-portable` validates local node files and generates PAC. On macOS and Linux it can read summary counters from a specified local Mihomo controller. The Linux development build can run a verified Mihomo binary in the foreground for manual proxy setup. It leaves system proxy settings alone and does not fetch subscription or provider URLs embedded in input. See the [platform roadmap](docs/跨平台路线.md) for usage and test coverage.
 
 [Contributing](CONTRIBUTING.md) · [Verification record](docs/验收记录.md) · [Release process](docs/RELEASING.md) · [Security maintenance](docs/安全维护.md)
 

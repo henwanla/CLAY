@@ -14,7 +14,7 @@ private enum CommandError: Error {
     case usage, file, noNodes, invalidPolicy, missingSecret, controller
 }
 
-@main struct PortableCLI {
+private struct PortableCLI {
     static func main() {
         let arguments = Array(CommandLine.arguments.dropFirst())
         if arguments == ["--help"] || arguments == ["-h"] { print(usage); return }
@@ -25,15 +25,27 @@ private enum CommandError: Error {
         catch CommandError.invalidPolicy { quit("Invalid PAC rules, decision, or target.", code: 65) }
         catch PACError.invalidRuleLine(let line, _) { quit("Invalid PAC rule at line \(line).", code: 65) }
         catch CommandError.missingSecret { quit("Provide the configured controller secret on standard input.", code: 65) }
-        catch { quit("The loopback Mihomo controller did not return a usable response.", code: 69) }
+        catch {
+            #if os(Linux)
+            if let problem = error as? LinuxMihomoError { quit(problem.message, code: problem.exitCode) }
+            #endif
+            quit("The loopback Mihomo controller did not return a usable response.", code: 69)
+        }
     }
 
-    private static let usage = """
+    private static var usage: String {
+        let common = """
         clay-portable inspect FILE
         clay-portable pac-check RULES [HOST] [--default-direct] [--no-local-bypass]
         clay-portable pac-script RULES PORT [--default-direct] [--no-local-bypass]
         clay-portable mihomo-status PORT < SECRET_FILE  (Linux/macOS, requires /usr/bin/curl)
         """
+        #if os(Linux)
+        return common + "\nclay-portable mihomo-run FILE NODE_NUMBER MIHOMO SHA256 [--proxy-port PORT] [--control-port PORT]"
+        #else
+        return common
+        #endif
+    }
 
     private static func run(_ arguments: [String]) throws {
         guard arguments.count >= 2 else { throw CommandError.usage }
@@ -82,6 +94,24 @@ private enum CommandError: Error {
             #else
             throw CommandError.controller
             #endif
+        #if os(Linux)
+        case "mihomo-run":
+            guard [5, 7, 9].contains(arguments.count),
+                  let index = validPort(arguments[2]), (1...100).contains(index) else { throw CommandError.usage }
+            var ports: [String: Int] = [:]
+            for offset in stride(from: 5, to: arguments.count, by: 2) {
+                let flag = arguments[offset]
+                guard ["--proxy-port", "--control-port"].contains(flag), ports[flag] == nil,
+                      let port = validPort(arguments[offset + 1]) else { throw CommandError.usage }
+                ports[flag] = port
+            }
+            let profiles = ProfileImporter.read(try readText(arguments[1])).profiles
+            guard index <= profiles.count else { throw LinuxMihomoError.noSuchNode }
+            let status = try LinuxMihomoRuntime.run(node: profiles[index - 1], executable: arguments[3],
+                                                   fingerprint: arguments[4], proxyPort: ports["--proxy-port"],
+                                                   controlPort: ports["--control-port"])
+            if status != 0 { exit(status) }
+        #endif
         default: throw CommandError.usage
         }
     }
@@ -168,3 +198,5 @@ private enum CommandError: Error {
     }
     #endif
 }
+
+PortableCLI.main()

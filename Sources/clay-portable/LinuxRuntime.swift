@@ -12,8 +12,54 @@ private func closeFD(_ fd: Int32) { _ = close(fd) }
 private func readFD(_ fd: Int32, _ buffer: UnsafeMutableRawPointer, _ count: Int) -> Int { read(fd, buffer, count) }
 private func pollFD(_ descriptor: inout pollfd, _ timeout: Int32) -> Int32 { poll(&descriptor, 1, timeout) }
 
+struct LinuxRunOptions {
+    static let usage = """
+    clay-portable mihomo-run FILE NODE_NUMBER MIHOMO SHA256 [--proxy-port PORT] [--control-port PORT]
+      [--all-nodes] [--mode rule|global|direct] [--pac-rules FILE] [--interactive]
+    """
+
+    let source: String, index: Int, executable: String, fingerprint: String
+    private(set) var proxyPort: Int?, controlPort: Int?, rules: String?
+    private(set) var mode: CoreRoutingMode = .rule
+    private(set) var allNodes = false, interactive = false
+
+    init?(_ args: [String]) {
+        guard args.count >= 5, let index = Self.number(args[2]), index <= 100 else { return nil }
+        (source, self.index, executable, fingerprint) = (args[1], index, args[3], args[4])
+        var seen: Set<String> = [], i = 5
+        while i < args.count {
+            let key = args[i]
+            guard seen.insert(key).inserted else { return nil }
+            i += 1
+            switch key {
+            case "--interactive": interactive = true; continue
+            case "--all-nodes": allNodes = true; continue
+            default: break
+            }
+            guard i < args.count, !args[i].isEmpty, !args[i].hasPrefix("--") else { return nil }
+            let value = args[i]
+            i += 1
+            switch key {
+            case "--mode":
+                guard let selected = CoreRoutingMode(rawValue: value) else { return nil }
+                mode = selected
+            case "--proxy-port", "--control-port":
+                guard let port = Self.number(value), port <= 65535 else { return nil }
+                if key == "--proxy-port" { proxyPort = port } else { controlPort = port }
+            case "--pac-rules": rules = value
+            default: return nil
+            }
+        }
+    }
+
+    fileprivate static func number(_ text: String) -> Int? {
+        guard !text.isEmpty, text.utf8.allSatisfy({ (48...57).contains($0) }), let value = Int(text), value > 0 else { return nil }
+        return value
+    }
+}
+
 enum LinuxMihomoError: Error {
-    case noSuchNode, badFingerprint, executable, digest, privateFiles, signals, launch, ports, timeout, childExited, output
+    case noSuchNode, badFingerprint, executable, digest, privateFiles, signals, launch, ports, timeout, childExited, output, input, curl
 
     var message: String {
         switch self {
@@ -28,6 +74,8 @@ enum LinuxMihomoError: Error {
         case .timeout: return "Mihomo did not establish its own loopback listeners in time. Linux /proc access is required."
         case .childExited: return "Mihomo exited before this session finished."
         case .output: return "Unable to write the Mihomo loopback addresses to standard output."
+        case .input: return "Unable to read interactive commands from standard input."
+        case .curl: return "Interactive control requires /usr/bin/curl."
         }
     }
 
@@ -41,10 +89,15 @@ enum LinuxMihomoError: Error {
 
 enum LinuxMihomoRuntime {
     /// Returns the signal exit code only after the child and its private state are gone.
-    static func run(node: NodeProfile, executable: String, fingerprint: String, proxyPort: Int?, controlPort: Int?) throws -> Int32 {
+    static func run(profiles: [NodeProfile], options: LinuxRunOptions, policy: PACPolicy?) throws -> Int32 {
+        guard options.index <= profiles.count else { throw LinuxMihomoError.noSuchNode }
+        let node = profiles[options.index - 1]
+        let nodes = options.allNodes ? profiles : [node]
+        let fingerprint = options.fingerprint
         guard fingerprint.utf8.count == 64, fingerprint.utf8.allSatisfy({ (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0) })
         else { throw LinuxMihomoError.badFingerprint }
-        guard proxyPort == nil || proxyPort != controlPort else { throw LinuxMihomoError.ports }
+        guard options.proxyPort == nil || options.proxyPort != options.controlPort else { throw LinuxMihomoError.ports }
+        guard !options.interactive || access("/usr/bin/curl", X_OK) == 0 else { throw LinuxMihomoError.curl }
 
         // main() runs on this thread. Block the signals before creating a
         // child; a synchronous signal fd prevents interrupting cleanup code.
@@ -53,18 +106,20 @@ enum LinuxMihomoRuntime {
         let directory = try privateDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let engine = directory.appendingPathComponent("mihomo").path
-        let source = URL(fileURLWithPath: executable).path
+        let source = URL(fileURLWithPath: options.executable).path
         try stageBinary(source, to: engine)
         if let interrupted = signals.poll(timeout: 0) { return interrupted }
         if let interrupted = try verifyBinary(engine, fingerprint: fingerprint.lowercased(), directory: directory.path, signals: signals) { return interrupted }
 
-        let proxy = try PortReservation(proxyPort)
-        let control = try PortReservation(controlPort)
+        let proxy = try PortReservation(options.proxyPort)
+        let control = try PortReservation(options.controlPort)
+        let secret = UUID().uuidString + UUID().uuidString
+        let configPath = directory.appendingPathComponent("clay.json").path
         let config: Data
         do {
-            config = try CoreConfig.make(nodes: [node], active: node, proxyPort: proxy.port,
-                                         controlPort: control.port, secret: UUID().uuidString + UUID().uuidString)
-            try writePrivateFile(config, to: directory.appendingPathComponent("clay.json").path)
+            config = try CoreConfig.make(nodes: nodes, active: node, proxyPort: proxy.port,
+                                         controlPort: control.port, secret: secret, mode: options.mode, policy: policy)
+            try writePrivateFile(config, to: configPath)
         } catch { throw LinuxMihomoError.privateFiles }
 
         let null = open("/dev/null", O_RDWR | O_CLOEXEC)
@@ -73,7 +128,7 @@ enum LinuxMihomoRuntime {
         if let interrupted = signals.poll(timeout: 0) { return interrupted }
         proxy.release()
         control.release()
-        let child = try Child(executable: engine, arguments: ["-d", directory.path, "-f", directory.appendingPathComponent("clay.json").path],
+        let child = try Child(executable: engine, arguments: ["-d", directory.path, "-f", configPath],
                               home: directory.path, stdin: null, stdout: null, stderr: null)
         defer { child.stop() }
 
@@ -90,12 +145,91 @@ enum LinuxMihomoRuntime {
         // A consumer can close its pipe before readiness. Handle the write
         // error on this parent only, so normal child cleanup still runs.
         _ = signal(SIGPIPE, SIG_IGN)
-        let readyLine = Data("mihomo=ready proxy=127.0.0.1:\(proxy.port) controller=127.0.0.1:\(control.port)\n".utf8)
-        do { try readyLine.withUnsafeBytes { try writeAll(STDOUT_FILENO, bytes: $0) } }
-        catch { throw LinuxMihomoError.output }
+        do {
+            try emit("mihomo=ready proxy=127.0.0.1:\(proxy.port) controller=127.0.0.1:\(control.port)", signals: signals)
+        } catch let interruption as LinuxInterruption { return interruption.code }
+        if options.interactive {
+            let names = options.allNodes
+                ? Dictionary(uniqueKeysWithValues: profiles.enumerated().map { ($0.offset + 1, $0.element.localName) })
+                : [options.index: node.localName]
+            let controller = LinuxSessionController(port: control.port, secret: secret, directory: directory.path,
+                                                    null: null, signals: signals) {
+                child.isAlive() && childOwnsListeners(pid: child.pid, ports: [control.port])
+            }
+            do { return try interact(names: names, controller: controller, child: child, signals: signals) }
+            catch let interruption as LinuxInterruption { return interruption.code }
+        }
         while true {
             if let interrupted = signals.poll(timeout: 200) { return interrupted }
             guard child.isAlive() else { throw LinuxMihomoError.childExited }
+        }
+    }
+
+    private static func emit(_ response: String, signals: TerminationSignals) throws {
+        // Output is part of the interactive protocol. A stalled consumer
+        // must not keep the signal-handling thread from reaping the engine.
+        let flags = fcntl(STDOUT_FILENO, F_GETFL, 0)
+        guard flags >= 0 else { throw LinuxMihomoError.output }
+        let changed = flags & O_NONBLOCK == 0
+        if changed, fcntl(STDOUT_FILENO, F_SETFL, flags | O_NONBLOCK) < 0 { throw LinuxMihomoError.output }
+        defer { if changed { _ = fcntl(STDOUT_FILENO, F_SETFL, flags) } }
+
+        let deadline = DispatchTime.now() + .seconds(2)
+        try Data((response + "\n").utf8).withUnsafeBytes { bytes in
+            guard let base = bytes.baseAddress else { return }
+            var offset = 0
+            while offset < bytes.count {
+                try signals.check()
+                guard DispatchTime.now() < deadline else { throw LinuxMihomoError.output }
+                let size = write(STDOUT_FILENO, base.advanced(by: offset), bytes.count - offset)
+                if size < 0, errno == EINTR { continue }
+                if size < 0, errno == EAGAIN || errno == EWOULDBLOCK {
+                    if let code = signals.poll(timeout: 35) { throw LinuxInterruption(code: code) }
+                    continue
+                }
+                guard size > 0 else { throw LinuxMihomoError.output }
+                offset += size
+            }
+        }
+    }
+
+    private static func interact(names: [Int: String], controller: LinuxSessionController, child: Child,
+                                 signals: TerminationSignals) throws -> Int32 {
+        var input = LinuxInteractiveInput()
+        while true {
+            try signals.check()
+            guard child.isAlive() else { throw LinuxMihomoError.childExited }
+            let batch = try input.readBatch()
+            for line in batch.lines {
+                try signals.check()
+                let fields = line?.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init) ?? []
+                let reply: String
+                do {
+                    switch fields.first {
+                    case "quit" where fields.count == 1: return 0
+                    case "help" where fields.count == 1:
+                        reply = "commands: status | mode rule|global|direct | node N | quit"
+                    case "status" where fields.count == 1:
+                        let mode = try controller.mode()
+                        let active = try controller.selectedNode()
+                        guard let number = names.first(where: { $0.value == active })?.key else { throw LinuxControllerError.unconfirmed }
+                        reply = "mode=\(mode.rawValue) node=\(number)"
+                    case "mode" where fields.count == 2:
+                        if let mode = CoreRoutingMode(rawValue: fields[1]) {
+                            try controller.setMode(mode)
+                            reply = "mode=\(mode.rawValue)"
+                        } else { reply = "error=invalid-command" }
+                    case "node" where fields.count == 2:
+                        if let number = LinuxRunOptions.number(fields[1]), let selected = names[number] {
+                            try controller.selectNode(selected)
+                            reply = "node=\(number)"
+                        } else { reply = "error=unavailable-node" }
+                    default: reply = "error=invalid-command"
+                    }
+                } catch is LinuxControllerError { reply = "error=controller-unconfirmed" }
+                try emit(reply, signals: signals)
+            }
+            if batch.eof { return 0 }
         }
     }
 
@@ -146,7 +280,7 @@ enum LinuxMihomoRuntime {
         try data.withUnsafeBytes { try writeAll(output, bytes: $0) }
     }
 
-    private static func writeAll(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws {
+    fileprivate static func writeAll(_ descriptor: Int32, bytes: UnsafeRawBufferPointer) throws {
         guard let base = bytes.baseAddress else { return }
         var offset = 0
         while offset < bytes.count {
@@ -219,6 +353,149 @@ enum LinuxMihomoRuntime {
     }
 }
 
+private struct LinuxInteractiveInput {
+    private var line: [UInt8] = []
+    private var overflow = false
+
+    /// Bounds both each read and each command. Oversize input is discarded until
+    /// the next newline, so its tail cannot be interpreted as another command.
+    mutating func readBatch() throws -> (lines: [String?], eof: Bool) {
+        var descriptor = pollfd(fd: STDIN_FILENO, events: Int16(POLLIN), revents: 0)
+        let ready = pollFD(&descriptor, 100)
+        if ready == 0 || (ready < 0 && errno == EINTR) { return ([], false) }
+        guard ready > 0, descriptor.revents & Int16(POLLIN | POLLHUP) != 0 else { throw LinuxMihomoError.input }
+        var bytes = [UInt8](repeating: 0, count: 256)
+        let amount = bytes.withUnsafeMutableBytes { readFD(STDIN_FILENO, $0.baseAddress!, $0.count) }
+        if amount < 0, errno == EINTR || errno == EAGAIN { return ([], false) }
+        guard amount >= 0 else { throw LinuxMihomoError.input }
+        var commands: [String?] = []
+        if amount == 0 {
+            finishLine(&commands)
+            return (commands, true)
+        }
+        for byte in bytes.prefix(amount) {
+            if byte == 10 { finishLine(&commands) }
+            else if line.count == 128 { overflow = true }
+            else if !overflow { line.append(byte) }
+        }
+        return (commands, false)
+    }
+
+    private mutating func finishLine(_ commands: inout [String?]) {
+        defer { line.removeAll(keepingCapacity: true); overflow = false }
+        if line.last == 13 { line.removeLast() }
+        if overflow { commands.append(nil) }
+        else if !line.isEmpty { commands.append(String(bytes: line, encoding: .utf8)) }
+    }
+}
+
+private enum LinuxControllerError: Error { case unconfirmed }
+private struct LinuxInterruption: Error { let code: Int32 }
+
+private struct LinuxSessionController {
+    let port: Int, secret: String, directory: String, null: Int32, signals: TerminationSignals
+    let ownsController: () -> Bool
+
+    private struct Config: Decodable { let mode: String }
+    private struct Selector: Decodable { let now: String }
+
+    func mode() throws -> CoreRoutingMode {
+        let data = try request(path: "/configs", expectedStatus: 200)
+        guard let response = try? JSONDecoder().decode(Config.self, from: data),
+              let mode = CoreRoutingMode(rawValue: response.mode.lowercased()) else { throw LinuxControllerError.unconfirmed }
+        return mode
+    }
+
+    func selectedNode() throws -> String {
+        let data = try request(path: "/proxies/CLAY", expectedStatus: 200)
+        guard let response = try? JSONDecoder().decode(Selector.self, from: data) else { throw LinuxControllerError.unconfirmed }
+        return response.now
+    }
+
+    func setMode(_ mode: CoreRoutingMode) throws {
+        _ = try request(path: "/configs", expectedStatus: 204, method: "PATCH", body: ["mode": mode.rawValue])
+        guard try self.mode() == mode else { throw LinuxControllerError.unconfirmed }
+    }
+
+    func selectNode(_ name: String) throws {
+        _ = try request(path: "/proxies/CLAY", expectedStatus: 204, method: "PUT", body: ["name": name])
+        guard try selectedNode() == name else { throw LinuxControllerError.unconfirmed }
+    }
+
+    private func request(path: String, expectedStatus: Int, method: String = "GET", body: [String: String]? = nil) throws -> Data {
+        try signals.check()
+        guard ownsController() else { throw LinuxControllerError.unconfirmed }
+        let input = try ControllerPipe(), output = try ControllerPipe()
+        let command = try launchRequest(path: path, method: method, body: body, input: input, output: output)
+        defer { command.stop() }
+        input.closeRead()
+        output.closeWrite()
+        let deadline = DispatchTime.now() + .seconds(4)
+        var response = Data(), bytes = [UInt8](repeating: 0, count: 8_192)
+        let limit = 131_072 + 4
+        while true {
+            try signals.check()
+            guard DispatchTime.now() < deadline else { throw LinuxControllerError.unconfirmed }
+            var descriptor = pollfd(fd: output.readEnd, events: Int16(POLLIN), revents: 0)
+            let state = pollFD(&descriptor, 35)
+            if state == 0 || (state < 0 && errno == EINTR) { continue }
+            guard state > 0, descriptor.revents & Int16(POLLIN | POLLHUP) != 0 else { throw LinuxControllerError.unconfirmed }
+            let length = bytes.withUnsafeMutableBytes { readFD(output.readEnd, $0.baseAddress!, $0.count) }
+            if length < 0, errno == EINTR { continue }
+            guard length >= 0, length <= limit - response.count else { throw LinuxControllerError.unconfirmed }
+            if length == 0 { break }
+            response.append(contentsOf: bytes.prefix(length))
+        }
+        while command.isAlive() {
+            if let code = signals.poll(timeout: 20) { throw LinuxInterruption(code: code) }
+            guard DispatchTime.now() < deadline else { throw LinuxControllerError.unconfirmed }
+        }
+        guard command.rawStatus == 0, response.suffix(4) == Data("\n\(expectedStatus)".utf8), ownsController() else {
+            throw LinuxControllerError.unconfirmed
+        }
+        return response.dropLast(4)
+    }
+
+    private func launchRequest(path: String, method: String, body: [String: String]?, input: ControllerPipe,
+                               output: ControllerPipe) throws -> Child {
+        do {
+            // Put the credential into a pipe before spawning; it never appears
+            // in another process's command line, environment or output files.
+            try Data("Authorization: Bearer \(secret)\n".utf8).withUnsafeBytes {
+                try LinuxMihomoRuntime.writeAll(input.writeEnd, bytes: $0)
+            }
+            input.closeWrite()
+            var arguments = ["-q", "--silent", "--no-location", "--noproxy", "*", "--proto", "=http", "--connect-timeout", "1",
+                             "--max-time", "3", "--max-filesize", "131072", "--write-out", "\n%{http_code}",
+                             "--header", "@-", "--request", method]
+            if let body {
+                let data = try JSONEncoder().encode(body)
+                arguments += ["--header", "Content-Type: application/json", "--data-binary", String(decoding: data, as: UTF8.self)]
+            }
+            arguments += ["--", "http://127.0.0.1:\(port)\(path)"]
+            return try Child(executable: "/usr/bin/curl", arguments: arguments, home: directory,
+                             stdin: input.readEnd, stdout: output.writeEnd, stderr: null)
+        } catch { throw LinuxControllerError.unconfirmed }
+    }
+}
+
+private final class ControllerPipe {
+    private(set) var readEnd: Int32, writeEnd: Int32
+
+    init() throws {
+        var fds: [Int32] = [-1, -1]
+        guard pipe(&fds) == 0 else { throw LinuxControllerError.unconfirmed }
+        guard fcntl(fds[0], F_SETFD, FD_CLOEXEC) == 0, fcntl(fds[1], F_SETFD, FD_CLOEXEC) == 0 else {
+            closeFD(fds[0]); closeFD(fds[1]); throw LinuxControllerError.unconfirmed
+        }
+        (readEnd, writeEnd) = (fds[0], fds[1])
+    }
+
+    func closeRead() { if readEnd >= 0 { closeFD(readEnd); readEnd = -1 } }
+    func closeWrite() { if writeEnd >= 0 { closeFD(writeEnd); writeEnd = -1 } }
+    deinit { closeRead(); closeWrite() }
+}
+
 private final class PortReservation {
     private var descriptor: Int32
     let port: Int
@@ -280,6 +557,10 @@ private final class TerminationSignals {
               info.withUnsafeMutableBytes({ readFD(descriptor, $0.baseAddress!, $0.count) }) == 128,
               info[0] == UInt32(SIGINT) || info[0] == UInt32(SIGTERM) else { return nil }
         return 128 + Int32(info[0])
+    }
+
+    func check() throws {
+        if let code = poll(timeout: 0) { throw LinuxInterruption(code: code) }
     }
 
     func close() {

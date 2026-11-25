@@ -41,7 +41,7 @@ private struct PortableCLI {
         clay-portable mihomo-status PORT < SECRET_FILE  (Linux/macOS, requires /usr/bin/curl)
         """
         #if os(Linux)
-        return common + "\nclay-portable mihomo-run FILE NODE_NUMBER MIHOMO SHA256 [--proxy-port PORT] [--control-port PORT]"
+        return common + "\n" + LinuxRunOptions.usage
         #else
         return common
         #endif
@@ -96,20 +96,12 @@ private struct PortableCLI {
             #endif
         #if os(Linux)
         case "mihomo-run":
-            guard [5, 7, 9].contains(arguments.count),
-                  let index = validPort(arguments[2]), (1...100).contains(index) else { throw CommandError.usage }
-            var ports: [String: Int] = [:]
-            for offset in stride(from: 5, to: arguments.count, by: 2) {
-                let flag = arguments[offset]
-                guard ["--proxy-port", "--control-port"].contains(flag), ports[flag] == nil,
-                      let port = validPort(arguments[offset + 1]) else { throw CommandError.usage }
-                ports[flag] = port
+            guard let options = LinuxRunOptions(arguments) else { throw CommandError.usage }
+            let profiles = ProfileImporter.read(try readText(options.source)).profiles
+            let policy = try options.rules.map {
+                try PACPolicy(rules: PACPolicy.importRules(readText($0)), defaultDecision: .proxy, bypassLocal: true)
             }
-            let profiles = ProfileImporter.read(try readText(arguments[1])).profiles
-            guard index <= profiles.count else { throw LinuxMihomoError.noSuchNode }
-            let status = try LinuxMihomoRuntime.run(node: profiles[index - 1], executable: arguments[3],
-                                                   fingerprint: arguments[4], proxyPort: ports["--proxy-port"],
-                                                   controlPort: ports["--control-port"])
+            let status = try LinuxMihomoRuntime.run(profiles: profiles, options: options, policy: policy)
             if status != 0 { exit(status) }
         #endif
         default: throw CommandError.usage

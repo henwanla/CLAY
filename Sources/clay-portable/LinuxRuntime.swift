@@ -13,7 +13,7 @@ private func readFD(_ fd: Int32, _ buffer: UnsafeMutableRawPointer, _ count: Int
 private func pollFD(_ descriptor: inout pollfd, _ timeout: Int32) -> Int32 { poll(&descriptor, 1, timeout) }
 
 enum LinuxMihomoError: Error {
-    case noSuchNode, badFingerprint, executable, digest, privateFiles, signals, launch, ports, timeout, childExited
+    case noSuchNode, badFingerprint, executable, digest, privateFiles, signals, launch, ports, timeout, childExited, output
 
     var message: String {
         switch self {
@@ -27,6 +27,7 @@ enum LinuxMihomoError: Error {
         case .ports: return "The requested loopback ports are unavailable."
         case .timeout: return "Mihomo did not establish its own loopback listeners in time. Linux /proc access is required."
         case .childExited: return "Mihomo exited before this session finished."
+        case .output: return "Unable to write the Mihomo loopback addresses to standard output."
         }
     }
 
@@ -86,7 +87,12 @@ enum LinuxMihomoRuntime {
         }
         guard ready else { throw LinuxMihomoError.timeout }
         if let interrupted = signals.poll(timeout: 0) { return interrupted }
-        FileHandle.standardOutput.write(Data("mihomo=ready proxy=127.0.0.1:\(proxy.port) controller=127.0.0.1:\(control.port)\n".utf8))
+        // A consumer can close its pipe before readiness. Handle the write
+        // error on this parent only, so normal child cleanup still runs.
+        _ = signal(SIGPIPE, SIG_IGN)
+        let readyLine = Data("mihomo=ready proxy=127.0.0.1:\(proxy.port) controller=127.0.0.1:\(control.port)\n".utf8)
+        do { try readyLine.withUnsafeBytes { try writeAll(STDOUT_FILENO, bytes: $0) } }
+        catch { throw LinuxMihomoError.output }
         while true {
             if let interrupted = signals.poll(timeout: 200) { return interrupted }
             guard child.isAlive() else { throw LinuxMihomoError.childExited }

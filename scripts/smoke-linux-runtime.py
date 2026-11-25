@@ -130,6 +130,17 @@ def run_checks(binary):
             finally:
                 finish(process)
 
+        # A closed readiness pipe should stop the session and reap the child.
+        process = launch("normal")
+        try:
+            process.stdout.close()
+            directory, pid, _, _ = wait_until(report)
+            _, stderr = process.communicate(timeout=5)
+            assert process.returncode == 69 and "standard output" in stderr
+            clean(directory, pid)
+        finally:
+            finish(process)
+
         # The engine never binds. Inject listener sockets from a different
         # process after reservation release; the runtime must not report ready.
         process = launch("none")

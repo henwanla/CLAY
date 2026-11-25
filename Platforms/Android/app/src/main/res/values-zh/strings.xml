@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="eyebrow">离线预览</string>
+    <string name="intro">检查本地节点配置，查看命中的 PAC 规则。应用不会连接节点或改变设备流量。</string>
+    <string name="nodes_title">节点检查</string>
+    <string name="nodes_label">节点配置</string>
+    <string name="nodes_hint">粘贴分享链接、Clash YAML 或 V2Ray / Xray JSON</string>
+    <string name="nodes_run">检查节点</string>
+    <string name="nodes_count">节点数：%1$d</string>
+    <string name="nodes_issue_row">%1$s：%2$d</string>
+    <string name="issue_malformed">输入格式无效</string>
+    <string name="issue_protocol">不支持此协议</string>
+    <string name="issue_transport">不支持此传输方式</string>
+    <string name="issue_option">不支持此选项</string>
+    <string name="issue_account">节点凭据或地址无效</string>
+    <string name="issue_not_proxy">已跳过非代理出站</string>
+    <string name="issue_other">其他问题</string>
+    <string name="security_none">无</string>
+    <string name="pac_title">PAC 规则测试</string>
+    <string name="pac_rules">按顺序填写规则（可选）</string>
+    <string name="pac_target">域名、IP 地址或 URL</string>
+    <string name="pac_direct">规则未命中时默认直连（DIRECT）</string>
+    <string name="pac_bypass">本地和私有地址直连</string>
+    <string name="pac_run">测试规则</string>
+    <string name="pac_result">%1$s · %2$s\n规则数：%3$d</string>
+    <string name="pac_reason_rule">第 %1$d 条规则</string>
+    <string name="pac_reason_loopback">回环保护</string>
+    <string name="pac_reason_local">本地或私有地址</string>
+    <string name="pac_reason_fallback">默认动作</string>
+    <string name="pac_invalid_rule">第 %1$d 行规则无效。请使用 DOMAIN、DOMAIN-SUFFIX、DOMAIN-KEYWORD 或 IP-CIDR，动作填 DIRECT 或 PROXY。</string>
+    <string name="pac_invalid_host">请输入有效的域名、IP 地址或 URL。</string>
+    <string name="input_too_large">内容太长，无法预览。</string>
+    <string name="running">正在检查…</string>
+    <string name="failed">无法完成预览。</string>
+    <string name="clear">清空</string>
+</resources>

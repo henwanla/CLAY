@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="eyebrow">オフラインプレビュー</string>
+    <string name="intro">ローカルのノード設定を検査し、適用される PAC ルールを確認できます。ノードへの接続や端末の通信設定の変更は行いません。</string>
+    <string name="nodes_title">ノードの検査</string>
+    <string name="nodes_label">ノード設定</string>
+    <string name="nodes_hint">共有リンク、Clash YAML、または V2Ray / Xray JSON を貼り付け</string>
+    <string name="nodes_run">ノードを検査</string>
+    <string name="nodes_count">ノード数：%1$d</string>
+    <string name="nodes_issue_row">%1$s：%2$d</string>
+    <string name="issue_malformed">無効な入力</string>
+    <string name="issue_protocol">未対応のプロトコル</string>
+    <string name="issue_transport">未対応の転送方式</string>
+    <string name="issue_option">未対応のオプション</string>
+    <string name="issue_account">ノードの認証情報またはアドレスが無効です</string>
+    <string name="issue_not_proxy">プロキシ以外のアウトバウンドを除外</string>
+    <string name="issue_other">その他の問題</string>
+    <string name="security_none">なし</string>
+    <string name="pac_title">PAC ルールのテスト</string>
+    <string name="pac_rules">ルールを優先順に入力（省略可）</string>
+    <string name="pac_target">ドメイン、IP アドレス、または URL</string>
+    <string name="pac_direct">一致しない場合は直接接続（DIRECT）</string>
+    <string name="pac_bypass">ローカルおよびプライベートアドレスは直接接続</string>
+    <string name="pac_run">ルールをテスト</string>
+    <string name="pac_result">%1$s · %2$s\nルール数：%3$d</string>
+    <string name="pac_reason_rule">ルール %1$d</string>
+    <string name="pac_reason_loopback">ループバック保護</string>
+    <string name="pac_reason_local">ローカルまたはプライベートアドレス</string>
+    <string name="pac_reason_fallback">既定の動作</string>
+    <string name="pac_invalid_rule">%1$d 行目のルールが無効です。DOMAIN、DOMAIN-SUFFIX、DOMAIN-KEYWORD、IP-CIDR のいずれかと、DIRECT または PROXY を指定してください。</string>
+    <string name="pac_invalid_host">有効なドメイン、IP アドレス、または URL を入力してください。</string>
+    <string name="input_too_large">入力が大きすぎるためプレビューできません。</string>
+    <string name="running">確認中…</string>
+    <string name="failed">プレビューを完了できませんでした。</string>
+    <string name="clear">消去</string>
+</resources>

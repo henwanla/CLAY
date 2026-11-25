@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CLAY</string>
+    <string name="eyebrow">Offline preview</string>
+    <string name="intro">Inspect local node configurations and see which PAC rule applies. This app does not connect to nodes or change device traffic.</string>
+    <string name="nodes_title">Node inspector</string>
+    <string name="nodes_label">Node configuration</string>
+    <string name="nodes_hint">Paste share links, Clash YAML, or V2Ray / Xray JSON</string>
+    <string name="nodes_run">Inspect nodes</string>
+    <string name="nodes_count">Nodes: %1$d</string>
+    <string name="nodes_summary_row">%1$s · %2$s · %3$s  ×%4$d</string>
+    <string name="nodes_issue_row">%1$s: %2$d</string>
+    <string name="issue_malformed">Invalid input</string>
+    <string name="issue_protocol">Unsupported protocol</string>
+    <string name="issue_transport">Unsupported transport</string>
+    <string name="issue_option">Unsupported option</string>
+    <string name="issue_account">Invalid node credentials or address</string>
+    <string name="issue_not_proxy">Non-proxy outbound skipped</string>
+    <string name="issue_other">Other issue</string>
+    <string name="security_none">none</string>
+    <string name="pac_title">PAC rule tester</string>
+    <string name="pac_rules">Ordered rules (optional)</string>
+    <string name="pac_hint">DOMAIN-SUFFIX,example.test,PROXY</string>
+    <string name="pac_target">Domain, IP address, or URL</string>
+    <string name="pac_target_hint">www.example.test</string>
+    <string name="pac_direct">Default to DIRECT if no rule matches</string>
+    <string name="pac_bypass">Bypass local and private addresses</string>
+    <string name="pac_run">Test rule</string>
+    <string name="pac_result">%1$s · %2$s\nRules loaded: %3$d</string>
+    <string name="pac_reason_rule">Rule #%1$d</string>
+    <string name="pac_reason_loopback">Loopback protection</string>
+    <string name="pac_reason_local">Local or private address</string>
+    <string name="pac_reason_fallback">Default action</string>
+    <string name="pac_invalid_rule">Invalid rule on line %1$d. Use DOMAIN, DOMAIN-SUFFIX, DOMAIN-KEYWORD, or IP-CIDR with DIRECT or PROXY.</string>
+    <string name="pac_invalid_host">Enter a valid domain, IP address, or URL.</string>
+    <string name="input_too_large">This input is too large to preview.</string>
+    <string name="running">Checking…</string>
+    <string name="failed">Could not complete the preview.</string>
+    <string name="clear">Clear</string>
+</resources>

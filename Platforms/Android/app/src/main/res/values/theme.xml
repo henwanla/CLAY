@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="page">#F8F2EC</color>
+    <color name="card">#FFFCF9</color>
+    <color name="ink">#231B16</color>
+    <color name="muted">#65554C</color>
+    <color name="accent">#9D3F22</color>
+    <color name="line">#E7D9CF</color>
+    <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/page</item>
+        <item name="android:colorAccent">@color/accent</item>
+        <item name="android:statusBarColor">@color/page</item>
+        <item name="android:navigationBarColor">#231B16</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>

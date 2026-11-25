@@ -68,6 +68,8 @@ jobs:
           printf 'SWIFT_BIN=%s\n' "$root/swift-expanded/swift-6.4.3-RELEASE-osx-package.pkg/Payload/usr/bin/swift" >> "$GITHUB_ENV"
           printf 'SWIFT_SDKS_PATH=%s\n' "$root/swift-sdks" >> "$GITHUB_ENV"
           printf 'ANDROID_NDK_HOME=%s\n' "$root/android-ndk-r30" >> "$GITHUB_ENV"
+          # Swift Build prefers ANDROID_NDK_ROOT over ANDROID_NDK_HOME; the runner predefines both.
+          printf 'ANDROID_NDK_ROOT=%s\n' "$root/android-ndk-r30" >> "$GITHUB_ENV"
           printf 'CLAY_ANDROID_BUILD_DIR=%s\n' "$root/build-arm64" >> "$GITHUB_ENV"
       - name: Compile and verify the Android arm64 ELF
         shell: bash

@@ -70,6 +70,8 @@ python3 scripts/smoke-subscriptions.py .build/release/CLAYCoreChecks
 
 便携工具 `clay-portable` 可检查本地节点文件和生成 PAC；macOS/Linux 还可查看指定本机 Mihomo 的流量汇总。开发版在 Linux 可前台运行经 SHA-256 核对的 Mihomo，供应用手动接入。它不会修改系统代理或执行输入文件里的订阅与规则提供器链接。使用方法和验证范围见[跨平台计划](docs/跨平台路线.md)。
 
+[Android ARM64 离线预览](Platforms/Android/README.md)可检查节点和 PAC 规则，支持简体中文、英文和日文。它没有联网权限，也不提供 VPN；调试 APK 已在 Android API 24 ARM64 模拟器验收。
+
 [参与开发](CONTRIBUTING.md) · [架构调研](docs/架构调研.md) · [验收记录](docs/验收记录.md) · [打包及发布](docs/RELEASING.md) · [安全维护](docs/安全维护.md)
 
 CLAY 原创代码以 [MIT](https://github.com/henwanla/CLAY/blob/main/LICENSE) 许可发布。Yams 和 libyaml 各有 [上游许可证](https://github.com/henwanla/CLAY/blob/main/Vendor/Yams/UPSTREAM.md)。Mihomo 是按其 GPL 许可发布的独立依赖；本机预览包附有其许可证和固定版本的源码入口，公开 ZIP 不含该内核。

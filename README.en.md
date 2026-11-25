@@ -70,6 +70,8 @@ python3 scripts/smoke-subscriptions.py .build/release/CLAYCoreChecks
 
 `clay-portable` validates local node files and generates PAC. On macOS and Linux it can read summary counters from a specified local Mihomo controller. The Linux development build can run a verified Mihomo binary in the foreground for manual proxy setup. It leaves system proxy settings alone and does not fetch subscription or provider URLs embedded in input. See the [platform roadmap](docs/跨平台路线.md) for usage and test coverage.
 
+The [Android ARM64 offline preview](Platforms/Android/README.md) checks profiles and PAC rules in Simplified Chinese, English, and Japanese. The debug APK passed tests on an Android API 24 ARM64 emulator. It has no network permission or VPN support.
+
 [Contributing](CONTRIBUTING.md) · [Verification record](docs/验收记录.md) · [Release process](docs/RELEASING.md) · [Security maintenance](docs/安全维护.md)
 
 Original CLAY code uses the [MIT License](LICENSE). Yams and libyaml have [separate upstream license notices](https://github.com/henwanla/CLAY/blob/main/Vendor/Yams/UPSTREAM.md). Mihomo is a standalone GPL dependency. The local preview keeps its license and pinned upstream source reference; the public ZIP does not redistribute it.

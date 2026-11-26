@@ -102,7 +102,7 @@ The [Android local relay preview](Platforms/Android/README.md#本机代理预览
 
 The separate [Android VPN technical preview](Platforms/Android/README.md#vpn-技术预览--vpn-technical-preview) is a development APK with IPv4 system routing, a foreground service, and node and mode switching. Its Quick Settings tile opens CLAY or stops the running VPN. Relay and VPN both support [manual HTTPS subscription refresh with encrypted node caching](Platforms/Android/README.md#订阅--subscriptions). The Android 15 emulator checks IP rules, HTTP/TLS domain rules on selected TCP ports, and plain UDP DNS. Physical devices, network switching, and encrypted DNS need more testing. There is no public VPN APK yet.
 
-[iOS and iPadOS](Platforms/iOS/README.md) have an offline profile checker and a separate CLAY Tunnel Lab. The lab has an encrypted subscription cache, routes a single reserved test address, and supports applying a test node and mode while connected. It still needs testing on a signed physical device.
+[iOS and iPadOS](Platforms/iOS/README.md) have an offline profile checker and a separate CLAY Tunnel Lab. The lab has an encrypted subscription cache, routes one chosen IPv4/TCP test endpoint, and supports changing the node and mode while connected. It still needs testing on a signed physical device.
 
 [Contributing](CONTRIBUTING.md) · [Verification record](docs/验收记录.md) · [Release process](docs/RELEASING.md) · [Security maintenance](docs/安全维护.md)
 

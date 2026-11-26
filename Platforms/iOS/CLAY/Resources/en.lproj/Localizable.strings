@@ -19,7 +19,17 @@
 "Not a proxy outbound" = "Not a proxy outbound";
 "lab.title" = "CLAY Tunnel Lab";
 "lab.scope" = "Test route only";
-"lab.scope.description" = "This preview routes only the address below. It does not override DNS or provide general VPN protection. Starting it may pause another VPN.";
+"lab.scope.description" = "While connected, iOS sends all traffic for this IPv4 address to the Lab. Only the selected TCP port is forwarded. DNS settings and routes to other destinations are unchanged. Starting the Lab may pause another VPN.";
+"lab.target.ipv4" = "Destination IPv4";
+"lab.target.tcpPort" = "TCP port";
+"lab.target.live" = "Active endpoint";
+"lab.target.reading" = "Checking the active endpoint…";
+"lab.target.unknown" = "The tunnel has not confirmed its endpoint.";
+"lab.target.retry" = "Check active endpoint";
+"lab.target.reconnect" = "Stop and reconnect to change the IPv4 address or port. You can switch nodes while connected.";
+"lab.target.invalid" = "Enter a dotted IPv4 address and a port from 1 to 65535. Loopback, link-local, multicast and the tunnel’s own addresses are not supported.";
+"lab.target.reset" = "Use demo endpoint";
+"lab.target.customProbe" = "Use your own client to test this endpoint. The built-in probe only sends to the demo fixture.";
 "lab.import" = "Import test nodes";
 "lab.noNodes" = "No compatible nodes";
 "lab.node" = "Test node";
@@ -40,7 +50,7 @@
 "lab.update.hint" = "While connected, apply your chosen node and mode. Switching closes existing test connections.";
 "lab.update.apply" = "Apply to test tunnel";
 "lab.update.working" = "Applying to test tunnel…";
-"lab.update.applied" = "Applied. Send a new test packet to check the route.";
+"lab.update.applied" = "Applied. Open a new connection to check the route.";
 "lab.update.rejected" = "The update was rejected; no changes were applied by this request.";
 "lab.update.unavailable" = "Could not reach the tunnel. No update was sent.";
 "lab.update.unknown" = "The tunnel did not confirm the update. Apply again or stop the tunnel before testing.";

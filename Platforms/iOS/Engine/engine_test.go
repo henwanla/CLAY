@@ -9,7 +9,9 @@ import (
 	"encoding/json"
 	"io"
 	"net"
+	"net/netip"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -40,6 +42,11 @@ func syntheticNodes(first, second int) []byte {
 
 func proxyFixture(t *testing.T, reply string, disconnectChecks ...chan error) int {
 	t.Helper()
+	return proxyFixtureFor(t, reply, demoEndpoint, nil, disconnectChecks...)
+}
+
+func proxyFixtureFor(t *testing.T, reply string, endpoint netip.AddrPort, accepted *atomic.Uint64, disconnectChecks ...chan error) int {
+	t.Helper()
 	ln, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {
 		t.Fatal(err)
@@ -50,6 +57,9 @@ func proxyFixture(t *testing.T, reply string, disconnectChecks ...chan error) in
 			conn, err := ln.AcceptTCP()
 			if err != nil {
 				return
+			}
+			if accepted != nil {
+				accepted.Add(1)
 			}
 			func() {
 				defer conn.Close()
@@ -66,7 +76,9 @@ func proxyFixture(t *testing.T, reply string, disconnectChecks ...chan error) in
 				if data[len(prefix)] != 1 {
 					return
 				}
-				target, _ := hex.DecodeString("46a001c633642a")
+				addr := endpoint.Addr().As4()
+				target := append(binary.BigEndian.AppendUint16(nil, endpoint.Port()), 1)
+				target = append(target, addr[:]...)
 				data = make([]byte, len(target))
 				if _, err := io.ReadFull(conn, data); err != nil || !bytes.Equal(data, target) {
 					return
@@ -265,11 +277,16 @@ func TestLabSwitchClosesActiveTCP(t *testing.T) {
 func checkFlowRetirement(t *testing.T, switchRoute bool) {
 	t.Helper()
 	disconnected := make(chan error, 1)
-	port := proxyFixture(t, "open", disconnected)
+	target := demoEndpoint
+	if switchRoute {
+		target = netip.MustParseAddrPort("203.0.113.37:40443")
+	}
+	var accepted atomic.Uint64
+	port := proxyFixtureFor(t, "open", target, &accepted, disconnected)
 	var id uint64
 	var err error
 	if switchRoute {
-		id, err = startLab(labFixture(t, port), 0)
+		id, err = startLab(labFixture(t, port), 0, target)
 	} else {
 		id, err = start(syntheticNodes(port, port), 1, 1)
 	}
@@ -279,10 +296,21 @@ func checkFlowRetirement(t *testing.T, switchRoute bool) {
 	defer stop(id)
 	peer, ctx, closePeer := newPeer(t, id)
 	defer closePeer()
+	if switchRoute {
+		for _, forbidden := range []netip.AddrPort{
+			netip.AddrPortFrom(demoEndpoint.Addr(), target.Port()),
+			netip.AddrPortFrom(target.Addr(), demoEndpoint.Port()),
+		} {
+			assertLabRejects(t, peer, ctx, forbidden)
+		}
+		if accepted.Load() != 0 {
+			t.Fatal("an out-of-scope connection reached the proxy")
+		}
+	}
 	dialCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	conn, err := gonet.DialContextTCP(dialCtx, peer, tcpip.FullAddress{NIC: 1,
-		Addr: tcpip.AddrFrom4([4]byte{198, 51, 100, 42}), Port: 18080}, header.IPv4ProtocolNumber)
+		Addr: tcpip.AddrFrom4(target.Addr().As4()), Port: target.Port()}, header.IPv4ProtocolNumber)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,9 +324,11 @@ func checkFlowRetirement(t *testing.T, switchRoute bool) {
 		t.Fatal("fixture did not open the routed connection")
 	}
 	if switchRoute {
-		replacement := labFixture(t, proxyFixture(t, "via-next"))
+		replacement := labFixture(t, proxyFixtureFor(t, "via-next", target, nil))
+		selfRoute := normalizedFixtures(t, map[string]any{"name": "lab", "type": "vless", "server": target.Addr().String(), "port": port,
+			"uuid": "56dc6c3e-8793-4d37-a363-f9f19db29c6d"})
 		if replaceLab(id+1, replacement, 1) || replaceLab(id, replacement, 2) ||
-			replaceLab(id, syntheticNodes(port, port), 0) || replaceLab(id, []byte("invalid"), 1) {
+			replaceLab(id, syntheticNodes(port, port), 0) || replaceLab(id, []byte("invalid"), 1) || replaceLab(id, selfRoute, 1) {
 			t.Fatal("invalid update was accepted")
 		}
 		select {
@@ -326,7 +356,42 @@ func checkFlowRetirement(t *testing.T, switchRoute bool) {
 	if switchRoute {
 		// Keep the same peer, stack, and session. The new flow must receive the
 		// new upstream's marker, even while the old TCP socket is still open here.
-		fetch(t, peer, ctx, tcpTarget, labPort, "via-next")
+		fetch(t, peer, ctx, target.Addr().As4(), int(target.Port()), "via-next")
+	}
+}
+
+func assertLabRejects(t *testing.T, peer *stack.Stack, ctx context.Context, target netip.AddrPort) {
+	t.Helper()
+	dialCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	conn, err := gonet.DialContextTCP(dialCtx, peer, tcpip.FullAddress{NIC: 1,
+		Addr: tcpip.AddrFrom4(target.Addr().As4()), Port: target.Port()}, header.IPv4ProtocolNumber)
+	if err == nil {
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+		if _, err = io.WriteString(conn, "synthetic-packet"); err == nil {
+			_, err = conn.Read(make([]byte, 1))
+		}
+	}
+	if timeout, ok := err.(net.Error); err == nil || (ok && timeout.Timeout()) || dialCtx.Err() != nil {
+		t.Fatal("out-of-scope connection was not closed")
+	}
+}
+
+func TestLabTargetScope(t *testing.T) {
+	for _, example := range []struct {
+		endpoint string
+		valid    bool
+	}{
+		{"198.51.100.42:18080", true}, {"10.20.30.40:65535", true},
+		{"0.1.2.3:80", false}, {"127.0.0.1:80", false}, {"169.254.1.1:80", false},
+		{"198.18.0.1:80", false}, {"198.18.0.2:80", false}, {"224.0.0.1:80", false},
+		{"240.1.2.3:80", false}, {"203.0.113.37:0", false}, {"[2001:db8::1]:80", false},
+		{"[::ffff:203.0.113.37]:80", false},
+	} {
+		if got := validLabTarget(netip.MustParseAddrPort(example.endpoint)); got != example.valid {
+			t.Errorf("validLabTarget(%q) = %t, want %t", example.endpoint, got, example.valid)
+		}
 	}
 }
 

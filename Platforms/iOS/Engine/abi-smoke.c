@@ -30,8 +30,11 @@ int main(void) {
         "\"type\":\"vless\",\"server\":\"127.0.0.1\",\"port\":18080,"
         "\"uuid\":\"56dc6c3e-8793-4d37-a363-f9f19db29c6d\"}],\"rules\":[\"MATCH,CLAY\"]}";
     const int32_t labSize = (int32_t)(sizeof(lab) - 1);
-    CHECK(clay_engine_start_lab(lab, labSize, 2) == 0);
-    const uint64_t id = clay_engine_start_lab(lab, labSize, 0);
+    const uint32_t destination = UINT32_C(0xC633642A); // 198.51.100.42
+    CHECK(clay_engine_start_lab(lab, labSize, 2, destination, 18080) == 0);
+    CHECK(clay_engine_start_lab(lab, labSize, 0, destination, 0) == 0);
+    CHECK(clay_engine_start_lab(lab, labSize, 0, UINT32_C(0x7f000001), 18080) == 0);
+    const uint64_t id = clay_engine_start_lab(lab, labSize, 0, destination, 18080);
     CHECK(id > previous);
     CHECK(clay_engine_replace_lab(previous, lab, labSize, 1) < 0);
     CHECK(clay_engine_replace_lab(id, lab, labSize, 2) < 0);

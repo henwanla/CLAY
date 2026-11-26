@@ -38,19 +38,25 @@ bash scripts/swift-local.sh build -c release --product CLAYCoreChecks
 
 The host test imports a synthetic Clash profile with the shared Swift code, then sends IPv4 through the packet bridge to local protocol servers. It checks TCP for VMess, VLESS, Shadowsocks AEAD, Trojan TLS and Hysteria2 (plain, Salamander and Gecko), plus UDP for all except the Shadowsocks fixture. It verifies routing to the chosen node on each start and rejects untrusted certificates, mismatched pins and wrong passwords. The Lab tests switch between all seven TCP variants within a single packet session, check that the previous upstream socket closes, and verify that invalid updates leave the previous node in place. Neither the host tests nor the iOS SDK link checks exercise the device VPN or system DNS.
 
-TUIC v5 的两种 UDP 中继（native、quic）也已在同一组宿主测试中通过 TCP 与 UDP 验证，并纳入 Lab 在线切换的 TCP 回归。错误密码、错误证书指纹及无指纹的自签名证书均不能取得应答。当前 Lab 仍只开放固定 IPv4/TCP 测试目标。
+TUIC v5 的两种 UDP 中继（native、quic）也已在同一组宿主测试中通过 TCP 与 UDP 验证，并纳入 Lab 在线切换的 TCP 回归。错误密码、错误证书指纹及无指纹的自签名证书均不能取得应答。当前 Lab 每次连接只开放一个指定的 IPv4/TCP 测试端点。
 
-Both TUIC v5 UDP relay modes (native and quic) now pass TCP and UDP in the same host suite and TCP live switching in the Lab. Wrong passwords, mismatched certificate pins, and unpinned self-signed certificates yield no response. The Lab still exposes only its fixed IPv4/TCP test target.
+Both TUIC v5 UDP relay modes (native and quic) now pass TCP and UDP in the same host suite and TCP live switching in the Lab. Wrong passwords, mismatched certificate pins, and unpinned self-signed certificates yield no response. The Lab exposes one explicitly selected IPv4/TCP endpoint per connection.
 
 CI repeats Lab TCP switching and restart tests with Go's race detector, then checks arm64 linkage for both iOS SDKs. Before distributing a binary, include the corresponding Mihomo source, bridge source, build instructions, and required license files.
 
 ## CLAY 隧道实验 / CLAY Tunnel Lab
 
-另一个 Xcode scheme `CLAYTunnelLab` 打包自己的 Packet Tunnel 扩展，与离线 App 分开。界面支持中文、英文和日文，可粘贴、导入和选择测试节点，以规则或全局模式开始，读取系统 VPN 状态，发送固定测试请求并停止。已连接时可选新节点和模式，再点「应用到测试隧道」；只有扩展确认后才显示已应用。切换保留系统测试路由，关闭旧上游连接，新连接走新节点。已经排队的旧包仍可能送达原 TCP 流。未收到确认时可重试或停止；导入和编辑本身不更改线路。系统 VPN 的授权提示以设备显示为准，启用本实验可能暂停其他 VPN。
+另一个 Xcode scheme `CLAYTunnelLab` 打包自己的 Packet Tunnel 扩展，与离线 App 分开。界面支持中文、英文和日文。用户在启动前输入一个 IPv4 地址及 TCP 端口、选节点和模式；也可使用默认演示端点 `198.51.100.42:18080`。连接后界面从扩展读取实际端点。更换端点要先停止再连接。在线应用节点或模式保留当前端点，关闭旧上游连接，后续连接使用新节点。已经排队的旧包仍可能送达原 TCP 流。只有扩展确认后才显示已应用；未确认时可重试或停止。
 
-系统只加入 `198.51.100.42/32` 测试路由，扩展还会拒绝不符合地址、TCP 端口 `18080` 或包格式的流量。没有默认路由、DNS 覆盖、IPv6 路由或按需启动。系统 VPN 配置只保存本实验的扩展标识和固定标签，所选节点仅随手动启动或应用更新发送，手动粘贴的内容不保存。实验中的规则和全局都只把这一个目标交给所选节点，未提供直连模式。此功能用于接入验收，不能当作全设备 VPN。
+系统为所选 IPv4 地址加入一条 `/32` 路由，**该地址的所有流量**都会进入扩展，只有所选端口的未分片 TCP 会转发。该地址的其他端口和协议在连接期间不可用。规则和全局模式均只通过所选节点转发这个端点，没有直连回退。不会修改 DNS 设置，也不加入默认路由或 IPv6 路由。系统 VPN 配置只保存扩展标识和固定标签；地址和端口只随手动启动发送，不写入缓存或日志。节点凭据只随手动启动或应用更新发送给扩展。启动可能暂停其他 VPN。
 
-The separate scheme embeds a Packet Tunnel extension with a single documentation IPv4 route. Only unfragmented TCP for `198.51.100.42:18080` is admitted. It leaves DNS and default routes alone. CLAY sends only the selected node on an explicit start or update and keeps credentials out of VPN preferences and logs. Apply a new node or mode while connected, then wait for the provider acknowledgment before sending a fresh probe. Old upstream connections close; packets already queued may still reach their original TCP flow. Both Rule and Global use the selected node for the fixed test destination.
+使用自定义端点时，用自己的客户端验证。内置探测只对演示端点发送明文夹具标记。代理节点的服务器地址应与目标 IPv4 不同；实验会拒绝相同的字面地址，不会主动查询域名来判断它是否解析到目标地址。它用于在受控环境验收代理接入。
+
+The separate `CLAYTunnelLab` scheme embeds a Packet Tunnel extension. Enter one IPv4 address and TCP port before starting, or use the demo endpoint `198.51.100.42:18080`. The app reads the active endpoint back from the extension. Stop and reconnect to change it. Applying a node or mode while connected preserves the endpoint and closes old upstream connections. Wait for the acknowledgment before testing with a fresh connection. Packets already queued may still reach their original TCP flow.
+
+The OS claims **all traffic to the selected IPv4 address** using one `/32` route; only unfragmented TCP for the selected port is forwarded. The address's other ports and protocols are unavailable until the tunnel stops. Rule and Global both send this endpoint through the selected node without direct fallback. No DNS settings, default routes, or IPv6 routes are changed. VPN preferences contain only the fixed label and provider identity. The endpoint stays out of caches and logs; node credentials go to the extension only on an explicit start or apply. Starting may pause another VPN.
+
+Use your own client for a custom endpoint. The built-in plaintext test marker goes only to the demo endpoint. Use a proxy server at a different address from the selected destination: the Lab can reject a matching literal address, but does not look up proxy hostnames to detect a match. Use the Lab in a controlled test environment.
 
 ### 订阅 / Subscriptions
 
@@ -78,6 +84,7 @@ xcodebuild -project Platforms/iOS/CLAY.xcodeproj -scheme CLAYTunnelLab \
 
 1. 给 App 和扩展使用同一个开发团队，在两个标识上启用 Packet Tunnel entitlement。必要时用 `CLAY_LAB_ID` 改为该团队可签名的包名，扩展会自动带上 `.provider`。使用签名构建安装到自有测试设备；CI 的未签名产物不能安装。
 2. 在可信局域网运行 `python3 Platforms/iOS/TunnelLab/synthetic-upstream.py --bind <本机私有 IPv4>`。它生成临时 VLESS 测试链接，仅响应固定测试请求，不转发流量。粘贴它到 Lab，导入、选择、启动并按设备提示授权。不要使用真实订阅来跑这项验收。
-3. 系统显示已连接后点「发送测试包」，需收到测试应答。运行第二份夹具，把两条临时链接各放一行。连接第一条后选第二条和另一个模式，点「应用到测试隧道」，确认 VPN 显示仍连接。关掉第一份夹具并重新发送测试包，仍应收到应答。另复验停止、重启、拒绝和撤销权限。退出时关闭夹具。在确认真机的路由、DNS、IPv6、后台生命周期及内存前，不应增加默认路由。
+3. 先保持演示端点。系统显示已连接、当前端点读回成功后点「发送测试包」，需收到测试应答。运行第二份夹具，把两条临时链接各放一行。连接第一条后选第二条和另一个模式，点「应用到测试隧道」，确认 VPN 显示仍连接。关掉第一份夹具并重新发送测试包，仍应收到应答。另复验停止、重启、拒绝和撤销权限。退出时关闭夹具。
+4. 停止后，用另一个受控 IPv4/TCP 服务重复测试。确认重开 App 能读回实际端点、同地址的其他端口不转发、另一地址仍用原路由、停止后原路由恢复。设备上的路由、DNS、IPv6、后台生命周期和内存尚待确认。
 
-Use signing profiles that entitle the app and extension on the same team. On a trusted LAN, run the fixture with the Mac's private IPv4 address and import its temporary link in the Lab. Start the VPN, authorize it on the device, and tap “Send test packet.” Repeat with two fixtures: apply the second node and another mode, check the system VPN remains connected, stop the first fixture, and send a fresh probe. Stop the VPN and remaining fixture when finished. Unsigned CI builds check packaging only; they do not prove that an iPhone can run the tunnel.
+Use signing profiles that entitle the app and extension on the same team. On a trusted LAN, run the fixture with the Mac's private IPv4 address and import its temporary link in the Lab. Start with the demo endpoint, authorize the VPN on the device, wait for the active endpoint to appear, and tap “Send test packet.” Repeat with two fixtures: apply the second node and another mode, check the system VPN remains connected, stop the first fixture, and send a fresh probe. Stop the VPN and remaining fixture when finished. Repeat with a separate controlled IPv4/TCP service: verify readback after reopening the app, refusal on other ports at the same address, a separate address staying on its normal route, and route restoration after stopping. Unsigned CI builds check packaging only; they do not prove that an iPhone can run the tunnel.

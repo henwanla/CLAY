@@ -19,7 +19,17 @@
 "Not a proxy outbound" = "プロキシのアウトバウンドではありません";
 "lab.title" = "CLAY トンネルラボ";
 "lab.scope" = "テスト経路のみ";
-"lab.scope.description" = "このプレビューは下記のアドレスだけを経由させます。DNS の変更や端末全体の VPN 保護は行いません。起動時に他の VPN が停止する場合があります。";
+"lab.scope.description" = "接続中、iOS はこの IPv4 アドレス宛ての通信をすべてテストトンネルに渡します。転送するのは指定した TCP ポートのみです。DNS の設定や他の宛先への経路は変更しません。開始時に別の VPN が停止することがあります。";
+"lab.target.ipv4" = "宛先 IPv4";
+"lab.target.tcpPort" = "TCP ポート";
+"lab.target.live" = "接続中の宛先";
+"lab.target.reading" = "接続中の宛先を確認中…";
+"lab.target.unknown" = "トンネルから宛先の確認が取れていません。";
+"lab.target.retry" = "接続中の宛先を再確認";
+"lab.target.reconnect" = "IPv4 アドレスやポートを変更するには、停止して再接続してください。接続中はノードを切り替えられます。";
+"lab.target.invalid" = "ドット区切りの IPv4 アドレスと 1〜65535 のポートを入力してください。ループバック、リンクローカル、マルチキャスト、トンネル自身のアドレスは使用できません。";
+"lab.target.reset" = "デモの宛先に戻す";
+"lab.target.customProbe" = "この宛先にはご自身のクライアントで接続してください。内蔵テストはデモ専用です。";
 "lab.import" = "テストノードを読み込む";
 "lab.noNodes" = "対応するノードがありません";
 "lab.node" = "テストノード";
@@ -40,7 +50,7 @@
 "lab.update.hint" = "接続中に選択したノードとモードを適用できます。切り替え時は既存のテスト接続を閉じます。";
 "lab.update.apply" = "テストトンネルに適用";
 "lab.update.working" = "テストトンネルに適用中…";
-"lab.update.applied" = "適用しました。新しいテスト通信で経路を確認してください。";
+"lab.update.applied" = "適用しました。新しい接続で経路を確認してください。";
 "lab.update.rejected" = "更新が拒否されました。この操作による変更はありません。";
 "lab.update.unavailable" = "トンネルに接続できず、更新は送信されませんでした。";
 "lab.update.unknown" = "トンネルから更新の確認がありません。再度適用するか、トンネルを停止してからテストしてください。";

@@ -19,7 +19,17 @@
 "Not a proxy outbound" = "不是代理出站";
 "lab.title" = "CLAY 隧道实验";
 "lab.scope" = "仅测试路由";
-"lab.scope.description" = "预览只接管下列地址，不修改 DNS，也不提供全局 VPN 保护。启动时可能暂停其他 VPN。";
+"lab.scope.description" = "连接期间，iOS 会将发往该 IPv4 地址的所有流量交给实验隧道。只转发所选 TCP 端口。DNS 设置和其他目标的路由保持不变。启动实验可能暂停其他 VPN。";
+"lab.target.ipv4" = "目标 IPv4";
+"lab.target.tcpPort" = "TCP 端口";
+"lab.target.live" = "当前端点";
+"lab.target.reading" = "正在确认当前端点…";
+"lab.target.unknown" = "隧道尚未确认当前端点。";
+"lab.target.retry" = "重新确认当前端点";
+"lab.target.reconnect" = "更改 IPv4 地址或端口需要停止后重连。连接期间可以切换节点。";
+"lab.target.invalid" = "请输入以点分隔的 IPv4 地址和 1 至 65535 的端口。不支持回环、链路本地、组播及隧道自身使用的地址。";
+"lab.target.reset" = "恢复演示端点";
+"lab.target.customProbe" = "请用你自己的客户端验证此端点。内置探测只发送到演示端点。";
 "lab.import" = "导入测试节点";
 "lab.noNodes" = "没有兼容的节点";
 "lab.node" = "测试节点";
@@ -40,7 +50,7 @@
 "lab.update.hint" = "连接期间可应用所选节点和模式。切换会关闭现有测试连接。";
 "lab.update.apply" = "应用到测试隧道";
 "lab.update.working" = "正在应用到测试隧道…";
-"lab.update.applied" = "已应用。请发送新的测试请求来检查线路。";
+"lab.update.applied" = "已应用。请建立一条新连接来检查线路。";
 "lab.update.rejected" = "更新被拒绝，本次请求没有应用任何更改。";
 "lab.update.unavailable" = "无法联系测试隧道，未发送更新。";
 "lab.update.unknown" = "隧道未确认更新。请重新应用或停止隧道后再测试。";

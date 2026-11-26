@@ -26,7 +26,8 @@ import (
 	"github.com/metacubex/mihomo/listener/inbound"
 )
 
-var tcpTarget = [4]byte{198, 51, 100, 42}
+var demoEndpoint = netip.MustParseAddrPort("198.51.100.42:18080")
+var tcpTarget = demoEndpoint.Addr().As4()
 var udpTarget = netip.MustParseAddr("198.51.100.53")
 
 // These authenticated upstream listeners never dial any target. They answer
@@ -173,7 +174,7 @@ func TestImportedProtocols(t *testing.T) {
 		})
 	}
 	t.Run("lab-live-switch-across-protocols", func(t *testing.T) {
-		id, err := startLab(normalizedFixtures(t, nodes[0]), 0)
+		id, err := startLab(normalizedFixtures(t, nodes[0]), 0, demoEndpoint)
 		if err != nil {
 			t.Fatal("lab rejected first imported profile")
 		}
@@ -185,7 +186,7 @@ func TestImportedProtocols(t *testing.T) {
 				if index > 0 && !replaceLab(id, normalizedFixtures(t, nodes[index]), index%2) {
 					t.Fatal("lab rejected imported replacement")
 				}
-				fetch(t, peer, ctx, tcpTarget, labPort, check.label)
+				fetch(t, peer, ctx, tcpTarget, int(demoEndpoint.Port()), check.label)
 			})
 		}
 	})

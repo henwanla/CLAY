@@ -19,9 +19,13 @@ import NetworkExtension
     @Published private(set) var failure = false
     @Published private(set) var updating = false
     @Published private(set) var updateOutcome: UpdateOutcome?
+    @Published private(set) var liveTarget: LabContract.Target?
+    @Published private(set) var readingTarget = false
     private var manager: NETunnelProviderManager?
     private var updateID: UUID?
     private var pendingReply: Reply?
+    private var targetReadID: UUID?
+    private var targetReply: Reply?
 
     var active: Bool {
         switch status {
@@ -32,22 +36,33 @@ import NetworkExtension
 
     func readStatus() {
         status = manager?.connection.status ?? .invalid
-        if status != .connected { invalidateUpdate() }
+        if status != .connected {
+            invalidateUpdate()
+            invalidateTarget()
+        }
     }
 
     func refresh() async {
         guard !busy, !updating else { return }
-        busy = true
-        defer { busy = false }
-        do {
-            manager = try await ownConfiguration()
-            readStatus()
-        } catch {
-            failure = true
+        // Reuse the connection object while it represents an active session.
+        // Loading another manager must not leave callbacks from the old one valid.
+        readStatus()
+        if !active {
+            busy = true
+            do {
+                let loaded = try await ownConfiguration()
+                invalidateTarget()
+                manager = loaded
+                readStatus()
+            } catch {
+                failure = true
+            }
+            busy = false
         }
+        await readLiveTarget()
     }
 
-    func start(node: NodeProfile, mode: Mode) async {
+    func start(node: NodeProfile, mode: Mode, target: LabContract.Target) async {
         guard !busy, !active else { return }
         busy = true
         failure = false
@@ -55,14 +70,14 @@ import NetworkExtension
         do {
             let profile = try Self.profile(for: node)
             let manager = try await ownConfiguration() ?? NETunnelProviderManager()
+            invalidateTarget()
             self.manager = manager
             readStatus()
             guard !active else { return }
             let configuration = NETunnelProviderProtocol()
             configuration.providerBundleIdentifier = try Self.providerID()
             configuration.serverAddress = LabContract.remoteAddress
-            // Preferences contain only the provider identity and lab route label.
-            // Node credentials are sent as per-start options, without on-demand.
+            // The target and node credentials travel only in the per-start options.
             manager.protocolConfiguration = configuration
             manager.localizedDescription = "CLAY Tunnel Lab"
             manager.isEnabled = true
@@ -74,7 +89,9 @@ import NetworkExtension
                 throw LabContract.Failure.setup
             }
             try session.startTunnel(options: [LabContract.profileKey: profile as NSData,
-                                              LabContract.modeKey: NSNumber(value: mode.engineValue)])
+                                              LabContract.modeKey: NSNumber(value: mode.engineValue),
+                                              LabContract.addressKey: target.address as NSString,
+                                              LabContract.portKey: String(target.port) as NSString])
             readStatus()
         } catch {
             failure = true
@@ -85,8 +102,25 @@ import NetworkExtension
     func stop() {
         failure = false
         invalidateUpdate()
+        invalidateTarget()
         manager?.connection.stopVPNTunnel()
         readStatus()
+    }
+
+    func readLiveTarget() async {
+        readStatus()
+        guard status == .connected, !busy, liveTarget == nil, !readingTarget,
+              let manager, let session = manager.connection as? NETunnelProviderSession else { return }
+        let id = UUID()
+        targetReadID = id
+        readingTarget = true
+        let reply = await send(LabContract.targetRequest, to: session, forTarget: true)
+        guard targetReadID == id else { return }
+        targetReadID = nil
+        targetReply = nil
+        readingTarget = false
+        guard self.manager === manager, session.status == .connected else { return }
+        liveTarget = LabContract.readTarget(reply)
     }
 
     func apply(node: NodeProfile, mode: Mode) async {
@@ -143,10 +177,20 @@ import NetworkExtension
         reply?.finish(nil)
     }
 
-    private func send(_ message: Data, to session: NETunnelProviderSession) async -> Data? {
+    private func invalidateTarget() {
+        targetReadID = nil
+        readingTarget = false
+        liveTarget = nil
+        let reply = targetReply
+        targetReply = nil
+        reply?.finish(nil)
+    }
+
+    private func send(_ message: Data, to session: NETunnelProviderSession, forTarget: Bool = false) async -> Data? {
         await withCheckedContinuation { continuation in
             let reply = Reply(continuation)
-            pendingReply = reply
+            // Target readback and the two-step node update can overlap.
+            if forTarget { targetReply = reply } else { pendingReply = reply }
             do {
                 try session.sendProviderMessage(message) { [weak reply] data in
                     Task { @MainActor in reply?.finish(data) }

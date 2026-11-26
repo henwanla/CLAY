@@ -2,47 +2,82 @@ import Foundation
 
 @main enum LabContractChecks {
     static func main() {
-        func packet(source: [UInt8], target: [UInt8], outgoing: Bool = true) -> Data {
+        func packet(source: [UInt8], target: [UInt8], port: UInt16 = 18080, outgoing: Bool = true) -> Data {
             var data = Data([0x45, 0, 0, 40, 0, 0, 0x40, 0, 64, 6, 0, 0])
             data.append(contentsOf: source + target)
             let local: [UInt8] = [0xC0, 0x00]
-            let fixture: [UInt8] = [0x46, 0xA0]
+            let fixture = [UInt8(port >> 8), UInt8(truncatingIfNeeded: port)]
             data.append(contentsOf: outgoing ? local + fixture : fixture + local)
             data.append(contentsOf: Array(repeating: 0, count: 16))
             data[32] = 0x50
             return data
         }
         let device: [UInt8] = [198, 18, 0, 1]
-        let target: [UInt8] = [198, 51, 100, 42]
+        let demo = LabContract.demoTarget
+        let target = demo.bytes
+        func accepts(_ data: Data, fromProvider: Bool) -> Bool {
+            LabContract.accepts(data, target: demo, fromProvider: fromProvider)
+        }
         let request = packet(source: device, target: target)
         let response = packet(source: target, target: device, outgoing: false)
-        precondition(LabContract.accepts(request, fromProvider: false))
-        precondition(LabContract.accepts(response, fromProvider: true))
-        precondition(!LabContract.accepts(response, fromProvider: false))
-        precondition(!LabContract.accepts(request, fromProvider: true))
-        precondition(!LabContract.accepts(packet(source: device, target: [198, 51, 100, 43]), fromProvider: false))
-        precondition(!LabContract.accepts(packet(source: [192, 0, 2, 10], target: target), fromProvider: false))
-        precondition(!LabContract.accepts(Data(request.dropLast()), fromProvider: false))
+        precondition(accepts(request, fromProvider: false))
+        precondition(accepts(response, fromProvider: true))
+        precondition(!accepts(response, fromProvider: false))
+        precondition(!accepts(request, fromProvider: true))
+        precondition(!accepts(packet(source: device, target: [198, 51, 100, 43]), fromProvider: false))
+        precondition(!accepts(packet(source: [192, 0, 2, 10], target: target), fromProvider: false))
+        precondition(!accepts(Data(request.dropLast()), fromProvider: false))
         var invalid = request
         invalid[0] = 0x60
-        precondition(!LabContract.accepts(invalid, fromProvider: false))
+        precondition(!accepts(invalid, fromProvider: false))
         invalid[0] = 0x4F
-        precondition(!LabContract.accepts(invalid, fromProvider: false))
+        precondition(!accepts(invalid, fromProvider: false))
         invalid[0] = 0x45
         invalid[3] = 39
-        precondition(!LabContract.accepts(invalid, fromProvider: false))
+        precondition(!accepts(invalid, fromProvider: false))
         invalid = request
         invalid[23] = 0xA1
-        precondition(!LabContract.accepts(invalid, fromProvider: false))
+        precondition(!accepts(invalid, fromProvider: false))
         invalid = request
         invalid[6] = 0x20
-        precondition(!LabContract.accepts(invalid, fromProvider: false))
+        precondition(!accepts(invalid, fromProvider: false))
         invalid = request
         invalid[9] = 17
-        precondition(!LabContract.accepts(invalid, fromProvider: false))
+        precondition(!accepts(invalid, fromProvider: false))
         invalid = request
         invalid[32] = 0x10
-        precondition(!LabContract.accepts(invalid, fromProvider: false))
+        precondition(!accepts(invalid, fromProvider: false))
+
+        let custom = LabContract.Target(address: "203.0.113.37", port: "40443")!
+        precondition(custom.encodedAddress == 0xCB007125)
+        let customRequest = packet(source: device, target: custom.bytes, port: custom.port)
+        let customReply = packet(source: custom.bytes, target: device, port: custom.port, outgoing: false)
+        precondition(LabContract.accepts(customRequest, target: custom, fromProvider: false))
+        precondition(LabContract.accepts(customReply, target: custom, fromProvider: true))
+        precondition(!LabContract.accepts(customReply, target: custom, fromProvider: false))
+        precondition(!LabContract.accepts(request, target: custom, fromProvider: false))
+        precondition(!LabContract.accepts(packet(source: device, target: custom.bytes), target: custom, fromProvider: false))
+        precondition(!accepts(customRequest, fromProvider: false))
+        for address in ["0.1.2.3", "127.0.0.1", "169.254.1.1", "198.18.0.1", "198.18.0.2",
+                        "224.0.0.1", "240.1.2.3", "2001:db8::1", "example.invalid", "192.0.2.01", "192..2.1"] {
+            precondition(LabContract.Target(address: address, port: "443") == nil)
+        }
+        for port in ["0", "65536", "-1", "+1", " 80", "080", "８０", ""] {
+            precondition(LabContract.Target(address: "203.0.113.37", port: port) == nil)
+        }
+        precondition(LabContract.Target(address: "10.20.30.40", port: "65535") != nil)
+        if case .readTarget? = LabContract.command(LabContract.targetRequest) {} else {
+            preconditionFailure("Target request did not round trip")
+        }
+        let encodedTarget = LabContract.targetReply(custom)
+        precondition(LabContract.readTarget(encodedTarget) == custom)
+        precondition(LabContract.readTarget(encodedTarget.dropLast()) == nil)
+        precondition(LabContract.readTarget(LabContract.targetRequest) == nil)
+        precondition(LabContract.command(encodedTarget) == nil)
+        var invalidTarget = encodedTarget
+        invalidTarget[invalidTarget.count - 2] = 0
+        invalidTarget[invalidTarget.count - 1] = 0
+        precondition(LabContract.readTarget(invalidTarget) == nil)
 
         let revision = LabContract.revision()
         let payload = Data(repeating: 0x7B, count: LabContract.maximumProfile)

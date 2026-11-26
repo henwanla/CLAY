@@ -2,10 +2,11 @@ import Foundation
 import Network
 
 enum LabProbe {
-    static func run() async -> Bool {
-        guard let port = NWEndpoint.Port(rawValue: LabContract.port) else { return false }
+    static func run(for target: LabContract.Target) async -> Bool {
+        // The fixture marker must never be sent to a user-entered endpoint.
+        guard target == LabContract.demoTarget, let port = NWEndpoint.Port(rawValue: target.port) else { return false }
         return await withCheckedContinuation { continuation in
-            Attempt(port: port, completion: continuation).start()
+            Attempt(address: target.address, port: port, completion: continuation).start()
         }
     }
 
@@ -17,8 +18,8 @@ enum LabProbe {
         private var completion: CheckedContinuation<Bool, Never>?
         private var sent = false
 
-        init(port: NWEndpoint.Port, completion: CheckedContinuation<Bool, Never>) {
-            connection = NWConnection(host: NWEndpoint.Host(LabContract.destination), port: port, using: .tcp)
+        init(address: String, port: NWEndpoint.Port, completion: CheckedContinuation<Bool, Never>) {
+            connection = NWConnection(host: NWEndpoint.Host(address), port: port, using: .tcp)
             self.completion = completion
         }
 

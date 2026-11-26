@@ -20,20 +20,28 @@ import (
 )
 
 const labProfileLimit = 128 * 1024
-const labPort = 18080
 
 var labOrigin = netip.MustParseAddr("198.18.0.1")
-var labDestination = netip.MustParseAddr("198.51.100.42")
+var labPeer = netip.MustParseAddr("198.18.0.2")
 
-// The Lab admits a single fixed test flow destination. Rule mode has one rule
-// for that destination; Global also uses the selected node. No Direct adapter,
-// system DNS hook, controller, or global tunnel settings are installed here.
-func parseLab(data []byte, mode int) (*labRoute, error) {
+func validLabTarget(target netip.AddrPort) bool {
+	ip := target.Addr()
+	return ip.Is4() && ip.IsGlobalUnicast() && ip != labOrigin && ip != labPeer &&
+		ip.As4()[0] != 0 && ip.As4()[0] < 224 && target.Port() != 0
+}
+
+// One scoped TCP endpoint is routed through the selected node in either mode.
+// A node replacement cannot change that endpoint or send it directly.
+func parseLab(data []byte, mode int, target netip.AddrPort) (*labRoute, error) {
 	if len(data) > labProfileLimit || (mode != 0 && mode != 1) {
 		return nil, errProfile
 	}
 	p, _, err := decodeProfile(data)
 	if err != nil || len(p.Proxies) != 1 || len(p.Rules) != 1 || p.Rules[0] != "MATCH,CLAY" {
+		return nil, errProfile
+	}
+	server, _ := p.Proxies[0]["server"].(string)
+	if address, err := netip.ParseAddr(server); err == nil && address.Unmap() == target.Addr() {
 		return nil, errProfile
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -83,17 +91,20 @@ func (c *labPacketConn) Close() error {
 	return c.PacketConn.Close()
 }
 
-func startLab(data []byte, mode int) (uint64, error) {
+func startLab(data []byte, mode int, target netip.AddrPort) (uint64, error) {
 	engine.Lock()
 	defer engine.Unlock()
 	if engine.live != nil {
 		return 0, errActive
 	}
-	route, err := parseLab(data, mode)
+	if !validLabTarget(target) {
+		return 0, errProfile
+	}
+	route, err := parseLab(data, mode, target)
 	if err != nil {
 		return 0, err
 	}
-	lab := &labTunnel{route: route}
+	lab := &labTunnel{route: route, target: target}
 	live, err := makeSession(lab)
 	if err != nil {
 		lab.install(nil)
@@ -110,7 +121,7 @@ func replaceLab(id uint64, data []byte, mode int) bool {
 	if live == nil || live.id != id || live.lab == nil {
 		return false
 	}
-	route, err := parseLab(data, mode)
+	route, err := parseLab(data, mode, live.lab.target)
 	if err != nil {
 		return false
 	}
@@ -132,8 +143,9 @@ type labFlow struct {
 }
 
 type labTunnel struct {
-	mu    sync.Mutex
-	route *labRoute
+	mu     sync.Mutex
+	route  *labRoute
+	target netip.AddrPort // immutable for the lifetime of the tunnel
 }
 
 func (lab *labTunnel) install(route *labRoute) {
@@ -165,7 +177,7 @@ func (lab *labTunnel) install(route *labRoute) {
 func (lab *labTunnel) NewConnection(_ context.Context, conn net.Conn, m M.Metadata) error {
 	defer conn.Close()
 	if m.Source.Fqdn != "" || m.Source.Addr.Unmap() != labOrigin || m.Destination.Fqdn != "" ||
-		m.Destination.Addr.Unmap() != labDestination || m.Destination.Port != labPort {
+		m.Destination.Addr.Unmap() != lab.target.Addr() || m.Destination.Port != lab.target.Port() {
 		return nil
 	}
 	lab.mu.Lock()
@@ -187,7 +199,7 @@ func (lab *labTunnel) NewConnection(_ context.Context, conn net.Conn, m M.Metada
 
 	ctx, cancel := context.WithTimeout(route.ctx, C.DefaultTCPTimeout)
 	remote, err := route.proxy.DialContext(ctx, &C.Metadata{NetWork: C.TCP, Type: C.TUN,
-		SrcIP: labOrigin, SrcPort: m.Source.Port, DstIP: labDestination, DstPort: labPort})
+		SrcIP: labOrigin, SrcPort: m.Source.Port, DstIP: lab.target.Addr(), DstPort: lab.target.Port()})
 	cancel()
 	if err != nil {
 		return nil

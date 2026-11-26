@@ -388,6 +388,16 @@ def window_checks(binary, directory, profile, gnome=False, plasma=False):
         until(lambda: not window.busy and window.session.state is not None)
         assert window.modes.get_active_id() == "global" and window.address.get_text()
         host.click(until, "Direct")
+        # The shared controller applies Direct, then rejects two attempts to
+        # close old connections. Neither the change nor the first refresh may
+        # claim the route is confirmed or re-enable the node/mode controls.
+        until(lambda: not window.busy and window.session.state is None)
+        assert not window.address.get_text() and not window.set_mode.get_sensitive()
+        assert "Status unconfirmed" in host.layout(until)
+        host.click(until, "Refresh status")
+        until(lambda: not window.busy and window.session.state is None)
+        assert not window.address.get_text() and "Status unconfirmed" in host.layout(until)
+        host.click(until, "Refresh status")
         until(lambda: not window.busy and window.modes.get_active_id() == "direct")
         assert "Direct mode" in window.status.get_text()
         if gnome:

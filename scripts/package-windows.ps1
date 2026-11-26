@@ -36,11 +36,13 @@ Source commit: $revision
 Requires the .NET 10 Desktop Runtime and the Swift runtime from the verified Swift toolchain.
 Extract the archive and run Clay.Windows.exe. It uses the adjacent clay-portable.exe.
 Load a local profile, select a trusted Mihomo executable, and enter its expected SHA-256.
-Set the displayed loopback proxy address in the client app. Use the tray to switch or stop.
+Use Connect Windows to apply CLAY's PAC, or set the loopback address manually.
+Use the tray to switch or stop. Stop and Quit restore settings CLAY still owns.
 
 此预览需要 .NET 10 Desktop Runtime 和经验证的 Swift 工具链所带的 Swift 运行时。
 解压后运行 Clay.Windows.exe，选择本地节点、可信的 Mihomo 并填写其 SHA-256。
-在需要代理的客户端中手动填写回环地址，可从系统托盘切换或停止代理。
+可用「连接 Windows」应用系统 PAC，也可手动填写回环地址。
+可从托盘切换或停止代理。停止或退出会恢复仍由 CLAY 管理的设置。
 
 This is an unsigned CI preview. Neither Mihomo nor any profile is bundled.
 这是未签名的 CI 预览，不包含 Mihomo 或任何节点配置。

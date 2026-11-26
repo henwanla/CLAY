@@ -16,9 +16,17 @@ Load a local profile, choose the extracted Mihomo executable, enter its verified
 
 加载本地节点文件，选择已解压的 Mihomo，填写核验过的 SHA-256，再选择节点、模式，按需导入规则文件。启动后在需要代理的应用里手动填写回环地址。关闭窗口后会话留在 Windows 托盘；托盘菜单可切节点、切模式、停止代理或退出 CLAY。界面随系统语言显示简体中文、英文或日文。
 
-This preview does not configure the Windows system proxy, register for login startup, or download subscriptions. It does not save profile paths, node credentials, or traffic history. CI builds the native Windows app and runs its redirected session bridge using a synthetic local controller. Visual layout and Explorer tray behavior need a physical Windows desktop check.
+Choose **Connect Windows** to start the session and temporarily apply CLAY's PAC to the current user's default Windows connection. If already running in manual mode, choose **Use Windows proxy** in the window or tray. Apps that follow Windows proxy settings will send non-local requests to Mihomo; locally addressed requests bypass the proxy. Rule, Global and Direct still belong to the running session and can be switched without changing the PAC URL. Apps with their own proxy configuration may need the manual address.
 
-桌面预览不会设置系统代理、注册开机启动或下载在线订阅，不保存配置路径、节点凭据和流量历史。CI 构建原生 Windows App，用合成回环控制器验收窗口所用的会话桥接；Explorer 托盘外观和实际桌面交互需另行验收。
+选择 **连接 Windows** 会启动会话，并为当前用户的默认网络临时应用 CLAY 的 PAC。已启动手动代理时，可从窗口或托盘选择 **应用到 Windows**。遵循系统代理的应用会把非本地请求交给 Mihomo；回环、本地域名和私有字面 IP 仍直连。规则／全局／直连可以在线切换，无须写入新的 PAC 地址。使用独立代理配置的应用仍可手动接入。
+
+**Restore Windows proxy** restores the prior settings and leaves the manual listener running. Stop and Quit restore the settings before closing the session. If CLAY is terminated abruptly, reopen it to recover. If Windows settings were changed separately, CLAY preserves those edits. If the current setup script still points to CLAY but the settings no longer match, remove CLAY’s script address in Windows Proxy settings and retry restoration or stop. The prior settings are encrypted locally with Windows DPAPI. The app does not save profile paths, node credentials, or traffic history.
+
+**恢复 Windows 代理设置** 会恢复原设置，保留手动代理端口。停止和退出会先恢复设置，再关闭会话。异常退出后可重新打开 CLAY 恢复；其他应用或用户后来修改的设置会保留。若当前脚本仍指向 CLAY，但其他设置已改变，请在 Windows「代理」里移除 CLAY 的脚本地址，再重试恢复或停止。原设置用 Windows DPAPI 加密保存在本机；不保存配置路径、节点凭据或流量历史。
+
+CI tests the native Windows PAC and restoration in the runner’s disposable user profile, including the native PAC evaluator, encrypted recovery, and the session bridge with a synthetic local controller. Explorer tray appearance, real browser traffic and settings managed by an organization need separate validation. This preview does not provide TUN, login startup, or remote subscription downloads.
+
+CI 在临时 Windows 用户配置中验收系统 PAC、原生 PAC 决策、加密恢复与合成会话桥接。Explorer 托盘外观、真实浏览器流量和组织管理的代理策略需另行验收。此预览不提供 TUN、开机启动或在线订阅下载。
 
 The [Windows GitHub Actions workflow](https://github.com/henwanla/CLAY/actions/workflows/portable-windows.yml) packages successful branch builds as the **CLAY-Windows-x64-preview** artifact for 14 days. Extract the ZIP, compare its SHA-256 against the accompanying file, and follow `START-HERE.txt`. The package is unsigned and requires the .NET 10 Desktop Runtime, Swift runtime and a separately verified Mihomo. It is a preview artifact, separate from the public macOS Release.
 

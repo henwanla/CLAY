@@ -26,12 +26,15 @@ internal sealed class MainWindow : Form
     private readonly Button stop = Button(L("Stop", "停止", "停止"));
     private readonly Button refresh = Button(L("Refresh status", "刷新状态", "状態を更新"));
     private readonly Button copy = Button(L("Copy address", "复制地址", "アドレスをコピー"));
+    private readonly Button system = Button("");
+    private readonly Label systemState = Label();
 
     private readonly NotifyIcon tray = new();
     private readonly ContextMenuStrip menu = new();
     private readonly ToolStripMenuItem trayStatus = new() { Enabled = false }, trayModes = new(L("Mode", "模式", "モード")),
         trayNodes = new(L("Nodes", "节点", "ノード")), trayStop = new(L("Stop proxy", "停止代理", "プロキシを停止")),
         trayExit = new(L("Quit CLAY", "退出 CLAY", "CLAY を終了"));
+    private readonly ToolStripMenuItem traySystem = new();
     private readonly System.Windows.Forms.Timer heartbeat = new() { Interval = 500 };
     private readonly Icon idleIcon = MakeIcon(Color.FromArgb(111, 122, 140)), liveIcon = MakeIcon(Color.FromArgb(29, 146, 121)),
         uncertainIcon = MakeIcon(Color.FromArgb(215, 138, 44));
@@ -39,17 +42,28 @@ internal sealed class MainWindow : Form
     private Inspection? profile;
     private string? engine, rules;
     private PortableSession? session;
+    private readonly WindowsPac? windowsPac;
+    private string? systemNotice;
     private Route? confirmed;
-    private bool busy, exiting;
+    private bool busy, exiting, exitDetected;
+    private int clockTicks;
 
     internal MainWindow(string cli)
     {
         this.cli = cli;
+        try
+        {
+            windowsPac = WindowsPac.Open();
+            if (windowsPac.Pending) ReportRelease(windowsPac.Release());
+        }
+        catch (PacRecoveryException) { systemNotice = RecoveryNeeded(); }
+        catch { systemNotice = L("Windows proxy control unavailable; manual proxy still available.",
+            "无法管理 Windows 代理；仍可使用手动代理。", "Windows プロキシを管理できません。手動設定は利用できます。"); }
         Text = "CLAY";
         Icon = idleIcon;
         StartPosition = FormStartPosition.CenterScreen;
-        ClientSize = new Size(650, 465);
-        MinimumSize = new Size(625, 475);
+        ClientSize = new Size(680, 515);
+        MinimumSize = new Size(645, 500);
         Font = new Font(SystemFonts.MessageBoxFont!.FontFamily, 10);
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(20), ColumnCount = 1 };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -58,9 +72,9 @@ internal sealed class MainWindow : Form
         heading.Font = new Font(Font.FontFamily, 23, FontStyle.Bold);
         layout.Controls.Add(heading);
         layout.Controls.Add(Label(L("Local proxy · Windows preview", "本机代理 · Windows 预览", "ローカルプロキシ · Windows プレビュー")));
-        layout.Controls.Add(Label(L("Set the proxy address in each client app. Closing this window keeps the session in the tray.",
-            "请在需要代理的应用中手动填写地址。关闭窗口后，会话保留在状态栏。",
-            "各アプリでプロキシを設定します。ウィンドウを閉じてもトレイで接続を維持します。")));
+        layout.Controls.Add(Label(L("Start manually or connect apps that follow the Windows proxy. Closing the window keeps the session in the tray.",
+            "可手动接入，也可连接采用 Windows 代理设置的应用。关闭窗口后，会话保留在托盘。",
+            "手動設定または Windows プロキシ対応アプリに接続できます。閉じると接続はトレイに残ります。")));
 
         var files = Group(L("Session inputs", "会话配置", "セッション設定"));
         var inputs = new TableLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, ColumnCount = 3, Padding = new Padding(6) };
@@ -80,10 +94,10 @@ internal sealed class MainWindow : Form
         node.AccessibleName = L("Node", "节点", "ノード");
         mode.AccessibleName = L("Routing mode", "路由模式", "ルーティングモード");
         pane.Controls.Add(Row(Label(node.AccessibleName), node, Label(mode.AccessibleName), mode));
-        pane.Controls.Add(Row(start, apply, refresh, stop));
+        pane.Controls.Add(Row(start, system, apply, refresh, stop));
         state.AccessibleName = L("Session status", "会话状态", "接続状態");
         state.Font = new Font(Font, FontStyle.Bold);
-        pane.Controls.Add(state); pane.Controls.Add(Row(address, copy));
+        pane.Controls.Add(state); pane.Controls.Add(systemState); pane.Controls.Add(Row(address, copy));
         live.Controls.Add(pane); layout.Controls.Add(live);
 
         profileLabel.Text = None(); engineLabel.Text = None(); ruleLabel.Text = None();
@@ -94,34 +108,57 @@ internal sealed class MainWindow : Form
         clearRule.Click += (_, _) => { rules = null; ruleLabel.Text = None(); UpdateControls(); };
         digest.TextChanged += (_, _) => UpdateControls();
         start.Click += async (_, _) => await StartAsync();
+        system.Click += async (_, _) => await ToggleWindowsAsync();
         apply.Click += async (_, _) => { if (node.SelectedItem is Node n && mode.SelectedItem is Mode m) await ChangeAsync(new(m.Value, n.Number)); };
         refresh.Click += async (_, _) => await WorkAsync(async () => SetConfirmed(await session!.RefreshAsync()));
         stop.Click += async (_, _) => await WorkAsync(StopAsync);
         copy.Click += (_, _) => { if (session is not null && confirmed is not null) { try { Clipboard.SetText(session.Address); } catch (ExternalException) { } } };
 
         menu.Items.Add(L("Open CLAY", "打开 CLAY", "CLAY を開く"), null, (_, _) => Reveal());
-        menu.Items.AddRange([trayStatus, new ToolStripSeparator(), trayModes, trayNodes, trayStop, trayExit]);
+        menu.Items.AddRange([trayStatus, new ToolStripSeparator(), trayModes, trayNodes, traySystem, trayStop, trayExit]);
+        traySystem.Click += async (_, _) => await ToggleWindowsAsync();
         trayStop.Click += async (_, _) => await WorkAsync(StopAsync);
-        trayExit.Click += async (_, _) => { if (busy) return; await WorkAsync(StopAsync); if (session is null) { exiting = true; Close(); } };
+        trayExit.Click += async (_, _) =>
+        {
+            if (busy) return;
+            await WorkAsync(async () =>
+            {
+                try { await StopAsync(); }
+                catch (PacRecoveryException) when (session is null && windowsPac?.Serving != true) { /* Keep the recovery record for next launch. */ }
+                exiting = true;
+            });
+            if (exiting) Close();
+        };
         tray.DoubleClick += (_, _) => Reveal();
         tray.ContextMenuStrip = menu;
         tray.Visible = true;
         heartbeat.Tick += async (_, _) =>
         {
-            if (!busy && session?.Ended == true) await WorkAsync(async () =>
+            if (busy) return;
+            if (!exitDetected && session?.Ended == true) await WorkAsync(async () =>
             {
+                exitDetected = true;
+                SetState(L("Proxy process ended", "代理进程已结束", "プロキシプロセスが終了しました"));
                 await StopAsync();
                 SetState(L("Proxy process ended", "代理进程已结束", "プロキシプロセスが終了しました"));
             });
+            else if (++clockTicks % 4 == 0 && windowsPac?.Pending == true) UpdateWindowsControls();
         };
         heartbeat.Start();
         FormClosing += (_, e) =>
         {
-            if (!exiting && e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; Hide(); }
+            if (!exiting && e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; Hide(); return; }
+            if (!exiting)
+            {
+                exiting = true;
+                try { windowsPac?.Release(); }
+                catch (PacRecoveryException) { /* Recover on the next launch if Windows is ending the session. */ }
+            }
         };
         FormClosed += (_, _) =>
         {
             heartbeat.Dispose(); tray.Visible = false; tray.Dispose(); menu.Dispose();
+            windowsPac?.Dispose();
             idleIcon.Dispose(); liveIcon.Dispose(); uncertainIcon.Dispose();
         };
         UpdateControls();
@@ -133,6 +170,10 @@ internal sealed class MainWindow : Form
     };
     private static string None() => L("Not selected", "未选择", "未選択");
     private static string Stopped() => L("Stopped", "已停止", "停止中");
+    private static string RecoveryNeeded() => L(
+        "Windows proxy recovery needed. If the settings changed, remove CLAY’s script address in Windows Proxy settings and retry.",
+        "Windows 代理待恢复。如果设置被改过，请在 Windows 代理设置中移除 CLAY 的脚本地址，然后重试。",
+        "Windows プロキシの復元が必要です。設定が変更された場合は CLAY のスクリプト URL を削除して再試行してください。");
 
     private async Task LoadAsync()
     {
@@ -148,16 +189,47 @@ internal sealed class MainWindow : Form
         });
     }
 
-    private async Task StartAsync()
+    private async Task StartAsync(bool connectWindows = false)
     {
         if (profile is null || engine is null || node.SelectedItem is not Node n || mode.SelectedItem is not Mode selected) return;
         await WorkAsync(async () =>
         {
             SetState(L("Verifying engine and starting…", "正在校验内核并启动…", "コアを検証して起動中…"));
             session = await PortableSession.StartAsync(cli, profile, engine, digest.Text.Trim(), rules, selected.Value, n.Number);
+            exitDetected = false;
             SetConfirmed(new Route(selected.Value, n.Number));
+            if (connectWindows) await EnableWindowsAsync();
         });
     }
+
+    private async Task ToggleWindowsAsync()
+    {
+        if (busy || windowsPac is null) return;
+        if (windowsPac.Pending) await WorkAsync(() => { ReportRelease(windowsPac.Release()); return Task.CompletedTask; });
+        else if (session is null) await StartAsync(connectWindows: true);
+        else if (confirmed is not null && !session.Ended) await WorkAsync(EnableWindowsAsync);
+    }
+
+    private async Task EnableWindowsAsync()
+    {
+        try
+        {
+            var script = await PortableSession.DefaultPacAsync(cli, session!.Address);
+            if (exiting || session.Ended) return;
+            windowsPac!.Enable(script);
+            systemNotice = null;
+        }
+        catch (PacRecoveryException) { systemNotice = RecoveryNeeded(); }
+        catch { systemNotice = L("Windows proxy was not enabled. Use the manual address or check Windows settings.",
+            "未启用 Windows 代理。可以手动填写地址，或检查 Windows 代理设置。", "Windows プロキシを有効にできません。手動設定または Windows 設定を確認してください。"); }
+    }
+
+    private void ReportRelease(PacRelease result) => systemNotice = result switch
+    {
+        PacRelease.Restored => L("Original Windows proxy settings restored.", "已恢复原来的 Windows 代理设置。", "元の Windows プロキシ設定を復元しました。"),
+        PacRelease.ExternalChange => L("The newer Windows proxy settings were preserved.", "已保留后来更改的 Windows 代理设置。", "変更後の Windows プロキシ設定を保持しました。"),
+        _ => systemNotice
+    };
 
     private async Task ChangeAsync(Route desired)
     {
@@ -171,6 +243,7 @@ internal sealed class MainWindow : Form
 
     private async Task StopAsync()
     {
+        if (windowsPac?.Pending == true) ReportRelease(windowsPac.Release());
         if (session is not null)
         {
             SetState(L("Stopping…", "正在停止…", "停止処理中…"));
@@ -187,6 +260,7 @@ internal sealed class MainWindow : Form
         busy = true; UpdateControls();
         try { await action(); }
         catch (ProfileChangedException) { SetState(L("Profile changed. Load nodes again.", "配置已变更，请重新加载节点。", "設定が変更されました。ノードを再読み込みしてください。")); }
+        catch (PacRecoveryException) { systemNotice = RecoveryNeeded(); if (!Visible) Reveal(); }
         catch (SessionCleanupException) { ShowUnconfirmedCleanup(); }
         catch (OperationCanceledException)
         {
@@ -240,6 +314,7 @@ internal sealed class MainWindow : Form
         apply.Enabled = running; refresh.Enabled = stop.Enabled = trayStop.Enabled = running;
         copy.Enabled = running && confirmed is not null;
         trayExit.Enabled = !busy;
+        UpdateWindowsControls();
         trayModes.Enabled = trayNodes.Enabled = running && confirmed is not null;
         ClearMenu(trayModes); ClearMenu(trayNodes);
         if (!trayModes.Enabled || confirmed is not { } current || profile is null) return;
@@ -256,6 +331,27 @@ internal sealed class MainWindow : Form
             trayNodes.DropDownItems.Add(entry);
         }
         if (profile.Nodes.Count > 12) trayNodes.DropDownItems.Add(L("All nodes…", "全部节点…", "すべてのノード…"), null, (_, _) => Reveal());
+    }
+
+    private void UpdateWindowsControls()
+    {
+        var pending = windowsPac?.Pending == true;
+        var active = false;
+        if (pending && !busy)
+        {
+            try { active = windowsPac!.Confirmed(); }
+            catch { /* Readback is unknown, so keep the recovery control visible. */ }
+        }
+        system.Text = pending ? L("Restore Windows proxy", "恢复 Windows 代理设置", "Windows プロキシを復元")
+            : session is null ? L("Connect Windows", "连接 Windows", "Windows に接続")
+            : L("Use Windows proxy", "应用到 Windows", "Windows に適用");
+        system.Enabled = !busy && windowsPac is not null && (pending || (session is null ? start.Enabled : confirmed is not null));
+        traySystem.Text = system.Text;
+        traySystem.Enabled = system.Enabled && (session is not null || pending);
+        traySystem.Checked = active;
+        systemState.Text = active ? L("Windows PAC configured for apps that follow system settings.",
+                "已配置 Windows PAC，供采用系统代理设置的应用使用。", "システム設定を使用するアプリ向けの Windows PAC を設定しました。")
+            : (pending && !busy ? RecoveryNeeded() : systemNotice ?? L("Manual · Windows settings unchanged", "手动接入 · 未启用 Windows 代理", "手動 · Windows プロキシ未設定"));
     }
 
     private static void ClearMenu(ToolStripMenuItem parent)

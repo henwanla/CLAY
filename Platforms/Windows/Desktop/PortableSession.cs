@@ -40,6 +40,37 @@ internal sealed class PortableSession : IAsyncDisposable
     internal string Address { get; private set; } = "";
     internal bool Ended => cli.HasExited;
 
+    internal static async Task<string> DefaultPacAsync(string executable, string address)
+    {
+        const string loopback = "127.0.0.1:";
+        if (!address.StartsWith(loopback, StringComparison.Ordinal) || !ushort.TryParse(address.AsSpan(loopback.Length), out var port) || port == 0)
+            throw new IOException();
+        // The shared PAC generator keeps literal local/private destinations direct
+        // and sends other traffic to Mihomo, which owns the selected mode.
+        var emptyRules = Path.GetTempFileName();
+        try
+        {
+            using var child = StartProcess(executable, ["pac-script", emptyRules, port.ToString(System.Globalization.CultureInfo.InvariantCulture)]);
+            var discard = child.StandardError.BaseStream.CopyToAsync(Stream.Null);
+            using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            try
+            {
+                var buffer = new char[8193];
+                int length = await child.StandardOutput.ReadBlockAsync(buffer.AsMemory(), limit.Token);
+                if (length is 0 or >= 8193) throw new IOException();
+                await child.WaitForExitAsync(limit.Token);
+                if (child.ExitCode != 0) throw new IOException();
+                return new string(buffer, 0, length);
+            }
+            finally
+            {
+                if (!child.HasExited) child.Kill();
+                await discard;
+            }
+        }
+        finally { File.Delete(emptyRules); }
+    }
+
     internal static async Task<Inspection> InspectAsync(string executable, string path)
     {
         path = Path.GetFullPath(path);

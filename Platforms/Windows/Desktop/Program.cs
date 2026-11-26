@@ -12,6 +12,13 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        if (args is ["--smoke-pac", var portable])
+        {
+            try { PacChecks.RunAsync(portable).GetAwaiter().GetResult(); return 0; }
+            catch (BridgeException error) { Console.Error.WriteLine($"Windows PAC check failed at {error.Step}."); return 1; }
+            catch (System.ComponentModel.Win32Exception error) { Console.Error.WriteLine($"Windows PAC check failed with Windows error {error.NativeErrorCode}."); return 1; }
+            catch (Exception error) { Console.Error.WriteLine($"Windows PAC check failed: {error.GetType().Name}."); return 1; }
+        }
         if (args is ["--smoke", var binary, var fixture])
         {
             try { SmokeAsync(binary, fixture).GetAwaiter().GetResult(); return 0; }

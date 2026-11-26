@@ -90,7 +90,7 @@ python3 scripts/smoke-subscriptions.py .build/release/CLAYCoreChecks
 
 The [GTK desktop preview](Platforms/Linux/README.md) for Linux loads local nodes, manages a loopback proxy, and switches nodes and routing modes from the window or optional tray. With a working tray, closing the window keeps a running session active. Enter the local proxy address in each app that should use it.
 
-The [Windows desktop preview](Platforms/Windows/README.md) manages a manual loopback proxy. Its tray icon keeps the session accessible after the window is closed and offers node and mode switching.
+The [Windows desktop preview](Platforms/Windows/README.md) offers a manual loopback proxy and optional Windows PAC with restoration. Its tray icon keeps the session accessible after the window is closed and offers node and mode switching.
 
 The [Android ARM64 offline preview](Platforms/Android/README.md) checks profiles and PAC rules in Simplified Chinese, English, and Japanese. The debug APK passed tests on an Android API 24 ARM64 emulator. It has no network permission or VPN support.
 

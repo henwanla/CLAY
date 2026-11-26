@@ -62,7 +62,8 @@ static BOOL private_dir(WCHAR out[PATH_CAP]) {
     user = malloc(size);
     if (!user || !GetTokenInformation(token, TokenUser, user, size, &size) ||
         !ConvertSidToStringSidW(user->User.Sid, &sid)) goto done;
-    if (_snwprintf_s(rule, 256, _TRUNCATE, L"D:P(A;OICI;FA;;%ls)", sid) < 0 ||
+    // An ACE has separate object and inherited-object fields before the SID.
+    if (_snwprintf_s(rule, 256, _TRUNCATE, L"D:P(A;OICI;FA;;;%ls)", sid) < 0 ||
         !ConvertStringSecurityDescriptorToSecurityDescriptorW(rule, SDDL_REVISION_1, &descriptor, NULL)) goto done;
     if (FAILED(SHGetKnownFolderPath(&local_app_data, KF_FLAG_DEFAULT, NULL, &root)) || !root ||
         !GetVolumePathNameW(root, volume, PATH_CAP) || GetDriveTypeW(volume) != DRIVE_FIXED ||

@@ -15,6 +15,8 @@ from session import DesktopError, MODES, Session, inspect
 
 
 class Window(Gtk.Window):
+    __gtype_name__ = "ClayDesktopWindow"
+
     def __init__(self, binary):
         super().__init__(title="CLAY for Linux")
         self.set_default_size(640, 420)

@@ -69,6 +69,7 @@ final class VpnChecks {
             await(test, R.string.vpn_ready, 1, "global", "foreground start");
             require(fetch("198.51.100.42", 18080).endsWith(proof + "-A"), "system TCP uses first node");
             if (!fault.isEmpty()) return verifyFailure(test, activity, fault, direct, proof);
+            PendingIntent stop = currentNotificationStop(activity);
             ClayVpnService.Snapshot[] oldTile = new ClayVpnService.Snapshot[1];
             test.runOnMainSync(() -> {
                 oldTile[0] = ClayVpnService.state();
@@ -101,12 +102,7 @@ final class VpnChecks {
             for (int i = 0; i < 40 && !activity.isDestroyed(); i++) SystemClock.sleep(50);
             require(activity.isDestroyed(), "foreground Activity destroyed");
             require(fetch("198.51.100.42", 18080).endsWith(proof + "-B"), "VPN stays up after Activity closes");
-            PendingIntent stop = null;
-            for (StatusBarNotification notice : activity.getSystemService(NotificationManager.class).getActiveNotifications()) {
-                Notification.Action[] actions = notice.getNotification().actions;
-                if (actions != null && actions.length == 1) stop = actions[0].actionIntent;
-            }
-            require(stop != null, "notification stop action available");
+            require(stop.equals(currentNotificationStop(activity)), "the same session retains its stop action after node and mode changes");
             stop.send();
             await(test, R.string.vpn_stopped, 0, null, "notification stop cleaned session");
             Intent reopen = new Intent(Intent.ACTION_MAIN).setClassName(test.getTargetContext(), MainActivity.class.getName())
@@ -118,7 +114,18 @@ final class VpnChecks {
                 require(fetch("198.51.100.42", 18080).endsWith(proof + "-A"), "restarted tunnel forwards traffic");
                 test.runOnMainSync(() -> require(!ClayVpnService.stopFromTile(oldTile[0]),
                         "outdated tile action cannot stop a new session"));
-                require(fetch("198.51.100.42", 18080).endsWith(proof + "-A"), "stale action leaves live route intact");
+                PendingIntent fresh = currentNotificationStop(returned);
+                require(!fresh.equals(stop), "each session has a distinct system stop action");
+                boolean cancelled = false;
+                try { stop.send(); }
+                catch (PendingIntent.CanceledException expected) { cancelled = true; }
+                require(cancelled, "retired notification action was cancelled");
+                require(fetch("198.51.100.42", 18080).endsWith(proof + "-A"), "retired background controls leave the new route intact");
+                fresh.send();
+                await(test, R.string.vpn_stopped, 0, null, "fresh notification stops the restarted tunnel");
+                assertClean(returned);
+                start(test, returned, first, second, proof);
+                await(test, R.string.vpn_ready, 1, "global", "restart for quick settings check");
                 test.runOnMainSync(() -> {
                     require(ClayVpnService.stopFromTile(ClayVpnService.state()), "current tile can request stop");
                     require(ClayVpnTile.action(ClayVpnService.state()) == ClayVpnTile.Action.WAIT,
@@ -132,6 +139,23 @@ final class VpnChecks {
             require(fetch(IPV6_FIXTURE, ipv6).endsWith(proof + "-V6"), "ordinary IPv6 resumes after stopping VPN");
             return "CLAY_ANDROID_VPN_PASS";
         } finally { test.runOnMainSync(ClayVpnService::stopFromPanel); }
+    }
+
+    private static PendingIntent currentNotificationStop(Activity activity) {
+        for (StatusBarNotification entry : activity.getSystemService(NotificationManager.class).getActiveNotifications()) {
+            Notification notice = entry.getNotification();
+            if (notice.actions == null || notice.actions.length != 1) continue;
+            require(notice.visibility == Notification.VISIBILITY_SECRET && notice.publicVersion == null,
+                    "notification is secret on the lock screen");
+            require(activity.getText(R.string.vpn_title).toString().contentEquals(notice.extras.getCharSequence(Notification.EXTRA_TITLE)),
+                    "notification title has no connection details");
+            require(activity.getText(R.string.vpn_notification_active).toString().contentEquals(notice.extras.getCharSequence(Notification.EXTRA_TEXT)),
+                    "notification describes only confirmed tunnel state without profile information");
+            require(activity.getText(R.string.vpn_stop).toString().contentEquals(notice.actions[0].title),
+                    "notification has a localized stop action");
+            return notice.actions[0].actionIntent;
+        }
+        throw new AssertionError("notification stop action available");
     }
 
     private static void verifyCancel(Instrumentation test, Activity activity, int first, int second) throws Exception {

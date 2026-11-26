@@ -17,7 +17,7 @@
     <string name="vpn_ended">VPN プロセスが終了し、通常の通信に戻ります。</string>
     <string name="vpn_revoked">Android によって VPN の許可が取り消されました。</string>
     <string name="vpn_invalid">ノード設定を貼り付け、ノードと有効な IPv4 DNS を指定してください。</string>
-    <string name="vpn_notification">IPv4 トンネルセッション · CLAY で状態を確認</string>
+    <string name="vpn_notification_active">IPv4 トンネル稼働中 · 詳細は CLAY で確認</string>
     <string name="vpn_cleanup_failed">VPN の終了を確認できません。システムの VPN 設定を確認してください。</string>
     <string name="vpn_tile_title">CLAY VPN</string>
     <string name="vpn_tile_open">CLAY を開く</string>

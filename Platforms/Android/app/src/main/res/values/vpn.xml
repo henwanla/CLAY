@@ -17,7 +17,7 @@
     <string name="vpn_ended">The VPN process ended. Normal networking resumes.</string>
     <string name="vpn_revoked">Android revoked VPN access.</string>
     <string name="vpn_invalid">Paste a profile, choose a node, and enter a valid IPv4 DNS server.</string>
-    <string name="vpn_notification">IPv4 tunnel session · Open CLAY to view status</string>
+    <string name="vpn_notification_active">IPv4 tunnel active · Open CLAY for details</string>
     <string name="vpn_cleanup_failed">Could not confirm VPN cleanup. Check VPN settings before trying again.</string>
     <string name="vpn_tile_title">CLAY VPN</string>
     <string name="vpn_tile_open">Open CLAY</string>

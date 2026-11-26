@@ -17,7 +17,7 @@
     <string name="vpn_ended">VPN 进程已结束，系统恢复普通网络。</string>
     <string name="vpn_revoked">Android 已撤销 VPN 权限。</string>
     <string name="vpn_invalid">请粘贴节点配置、选择节点并填写有效的 IPv4 DNS。</string>
-    <string name="vpn_notification">IPv4 隧道会话 · 打开 CLAY 查看状态</string>
+    <string name="vpn_notification_active">IPv4 隧道已接管 · 打开 CLAY 查看详情</string>
     <string name="vpn_cleanup_failed">未能确认 VPN 已完全退出。请先检查系统 VPN 设置再重试。</string>
     <string name="vpn_tile_title">CLAY VPN</string>
     <string name="vpn_tile_open">打开 CLAY</string>

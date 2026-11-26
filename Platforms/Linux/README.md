@@ -27,7 +27,7 @@ swift build -c release --product clay-portable
 1. Pick a local profile or a downloaded subscription file and click **Load nodes**. The main window shows each node's name and protocol alongside its import number, so you can distinguish nodes with the same protocol. The tray keeps only the number. If you edit the file, load it again.
 2. Choose the extracted Mihomo executable for your architecture and enter the expected SHA-256 of the executable. If the publisher supplies only an archive checksum, verify the archive first, then use `sha256sum` on the extracted executable.
 3. Select a node and routing mode. For Rule mode, you can choose a file of CLAY PAC rules. **Start session** starts a manual proxy. A loopback address appears after Mihomo reports the requested settings. Enter it in individual applications as their HTTP or SOCKS5 proxy.
-4. To change nodes or mode in the running session, select the new value and click **Apply**. If a change cannot be confirmed, click **Refresh status** to check the current state. Click **Stop** to end the session or **Quit CLAY** to stop and exit.
+4. To change nodes or mode in the running session, select the new value and click **Apply**. A real change closes the connections tracked by Mihomo; applications may reconnect. Selecting the already active value leaves those connections alone. If the change is unconfirmed, **Refresh status** retries any pending connection cleanup before showing the route. Click **Stop** to end the session or **Quit CLAY** to stop and exit.
 
 For subscriptions, install `python3-cryptography` and `libsecret-tools` and unlock your desktop Secret Service keyring (for example GNOME Keyring). While stopped, open **Subscriptions…**, enter a name and HTTPS address, then choose **Download and save** and **Use saved nodes**. **Refresh** updates the encrypted cache only after the new nodes pass validation; choose **Use saved nodes** again to apply it. Choose a local file and click **Load nodes** to switch back.
 
@@ -55,7 +55,7 @@ Linux 桌面预览可以读取本地节点配置、启动通过 SHA-256 校验�
 
 1. 选择本地配置或已下载的订阅文件，点 **Load nodes**。主窗口显示节点名称、协议和导入编号，方便分辨同一协议下的多个节点。托盘只显示编号。修改文件后请重新加载。
 2. 选择解压后的 Mihomo 可执行文件，填写该文件的预期 SHA-256。若上游只提供压缩包校验值，先验证压缩包，再计算解压后的文件哈希。
-3. 选好节点和模式，按需为 Rule 模式添加 CLAY PAC 规则文件。**Start session** 启动手动代理，内核确认后会显示 HTTP／SOCKS5 本机地址，可在需要代理的应用中填写。
+3. 选好节点和模式，按需为 Rule 模式添加 CLAY PAC 规则文件。**Start session** 启动手动代理，内核确认后会显示 HTTP／SOCKS5 本机地址，可在需要代理的应用中填写。实际切换会关闭内核跟踪的已有连接，重复选择当前项不会中断。切换未确认时，用 **Refresh status** 重试清理并读回状态。
 4. 运行时可通过 **Apply** 切换，结果未确认时可用 **Refresh status** 重新核对。点击 **Stop** 停止代理，**Quit CLAY** 停止并退出。
 
 订阅功能需要 `python3-cryptography`、`libsecret-tools` 以及已解锁的系统钥匙串（Secret Service，如 GNOME Keyring）。停止会话后打开 **Subscriptions…**，填写名称和 HTTPS 地址，点击 **Download and save** 后用 **Use saved nodes** 加载。**Refresh** 只有在新节点通过验证后才会替换缓存，刷新后须重新选择才会生效。需要切回本地配置时，选择文件并点击 **Load nodes**。

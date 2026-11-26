@@ -22,6 +22,7 @@ typedef struct fixture_state {
     char secret[65], nodes[2][42], mode[8];
     unsigned selected;
     int ignore_direct;
+    int drain_failures, pending, readback;
 } fixture_state;
 
 static void respond(SOCKET fd, fixture_state *state) {
@@ -58,23 +59,36 @@ static void respond(SOCKET fd, fixture_state *state) {
         }
         body[0] = 0;
         if (!allowed) status = "401 Unauthorized";
-        else if (!strncmp(request, "GET /configs ", 13))
+        else if (!strncmp(request, "GET /configs ", 13)) {
+            if (state->pending == 1) state->readback = 1;
             sprintf_s(body, sizeof(body), "{\"mode\":\"%s\"}", state->mode);
-        else if (!strncmp(request, "GET /proxies/CLAY ", 18))
+        } else if (!strncmp(request, "GET /proxies/CLAY ", 18)) {
+            if (state->pending == 2) state->readback = 1;
             sprintf_s(body, sizeof(body), "{\"now\":\"%s\"}", state->nodes[state->selected]);
-        else if (!strncmp(request, "PATCH /configs ", 15)) {
+        } else if (!strncmp(request, "PATCH /configs ", 15)) {
             status = "204 No Content";
             if (!strcmp(payload, "{\"mode\":\"rule\"}")) strcpy_s(state->mode, sizeof(state->mode), "rule");
             else if (!strcmp(payload, "{\"mode\":\"global\"}")) strcpy_s(state->mode, sizeof(state->mode), "global");
             else if (!strcmp(payload, "{\"mode\":\"direct\"}")) {
                 if (!state->ignore_direct) strcpy_s(state->mode, sizeof(state->mode), "direct");
             } else status = "400 Bad Request";
+            state->pending = 1;
+            state->readback = 0;
         } else if (!strncmp(request, "PUT /proxies/CLAY ", 18)) {
             status = "400 Bad Request";
             for (unsigned i = 0; i < _countof(state->nodes) && state->nodes[i][0]; ++i) {
                 sprintf_s(expected, sizeof(expected), "{\"name\":\"%s\"}", state->nodes[i]);
-                if (!strcmp(payload, expected)) { state->selected = i; status = "204 No Content"; break; }
+                if (!strcmp(payload, expected)) {
+                    if (state->selected == i) break;
+                    state->selected = i; state->pending = 2; state->readback = 0;
+                    status = "204 No Content";
+                    break;
+                }
             }
+        } else if (!strncmp(request, "DELETE /connections ", sizeof("DELETE /connections ") - 1)) {
+            if (!state->pending || !state->readback) status = "409 Conflict";
+            else if (state->drain_failures > 0) { --state->drain_failures; status = "503 Service Unavailable"; }
+            else { state->pending = 0; state->readback = 0; status = "204 No Content"; }
         } else status = "404 Not Found";
     }
     char response[256];
@@ -121,6 +135,7 @@ int wmain(int argc, wchar_t **argv) {
     if (!state.nodes[0][0]) return 23;
     strcpy_s(state.mode, sizeof(state.mode), "global");
     state.ignore_direct = strstr(json, "ignore-update-dummy") != NULL;
+    state.drain_failures = strstr(json, "retry-drain-dummy") != NULL ? 2 : 0;
     // Any child output (including the synthetic test credential) must be dropped.
     fprintf(stderr, "fixture-child-output: %s\n", json);
     fflush(stderr);

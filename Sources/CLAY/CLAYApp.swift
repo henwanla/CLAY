@@ -114,21 +114,21 @@ private struct StatusMenu: View {
             }
         }
         Divider()
-        Menu("流量模式：\(model.routingMode.label)") {
+        Menu("流量模式：\(model.routingConfirmed ? model.routingMode.label : "未确认")") {
             ForEach(CoreRoutingMode.allCases) { mode in
                 Button { model.selectRoutingMode(mode) } label: {
-                    if mode == model.routingMode { Label(mode.label, systemImage: "checkmark") }
+                    if model.routingConfirmed && mode == model.routingMode { Label(mode.label, systemImage: "checkmark") }
                     else { Text(mode.label) }
                 }
             }
         }.disabled(model.busy)
         if !model.nodes.isEmpty {
-            Menu("节点：\(model.chosen.map(nodeMenuTitle) ?? "未选")") {
+            Menu("节点：\(model.routingConfirmed ? model.chosen.map(nodeMenuTitle) ?? "未选" : "未确认")") {
                 ForEach(quickNodes) { node in
                     Button { model.select(node) } label: {
-                        if node.id == model.active { Label(nodeMenuTitle(node), systemImage: "checkmark") }
+                        if model.routingConfirmed && node.id == model.active { Label(nodeMenuTitle(node), systemImage: "checkmark") }
                         else { Text(nodeMenuTitle(node)) }
-                    }.disabled(model.busy || node.id == model.active)
+                    }.disabled(model.busy || (model.routingConfirmed && node.id == model.active))
                 }
                 Divider()
                 Button("查看全部 \(model.nodes.count) 个节点…") { showDashboard(.nodes) }
@@ -309,11 +309,12 @@ private struct Dashboard: View {
         VStack(alignment: .leading, spacing: 16) {
             TrafficDashboard(model: model)
             panel("流量模式", symbol: "arrow.triangle.branch") {
-                Picker("流量模式", selection: Binding(get: { model.routingMode }, set: model.selectRoutingMode)) {
-                    ForEach(CoreRoutingMode.allCases) { mode in Text(mode.label).tag(mode) }
+                Picker("流量模式", selection: Binding<CoreRoutingMode?>(get: { model.routingConfirmed ? model.routingMode : nil },
+                    set: { if let mode = $0 { model.selectRoutingMode(mode) } })) {
+                    ForEach(CoreRoutingMode.allCases) { mode in Text(mode.label).tag(Optional(mode)) }
                 }.pickerStyle(.segmented).labelsHidden().disabled(model.busy)
                 Text(routingExplanation).font(.callout).foregroundStyle(.secondary)
-                if model.routingMode == .rule && model.runningRules.map({ $0 != pac.policy }) == true {
+                if model.routingConfirmed && model.routingMode == .rule && model.runningRules.map({ $0 != pac.policy }) == true {
                     Text("规则有未应用的改动。重启代理后会载入新规则；自定义 PAC 仍可从 PAC 页面单独更新。")
                         .font(.callout).foregroundStyle(.orange)
                 }
@@ -324,11 +325,11 @@ private struct Dashboard: View {
             }
             panel("当前节点", symbol: "arrow.triangle.branch") {
                 HStack {
-                    Text(model.chosen?.name ?? "尚未选择节点").font(.headline).lineLimit(1)
+                    Text(model.routingConfirmed ? model.chosen?.name ?? "尚未选择节点" : "节点未确认").font(.headline).lineLimit(1)
                     Spacer()
                     Button(pac.modeLabel) { page = .pac }
                 }
-                if let n = model.chosen { Text("\(n.protocolName.uppercased()) · \(n.transport) · \(n.security)").foregroundStyle(.secondary) }
+                if model.routingConfirmed, let n = model.chosen { Text("\(n.protocolName.uppercased()) · \(n.transport) · \(n.security)").foregroundStyle(.secondary) }
                 if let proxy = model.proxyAddress {
                     HStack { Text(proxy).monospaced().textSelection(.enabled); Button("复制") { model.copy(proxy) } }
                     Text("HTTP 和 SOCKS5 共用这个端口，可填入需要手动配置的应用。")
@@ -342,6 +343,7 @@ private struct Dashboard: View {
         }
     }
     private var routingExplanation: String {
+        guard model.routingConfirmed else { return model.status }
         switch model.routingMode {
         case .rule: return "进入本机代理的流量按「PAC 规则」中的规则及未命中行为分流。"
         case .global: return "进入本机代理的流量全部走当前节点。"
@@ -371,15 +373,16 @@ private struct Dashboard: View {
                 if visibleNodes.isEmpty { Text("没有匹配的节点。").foregroundStyle(.secondary) }
             }
             ForEach(visibleNodes) { n in
+                let current = model.routingConfirmed && model.active == n.id
                 HStack(spacing: 13) {
-                    Image(systemName: model.active == n.id ? "largecircle.fill.circle" : "circle").foregroundStyle(model.active == n.id ? clay : .secondary)
+                    Image(systemName: current ? "largecircle.fill.circle" : "circle").foregroundStyle(current ? clay : .secondary)
                     VStack(alignment: .leading, spacing: 3) {
                         Text(n.name).font(.headline).lineLimit(1)
                         Text("\(n.protocolName.uppercased()) · \(n.transport) · \(n.security)").font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
                     if let probe = model.probes[n.id] { Text(probe.text).font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
-                    Button("选择") { model.select(n) }.disabled(model.busy || model.active == n.id)
+                    Button("选择") { model.select(n) }.disabled(model.busy || current)
                 }.padding(12).background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
             }
             importReport

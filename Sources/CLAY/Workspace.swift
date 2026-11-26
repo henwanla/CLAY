@@ -32,6 +32,7 @@ enum Probe {
     @Published var active: UUID?
     @Published private(set) var engine: URL?
     @Published private(set) var routingMode: CoreRoutingMode = .global
+    @Published private(set) var routingConfirmed = true
     @Published private(set) var runningRules: PACPolicy?
     @Published var issues: [ImportError: Int] = [:]
     @Published var hasImported = false
@@ -326,19 +327,23 @@ enum Probe {
     }
 
     func selectRoutingMode(_ mode: CoreRoutingMode) {
-        guard !busy, mode != routingMode else { return }
+        guard !busy else { return }
         guard let core else { rememberRoutingMode(mode); return }
         busy = true
+        routingConfirmed = false
+        status = "正在确认流量模式与旧连接状态…"
         sessionTask = Task {
             defer { busy = false; sessionTask = nil }
             do {
                 try await core.setRoutingMode(mode)
+                let actual = try await core.confirmedRouting()
                 guard self.core === core, !Task.isCancelled else { return }
-                rememberRoutingMode(mode)
+                guard actual.mode == mode else { throw SessionError.routingFailed }
+                try showConfirmedRoute(actual)
                 status = "流量模式已切换为\(mode.label)"
             } catch {
                 guard self.core === core, !Task.isCancelled else { return }
-                status = "切换流量模式失败；请检查会话或重新启动。"
+                status = "未确认流量模式与旧连接状态；请重试切换或停止会话。"
                 checkHealth()
             }
         }
@@ -347,6 +352,13 @@ enum Probe {
     private func rememberRoutingMode(_ mode: CoreRoutingMode) {
         routingMode = mode
         preferences.set(mode.rawValue, forKey: Self.routingPreference)
+    }
+
+    private func showConfirmedRoute(_ route: (mode: CoreRoutingMode, nodeName: String)) throws {
+        guard let node = nodes.first(where: { $0.localName == route.nodeName }) else { throw SessionError.selectionFailed }
+        active = node.id
+        if routingMode != route.mode { rememberRoutingMode(route.mode) }
+        routingConfirmed = true
     }
 
     func publishPAC(to endpoint: PACControl.Endpoint) {
@@ -405,6 +417,7 @@ enum Probe {
         connectionTask?.cancel(); connectionTask = nil; connectionActionBusy = false; connectionMessage = ""
         telemetry = nil; trafficHistory = []; telemetryStale = false; trafficSegment = 0
         core?.stopAndWait(); core = nil; proxyAddress = nil; runningRules = nil
+        routingConfirmed = true
         if sourceChangePending { applySelectedSource() }
     }
     @discardableResult func shutdown() async -> Bool {
@@ -427,15 +440,20 @@ enum Probe {
         guard !busy else { return }
         guard let core else { active = node.id; return }
         busy = true
+        routingConfirmed = false
+        status = "正在确认节点与旧连接状态…"
         sessionTask = Task {
             defer { busy = false; sessionTask = nil }
             do {
                 try await core.switchTo(node)
+                let actual = try await core.confirmedRouting()
                 guard self.core === core, !Task.isCancelled else { return }
-                active = node.id; status = "节点已切换"
+                guard actual.nodeName == node.localName else { throw SessionError.selectionFailed }
+                try showConfirmedRoute(actual)
+                status = "节点已切换"
             } catch {
                 guard self.core === core, !Task.isCancelled else { return }
-                status = "未能确认节点切换；请重试或重新启动。"; checkHealth()
+                status = "未确认节点与旧连接状态；请重试切换或停止会话。"; checkHealth()
             }
         }
     }

@@ -196,6 +196,7 @@ enum LinuxMihomoRuntime {
     private static func interact(names: [Int: String], controller: LinuxSessionController, child: Child,
                                  signals: TerminationSignals) throws -> Int32 {
         var input = LinuxInteractiveInput()
+        var controller = controller
         while true {
             try signals.check()
             guard child.isAlive() else { throw LinuxMihomoError.childExited }
@@ -210,6 +211,7 @@ enum LinuxMihomoRuntime {
                     case "help" where fields.count == 1:
                         reply = "commands: status | mode rule|global|direct | node N | quit"
                     case "status" where fields.count == 1:
+                        try controller.finishRoutingChange()
                         let mode = try controller.mode()
                         let active = try controller.selectedNode()
                         guard let number = names.first(where: { $0.value == active })?.key else { throw LinuxControllerError.unconfirmed }
@@ -394,6 +396,7 @@ private struct LinuxInterruption: Error { let code: Int32 }
 
 private struct LinuxSessionController {
     let port: Int, secret: String, directory: String, null: Int32, signals: TerminationSignals
+    var drainPending = false
     let ownsController: () -> Bool
 
     private struct Config: Decodable { let mode: String }
@@ -412,14 +415,28 @@ private struct LinuxSessionController {
         return response.now
     }
 
-    func setMode(_ mode: CoreRoutingMode) throws {
-        _ = try request(path: "/configs", expectedStatus: 204, method: "PATCH", body: ["mode": mode.rawValue])
-        guard try self.mode() == mode else { throw LinuxControllerError.unconfirmed }
+    mutating func setMode(_ mode: CoreRoutingMode) throws {
+        if try self.mode() != mode {
+            drainPending = true
+            _ = try request(path: "/configs", expectedStatus: 204, method: "PATCH", body: ["mode": mode.rawValue])
+            guard try self.mode() == mode else { throw LinuxControllerError.unconfirmed }
+        }
+        try finishRoutingChange()
     }
 
-    func selectNode(_ name: String) throws {
-        _ = try request(path: "/proxies/CLAY", expectedStatus: 204, method: "PUT", body: ["name": name])
-        guard try selectedNode() == name else { throw LinuxControllerError.unconfirmed }
+    mutating func selectNode(_ name: String) throws {
+        if try selectedNode() != name {
+            drainPending = true
+            _ = try request(path: "/proxies/CLAY", expectedStatus: 204, method: "PUT", body: ["name": name])
+            guard try selectedNode() == name else { throw LinuxControllerError.unconfirmed }
+        }
+        try finishRoutingChange()
+    }
+
+    mutating func finishRoutingChange() throws {
+        guard drainPending else { return }
+        _ = try request(path: "/connections", expectedStatus: 204, method: "DELETE")
+        drainPending = false
     }
 
     private func request(path: String, expectedStatus: Int, method: String = "GET", body: [String: String]? = nil) throws -> Data {

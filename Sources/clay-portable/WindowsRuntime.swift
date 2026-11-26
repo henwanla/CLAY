@@ -127,7 +127,7 @@ enum WindowsMihomoRuntime {
     }
 
     private static func interact(session: OpaquePointer, secret: String, names: [Int: String]) -> Int32 {
-        let controller = WindowsSessionController(session: session, secret: secret)
+        var controller = WindowsSessionController(session: session, secret: secret)
         var input = [UInt8](repeating: 0, count: 512), line = [UInt8](), overlong = false
         while true {
             var count: UInt32 = 0
@@ -153,6 +153,7 @@ enum WindowsMihomoRuntime {
                     case "help" where fields.count == 1:
                         reply = "commands: status | mode rule|global|direct | node N | quit"
                     case "status" where fields.count == 1:
+                        try controller.finishRoutingChange()
                         let mode = try controller.mode(), active = try controller.node()
                         guard let number = names.first(where: { $0.value == active })?.key else { throw WindowsControlError.unconfirmed }
                         reply = "mode=\(mode.rawValue) node=\(number)"
@@ -202,6 +203,7 @@ private enum WindowsControlError: Error {
 
 private struct WindowsSessionController {
     let session: OpaquePointer, secret: String
+    var drainPending = false
 
     func mode() throws -> CoreRoutingMode {
         guard let value = try request(Int32(CLAY_CTL_GET_MODE))["mode"] as? String,
@@ -214,14 +216,31 @@ private struct WindowsSessionController {
         return active
     }
 
-    func changeMode(_ mode: CoreRoutingMode) throws {
-        _ = try request(Int32(CLAY_CTL_SET_MODE), body: "{\"mode\":\"\(mode.rawValue)\"}")
-        guard try self.mode() == mode else { throw WindowsControlError.unconfirmed }
+    mutating func changeMode(_ mode: CoreRoutingMode) throws {
+        if try self.mode() != mode {
+            try change(Int32(CLAY_CTL_SET_MODE), body: "{\"mode\":\"\(mode.rawValue)\"}")
+            guard try self.mode() == mode else { throw WindowsControlError.unconfirmed }
+        }
+        try finishRoutingChange()
     }
 
-    func changeNode(_ id: String) throws {
-        _ = try request(Int32(CLAY_CTL_SET_NODE), body: "{\"name\":\"\(id)\"}")
-        guard try node() == id else { throw WindowsControlError.unconfirmed }
+    mutating func changeNode(_ id: String) throws {
+        if try node() != id {
+            try change(Int32(CLAY_CTL_SET_NODE), body: "{\"name\":\"\(id)\"}")
+            guard try node() == id else { throw WindowsControlError.unconfirmed }
+        }
+        try finishRoutingChange()
+    }
+
+    private mutating func change(_ operation: Int32, body: String) throws {
+        drainPending = true
+        _ = try request(operation, body: body)
+    }
+
+    mutating func finishRoutingChange() throws {
+        guard drainPending else { return }
+        _ = try request(Int32(CLAY_CTL_CLOSE_CONNECTIONS))
+        drainPending = false
     }
 
     private func request(_ operation: Int32, body: String? = nil) throws -> [String: Any] {
@@ -238,7 +257,7 @@ private struct WindowsSessionController {
         }
         if status == Int32(CLAY_WIN_CONTROLLER) { throw WindowsControlError.unconfirmed }
         guard status == Int32(CLAY_WIN_OK) else { throw WindowsControlError.sessionEnded(status) }
-        if body != nil { return [:] }
+        if body != nil || operation == Int32(CLAY_CTL_CLOSE_CONNECTIONS) { return [:] }
         guard let object = try? JSONSerialization.jsonObject(with: Data(response.prefix(Int(count)))) as? [String: Any] else {
             throw WindowsControlError.unconfirmed
         }

@@ -60,7 +60,9 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
             let args = CommandLine.arguments
             try SubscriptionStorageChecks.run()
             if args.count == 2, args[1] == "--storage-only" { return }
-            guard args.count == 4 else { throw CheckFailed("expected loopback origin, Mihomo, and temporary catalog directory") }
+            guard args.count == 6, let first = UInt16(args[4]), let second = UInt16(args[5]), first != second else {
+                throw CheckFailed("expected loopback origin, Mihomo, temporary catalog directory and two fixture ports")
+            }
             let directory = URL(filePath: args[3], directoryHint: .isDirectory)
             let store = SubscriptionStore(directory: directory, keyStore: TestSubscriptionKeyStore())
             let recoveryDirectory = directory.appendingPathComponent("pac-recovery")
@@ -81,10 +83,12 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
             }
             await model.shutdown()
             try await checkSystemConnection(engine: engine, origin: args[1], directory: directory.appendingPathComponent("system-connect"))
+            try await checkNodeSwitch(engine: engine, origin: args[1], ports: [first, second])
             print("PASS running listener stays available through refresh and failure; stop and offline reload use the last successful list")
             print("PASS background health monitor notices exit of the owned Mihomo and clears its listener without a window")
             print("PASS local PAC published with the live proxy port and was removed before the proxy listener")
             print("PASS rule, global, and direct mode changes affect real loopback requests without changing the listening address")
+            print("PASS node and mode changes close established TCP; reselecting the active node or mode leaves it open")
             print("PASS a mismatched executable fingerprint is rejected before launching the core")
         } catch {
             print("FAIL \(error)")
@@ -128,8 +132,15 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
         model.selectRoutingMode(.direct)
         try await wait("direct mode") { !model.busy }
         try require(model.routingMode == .direct && proxyFetch(origin, through: listener), "direct mode did not connect to the loopback origin")
+        let tunnel = try openTunnel(proxy: localPort, origin: origin)
+        defer { close(tunnel) }
+        try checkTunnel(tunnel)
+        model.selectRoutingMode(.direct)
+        try await wait("selecting the active mode") { !model.busy }
+        try checkTunnel(tunnel)
         model.selectRoutingMode(.global)
         try await wait("global mode") { !model.busy }
+        try requireClosed(tunnel, after: "mode switch")
         try require(model.routingMode == .global && model.proxyAddress == listener && !proxyFetch(origin, through: listener),
                     "returning to global mode did not preserve the listening address and selected node")
         model.publishPAC(to: .local)
@@ -355,6 +366,84 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
         do { try p.run(); p.waitUntilExit(); return p.terminationStatus == 0 } catch { return false }
     }
 
+    @MainActor private static func checkNodeSwitch(engine: URL, origin: String, ports: [UInt16]) async throws {
+        let nodes = ProfileImporter.read(ports.map {
+            "vless://4624a73a-98ce-43e7-8868-4deba224779c@127.0.0.1:\($0)?type=tcp#fixture"
+        }.joined(separator: "\n")).profiles
+        try require(nodes.count == 2, "expected two VLESS fixtures")
+        let core = try await CoreSession.start(engine: engine, nodes: nodes, active: nodes[0],
+                                               expectedFingerprint: EngineIdentity.fingerprint(engine), mode: .global)
+        defer { core.stopAndWait() }
+        let old = try openTunnel(proxy: UInt16(core.proxyPort), origin: origin)
+        defer { close(old) }
+        try checkTunnel(old, response: "node1")
+        try await core.switchTo(nodes[0])
+        try checkTunnel(old, response: "node1")
+        try await core.switchTo(nodes[1])
+        try requireClosed(old, after: "node switch")
+        let new = try openTunnel(proxy: UInt16(core.proxyPort), origin: origin)
+        defer { close(new) }
+        try checkTunnel(new, response: "node2")
+    }
+
+    private static func requireClosed(_ descriptor: Int32, after change: String) throws {
+        var byte: UInt8 = 0
+        let received = recv(descriptor, &byte, 1, 0)
+        try require(received == 0 || (received == -1 && errno == ECONNRESET), "an established connection survived the confirmed \(change)")
+    }
+
+    private static func openTunnel(proxy: UInt16, origin: String) throws -> Int32 {
+        guard let endpoint = URL(string: origin), endpoint.host == "127.0.0.1", let port = endpoint.port else {
+            throw CheckFailed("expected a loopback fixture")
+        }
+        let descriptor = socket(AF_INET, SOCK_STREAM, 0)
+        guard descriptor >= 0 else { throw CheckFailed("could not open probe socket") }
+        do {
+            var timeout = timeval(tv_sec: 2, tv_usec: 0), noSigPipe: Int32 = 1
+            try require(setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &timeout, UInt32(MemoryLayout.size(ofValue: timeout))) == 0,
+                        "could not bound probe reads")
+            try require(setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, UInt32(MemoryLayout.size(ofValue: noSigPipe))) == 0,
+                        "could not disable SIGPIPE for probe")
+            try require(connectLoopback(descriptor, to: proxy), "could not reach the mixed listener")
+            let authority = "127.0.0.1:\(port)"
+            try sendProbe("CONNECT \(authority) HTTP/1.1\r\nHost: \(authority)\r\n\r\n", through: descriptor)
+            let header = try readHeader(descriptor)
+            try require(header.hasPrefix("HTTP/1.1 200 "), "mixed listener did not create a TCP tunnel")
+            return descriptor
+        } catch { close(descriptor); throw error }
+    }
+
+    private static func checkTunnel(_ descriptor: Int32, response: String = "alive") throws {
+        try sendProbe("GET /keepalive HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n", through: descriptor)
+        let header = try readHeader(descriptor)
+        try require(header.hasPrefix("HTTP/1.1 200 "), "established tunnel did not reach the fixture")
+        var body = [UInt8]()
+        for _ in 0..<5 {
+            var byte: UInt8 = 0
+            try require(recv(descriptor, &byte, 1, 0) == 1, "keep-alive response ended early")
+            body.append(byte)
+        }
+        try require(body == Array(response.utf8), "established tunnel used the wrong route")
+    }
+
+    private static func sendProbe(_ text: String, through descriptor: Int32) throws {
+        let data = Data(text.utf8)
+        let count = data.withUnsafeBytes { send(descriptor, $0.baseAddress, $0.count, 0) }
+        try require(count == data.count, "could not send the short probe")
+    }
+
+    private static func readHeader(_ descriptor: Int32) throws -> String {
+        var bytes = [UInt8]()
+        let end: [UInt8] = [13, 10, 13, 10]
+        while bytes.count < 2048 {
+            var byte: UInt8 = 0
+            guard recv(descriptor, &byte, 1, 0) == 1 else { break }
+            bytes.append(byte)
+            if bytes.suffix(4).elementsEqual(end) { return String(decoding: bytes, as: UTF8.self) }
+        }
+        throw CheckFailed("did not receive a bounded probe header")
+    }
+
     @MainActor private static func wait(_ activity: String, until isDone: () -> Bool) async throws {
         let deadline = ContinuousClock.now + .seconds(8)
         while !isDone() {
@@ -371,6 +460,10 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
         let descriptor = socket(AF_INET, SOCK_STREAM, 0)
         guard descriptor >= 0 else { return false }
         defer { close(descriptor) }
+        return connectLoopback(descriptor, to: port)
+    }
+
+    private static func connectLoopback(_ descriptor: Int32, to port: UInt16) -> Bool {
         var address = sockaddr_in()
         address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
         address.sin_family = sa_family_t(AF_INET)

@@ -130,9 +130,15 @@ foreach ($path in @($env:CLAY_ACL_DIR, $env:CLAY_ACL_FILE)) {
                 assert ready, "interactive listener ownership not confirmed"
                 proxy, control = map(int, ready.groups())
                 send("sta")
-                send("tus\nnode 2\nstatus\nmode rule\nmode direct\nstatus\n")
+                send("tus\nnode 1\nnode 2\nstatus\nstatus\nmode rule\nmode direct\nstatus\n")
                 expect("mode=global node=1")
-                expect("node=2")
+                expect("node=1")  # Already-selected node must not call either write endpoint.
+                if password == "retry-drain-dummy":
+                    expect("error=controller-unconfirmed")  # Selection applied, drain did not.
+                    expect("error=controller-unconfirmed")  # Status must not confirm the new node yet.
+                else:
+                    expect("node=2")
+                    expect("mode=global node=2")
                 expect("mode=global node=2")
                 expect("mode=rule")
                 denied = password == "ignore-update-dummy"
@@ -163,6 +169,7 @@ foreach ($path in @($env:CLAY_ACL_DIR, $env:CLAY_ACL_FILE)) {
 
         for finish in ("quit", "eof", "signal"):
             run_interactive("ignore-update-dummy" if finish == "eof" else "valid-dummy", finish)
+        run_interactive("retry-drain-dummy", "quit")
     print("Windows runtime smoke passed: verified engine, private ACL, authenticated switching and cleanup")
 
 

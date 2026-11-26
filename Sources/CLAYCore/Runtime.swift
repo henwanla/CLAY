@@ -55,6 +55,7 @@ private final class ControllerRedirectPolicy: NSObject, URLSessionTaskDelegate, 
     private let client: URLSession
     private var trafficMeter = TrafficMeter()
     private var telemetryRequestInFlight = false
+    private var drainPending = false
     public var isRunning: Bool { process.isRunning }
     public var proxyAddress: String { "http://127.0.0.1:\(proxyPort)" }
 
@@ -144,7 +145,8 @@ private final class ControllerRedirectPolicy: NSObject, URLSessionTaskDelegate, 
         try? FileManager.default.removeItem(at: directory)
     }
 
-    private func call(_ path: String, method: String = "GET", body: Data? = nil, query: [URLQueryItem] = [], maxBytes: Int = 65_536) async throws -> Data {
+    private func call(_ path: String, method: String = "GET", body: Data? = nil, query: [URLQueryItem] = [], maxBytes: Int = 65_536,
+                      expectedStatus: Int? = nil) async throws -> Data {
         guard !Task.isCancelled, await ownsListener(controlPort), !Task.isCancelled else { throw SessionError.controlUnavailable }
         var parts = URLComponents(); parts.scheme = "http"; parts.host = "127.0.0.1"; parts.port = controlPort; parts.path = path
         if !query.isEmpty { parts.queryItems = query }
@@ -153,7 +155,8 @@ private final class ControllerRedirectPolicy: NSObject, URLSessionTaskDelegate, 
         request.setValue("Bearer \(secret)", forHTTPHeaderField: "Authorization")
         if body != nil { request.setValue("application/json", forHTTPHeaderField: "Content-Type") }
         let (bytes, response) = try await client.bytes(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+        guard let http = response as? HTTPURLResponse,
+              (expectedStatus.map { http.statusCode == $0 } ?? (200..<300).contains(http.statusCode)),
               response.expectedContentLength <= Int64(maxBytes) else { throw SessionError.controlUnavailable }
         var data = Data()
         if response.expectedContentLength > 0 { data.reserveCapacity(Int(response.expectedContentLength)) }
@@ -187,29 +190,56 @@ private final class ControllerRedirectPolicy: NSObject, URLSessionTaskDelegate, 
     public func closeAllConnections() async throws { try await closeConnections("/connections") }
 
     private func closeConnections(_ path: String) async throws {
-        do { _ = try await call(path, method: "DELETE") }
+        do { _ = try await call(path, method: "DELETE", expectedStatus: 204) }
         catch {
             if Task.isCancelled { throw CancellationError() }
             throw SessionError.closeConnectionsFailed
         }
     }
 
-    public func switchTo(_ node: NodeProfile) async throws {
+    private func selectedNodeName() async throws -> String {
         struct Selection: Decodable { let now: String }
+        return try JSONDecoder().decode(Selection.self, from: await call("/proxies/CLAY")).now
+    }
+
+    private func currentMode() async throws -> CoreRoutingMode {
+        struct Configuration: Decodable { let mode: String }
+        let value = try JSONDecoder().decode(Configuration.self, from: await call("/configs")).mode.lowercased()
+        guard let mode = CoreRoutingMode(rawValue: value) else { throw SessionError.routingFailed }
+        return mode
+    }
+
+    public func confirmedRouting() async throws -> (mode: CoreRoutingMode, nodeName: String) {
+        guard !drainPending else { throw SessionError.closeConnectionsFailed }
+        return (try await currentMode(), try await selectedNodeName())
+    }
+
+    public func switchTo(_ node: NodeProfile) async throws {
         do {
-            _ = try await call("/proxies/CLAY", method: "PUT", body: JSONEncoder().encode(["name": node.localName]))
-            let actual = try await call("/proxies/CLAY")
-            guard try JSONDecoder().decode(Selection.self, from: actual).now == node.localName else { throw SessionError.selectionFailed }
+            if try await selectedNodeName() != node.localName {
+                drainPending = true
+                _ = try await call("/proxies/CLAY", method: "PUT", body: JSONEncoder().encode(["name": node.localName]))
+                guard try await selectedNodeName() == node.localName else { throw SessionError.selectionFailed }
+            }
+            try await finishRoutingChange()
         } catch { throw SessionError.selectionFailed }
     }
 
     public func setRoutingMode(_ mode: CoreRoutingMode) async throws {
-        struct Configuration: Decodable { let mode: String }
         do {
-            _ = try await call("/configs", method: "PATCH", body: JSONEncoder().encode(["mode": mode.rawValue]))
-            let actual = try await call("/configs")
-            guard try JSONDecoder().decode(Configuration.self, from: actual).mode.lowercased() == mode.rawValue else { throw SessionError.routingFailed }
+            if try await currentMode() != mode {
+                drainPending = true
+                _ = try await call("/configs", method: "PATCH", body: JSONEncoder().encode(["mode": mode.rawValue]))
+                guard try await currentMode() == mode else { throw SessionError.routingFailed }
+            }
+            try await finishRoutingChange()
         } catch { throw SessionError.routingFailed }
+    }
+
+    private func finishRoutingChange() async throws {
+        guard drainPending else { return }
+        try await closeAllConnections()
+        drainPending = false
     }
 
     public func delay(_ node: NodeProfile, target: URL) async throws -> Int {

@@ -1,5 +1,10 @@
 # 更新记录 / Changelog
 
+## 开发中 / Unreleased
+
+- macOS、Windows 和 Linux 实际切换节点或流量模式后，等待内核关闭已有跟踪连接；重复选择当前项不会中断。状态未确认时不会显示切换成功。
+- On macOS, Windows, and Linux, CLAY waits for the core to close tracked connections after a node or routing mode change. Reselecting the active option keeps connections open. CLAY reports an unconfirmed state if it cannot verify the switch.
+
 ## 0.3.2 · 预览版 / Preview
 
 - macOS 的「连接 macOS」现在将非本地请求交给当前的规则／全局／直连模式。可从 PAC 页面单独应用自定义 PAC；macOS 尚未切换到新地址时，CLAY 保留旧监听。模式和节点切换由内核读回确认。

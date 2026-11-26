@@ -2,16 +2,38 @@
 """Exercise the actual subscription fetcher using only a loopback HTTP server."""
 import argparse
 import base64
+from contextlib import ExitStack
 import http.server
 from pathlib import Path
+import socketserver
 import subprocess
 import tempfile
 import threading
+from uuid import UUID
 
 
 LINK = b"vless://4624a73a-98ce-43e7-8868-4deba224779c@127.0.0.1:1234#local"
 CHUNK = b"a" * 65536
 CHUNK_COUNT = 33
+TEST_ACCOUNT = UUID("4624a73a-98ce-43e7-8868-4deba224779c").bytes
+
+
+class RouteNode(socketserver.StreamRequestHandler):
+    """Minimal VLESS TCP fixture that answers only the expected test destination."""
+
+    def handle(self):
+        self.connection.settimeout(8)
+        try:
+            header = b"\x00" + TEST_ACCOUNT + b"\x00\x01" + self.server.origin_port.to_bytes(2, "big") + b"\x01\x7f\x00\x00\x01"
+            if self.rfile.read(len(header)) != header:
+                return
+            self.wfile.write(b"\x00\x00")
+            while self.rfile.readline(512) == b"GET /keepalive HTTP/1.1\r\n":
+                if self.rfile.readline(512) != b"Host: 127.0.0.1\r\n" or self.rfile.readline(4) != b"\r\n":
+                    return
+                self.wfile.write(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n" + self.server.marker)
+        except OSError:
+            pass
 
 
 class Fixture(http.server.BaseHTTPRequestHandler):
@@ -19,6 +41,10 @@ class Fixture(http.server.BaseHTTPRequestHandler):
         route = self.path.partition("?")[0]
         if route == "/plain":
             self.send_body(LINK)
+        elif route == "/keepalive":
+            self.protocol_version = "HTTP/1.1"
+            self.close_connection = False
+            self.send_body(b"alive")
         elif route == "/base64":
             self.send_body(base64.b64encode(LINK))
         elif route == "/clash-yaml":
@@ -116,8 +142,17 @@ def main():
         try:
             url = f"http://127.0.0.1:{server.server_port}"
             if engine:
-                with tempfile.TemporaryDirectory(prefix="clay-workspace-") as tmp:
-                    subprocess.run([executable, url, engine, Path(tmp) / "catalog"], check=True, timeout=45)
+                with ExitStack() as stack:
+                    tmp = stack.enter_context(tempfile.TemporaryDirectory(prefix="clay-workspace-"))
+                    ports = []
+                    for marker in (b"node1", b"node2"):
+                        node = stack.enter_context(socketserver.ThreadingTCPServer(("127.0.0.1", 0), RouteNode))
+                        node.daemon_threads = True
+                        node.origin_port, node.marker = server.server_port, marker
+                        threading.Thread(target=node.serve_forever, daemon=True).start()
+                        stack.callback(node.shutdown)
+                        ports.append(str(node.server_address[1]))
+                    subprocess.run([executable, url, engine, Path(tmp) / "catalog", *ports], check=True, timeout=55)
             else:
                 subprocess.run([executable, "--subscription-fixture", url], check=True, timeout=45)
                 if server.yaml_downloads != 1:

@@ -50,7 +50,7 @@ Path(REPORT).write_text(json.dumps([str(directory), os.getpid(), proxy_port, con
 if MODE == "control":
     names = [proxy["name"] for proxy in config["proxies"]]
     assert config["proxy-groups"][0]["proxies"] == names
-    state = {"mode": config["mode"], "now": names[0]}
+    state = {"mode": config["mode"], "now": names[0], "pending": False, "readback": False, "failures": 0}
 
     class Controller(BaseHTTPRequestHandler):
         def send(self, status, payload=None):
@@ -69,8 +69,10 @@ if MODE == "control":
         def do_GET(self):
             if self.authenticated():
                 if self.path == "/configs":
+                    state["readback"] |= state["pending"] == "mode"
                     self.send(200, {"mode": state["mode"].title()})
                 elif self.path == "/proxies/CLAY":
+                    state["readback"] |= state["pending"] == "node"
                     self.send(200, {"now": state["now"]})
                 else:
                     self.send(404)
@@ -79,6 +81,10 @@ if MODE == "control":
             if self.authenticated():
                 value = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 assert self.path == "/configs" and set(value) == {"mode"}
+                assert value["mode"] != state["mode"], "no-op wrote to controller"
+                state.update(pending="mode", readback=False)
+                if value["mode"] == "direct":
+                    state["failures"] = 2
                 if value["mode"] != "rule":  # Acknowledge rule without applying it.
                     state["mode"] = value["mode"]
                 self.send(204)
@@ -87,10 +93,25 @@ if MODE == "control":
             if self.authenticated():
                 value = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 assert self.path == "/proxies/CLAY" and set(value) == {"name"}
+                assert value["name"] != state["now"], "no-op wrote to controller"
+                state.update(pending="node", readback=False)
                 if value["name"] != names[1]:
+                    state["readback"] = True  # Rejected before readback.
                     self.send(403)  # Include rejected mutation separately from stale readback.
                     return
                 state["now"] = names[1]
+                self.send(204)
+
+        def do_DELETE(self):
+            if not self.authenticated():
+                return
+            if self.path != "/connections" or not state["pending"] or not state["readback"]:
+                self.send(409)
+            elif state["failures"]:
+                state["failures"] -= 1
+                self.send(503)
+            else:
+                state.update(pending=False, readback=False)
                 self.send(204)
 
     proxy = socket.socket()
@@ -240,9 +261,14 @@ def run_checks(binary):
             assert output[0] == f"mihomo=ready proxy=127.0.0.1:{proxy} controller=127.0.0.1:{control}"
             for request, expected in [
                 ("status", "mode=global node=2"),
+                ("node 2", "node=2"),
+                ("mode global", "mode=global"),
                 ("node 1", "node=1"),
-                ("mode direct", "mode=direct"),
+                ("mode direct", "error=controller-unconfirmed"),
+                ("status", "error=controller-unconfirmed"),
+                ("status", "mode=direct node=1"),
                 ("mode rule", "error=controller-unconfirmed"),
+                ("status", "mode=direct node=1"),
                 ("node 2", "error=controller-unconfirmed"),
                 ("node 99", "error=unavailable-node"),
                 ("x" * 150 + "node 2", "error=invalid-command"),

@@ -425,13 +425,14 @@ int32_t clay_win_control(clay_win_session *s, int32_t operation, const char *sec
     *count = 0;
     int32_t status = control_health(s);
     if (status != CLAY_WIN_OK) return status;
-    static const WCHAR *verbs[] = {L"GET", L"GET", L"PATCH", L"PUT"};
-    static const WCHAR *paths[] = {L"/configs", L"/proxies/CLAY", L"/configs", L"/proxies/CLAY"};
-    if (operation < CLAY_CTL_GET_MODE || operation > CLAY_CTL_SET_NODE || !capacity ||
+    static const WCHAR *verbs[] = {L"GET", L"GET", L"PATCH", L"PUT", L"DELETE"};
+    static const WCHAR *paths[] = {L"/configs", L"/proxies/CLAY", L"/configs", L"/proxies/CLAY", L"/connections"};
+    if (operation < CLAY_CTL_GET_MODE || operation > CLAY_CTL_CLOSE_CONNECTIONS || !capacity ||
         strlen(secret) != 64 || strspn(secret, "0123456789abcdef") != 64) return CLAY_WIN_CONTROLLER;
+    BOOL has_body = operation == CLAY_CTL_SET_MODE || operation == CLAY_CTL_SET_NODE;
     BOOL change = operation >= CLAY_CTL_SET_MODE;
     size_t length = body ? strlen(body) : 0;
-    if ((change && (!length || length > 256)) || (!change && length)) return CLAY_WIN_CONTROLLER;
+    if ((has_body && (!length || length > 256)) || (!has_body && length)) return CLAY_WIN_CONTROLLER;
     status = CLAY_WIN_CONTROLLER;
     HINTERNET session = WinHttpOpen(L"CLAY", WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_NO_PROXY_NAME,
                                     WINHTTP_NO_PROXY_BYPASS, 0), connection = NULL, request = NULL;
@@ -451,7 +452,8 @@ int32_t clay_win_control(clay_win_session *s, int32_t operation, const char *sec
     DWORD http = 0, size = sizeof(http);
     if (!WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
                              WINHTTP_HEADER_NAME_BY_INDEX, &http, &size, WINHTTP_NO_HEADER_INDEX)) goto done;
-    if ((change && http != 204 && http != 200) || (!change && http != 200)) goto done;
+    if ((operation == CLAY_CTL_CLOSE_CONNECTIONS && http != 204) ||
+        (has_body && http != 204 && http != 200) || (!change && http != 200)) goto done;
     if (!change) {
         ULONGLONG deadline = GetTickCount64() + 1600;
         for (;;) {

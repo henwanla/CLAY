@@ -47,7 +47,7 @@ Stop if either hash differs. In Settings (**设置**) → Choose Mihomo (**选�
 
 ## Routing and app setup
 
-Choose a routing mode from Overview or the menu bar. **Rule** uses the loaded policy from PAC Rules; **Global** uses the selected node; **Direct** connects to the destination without a node. Connect macOS sends non-local requests to the core, so switching modes takes effect without changing macOS proxy settings again. Existing connections may keep their previous routes. Loopback, local names, and private addresses bypass this system connection. Restart the proxy to load edited rules.
+Choose a routing mode from Overview or the menu bar. **Rule** uses the loaded policy from PAC Rules; **Global** uses the selected node; **Direct** connects to the destination without a node. Connect macOS sends non-local requests to the core, so switching modes takes effect without changing macOS proxy settings again. On the development branch, switching nodes or modes closes existing connections tracked by the core so apps can reconnect. Traffic that bypasses the proxy is unaffected. Existing connections may keep their previous routes in public v0.3.2. Loopback, local names, and private addresses bypass this system connection. Restart the proxy to load edited rules.
 
 | Mode | How to use it | Scope |
 | --- | --- | --- |

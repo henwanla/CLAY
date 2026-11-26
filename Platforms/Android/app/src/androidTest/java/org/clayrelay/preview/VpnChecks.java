@@ -66,6 +66,7 @@ final class VpnChecks {
             });
             checkIPv6Blocked(ipv6);
             checkDns(proof, 73);
+            test.runOnMainSync(() -> edit(activity, MainActivity.ID_NODE_INPUT).setText("changed draft"));
             select(test, activity, 2, 1);
             await(test, R.string.vpn_ready, 2, "global", "confirmed node change");
             require(fetch("198.51.100.42", 18080).endsWith(proof + "-B"), "system TCP uses second node");
@@ -240,8 +241,8 @@ final class VpnChecks {
     }
 
     private static void select(Instrumentation test, Activity activity, int node, int mode) {
+        NodePickerChecks.choose(test, activity, VpnPanel.ID_NODE, node, node == 1 ? "Fixture-A" : "Fixture-B");
         test.runOnMainSync(() -> {
-            edit(activity, VpnPanel.ID_NODE).setText(Integer.toString(node));
             ((Spinner) activity.findViewById(VpnPanel.ID_MODE)).setSelection(mode);
             activity.findViewById(VpnPanel.ID_APPLY).performClick();
         });

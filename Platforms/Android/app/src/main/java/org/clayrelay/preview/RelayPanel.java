@@ -3,7 +3,6 @@ package org.clayrelay.preview;
 import android.app.Activity;
 import android.os.Handler;
 import android.os.Looper;
-import android.text.InputType;
 import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
@@ -27,7 +26,8 @@ final class RelayPanel {
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Activity activity;
-    private final EditText rules, index;
+    private final EditText rules;
+    private final NodePicker picker;
     private final NodeInput nodes;
     private final Spinner mode;
     private final CheckBox direct, bypass;
@@ -42,12 +42,8 @@ final class RelayPanel {
         TextView description = new TextView(activity);
         description.setText(R.string.relay_intro);
         card.addView(description);
-        index = new EditText(activity);
-        index.setId(ID_NODE); index.setSaveEnabled(false);
-        index.setInputType(InputType.TYPE_CLASS_NUMBER); index.setSingleLine(true);
-        index.setHint(R.string.relay_index); index.setContentDescription(activity.getString(R.string.relay_index));
-        index.setText("1");
-        card.addView(index);
+        picker = new NodePicker(activity, nodes, ID_NODE);
+        card.addView(picker);
         mode = new Spinner(activity);
         mode.setId(ID_MODE); mode.setSaveEnabled(false);
         mode.setContentDescription(activity.getString(R.string.relay_mode));
@@ -111,11 +107,14 @@ final class RelayPanel {
     }
 
     private void buttons() {
+        picker.allow(!busy && (!hasSession || session.running()));
         start.setEnabled(!busy && !hasSession);
         apply.setEnabled(!busy && hasSession && session.running());
         stop.setEnabled(!busy && hasSession);
         show.setVisibility(!busy && ready != null ? View.VISIBLE : View.GONE);
     }
+
+    void hidePicker() { picker.hide(); }
 
     void hideCredentials() {
         credentials.setText(""); credentials.setVisibility(View.GONE);
@@ -123,10 +122,8 @@ final class RelayPanel {
 
     private void change(boolean update) {
         if (destroyed || busy) return;
-        final int node;
-        try { node = Integer.parseInt(index.getText().toString().trim()); }
-        catch (NumberFormatException error) { status.setText(R.string.relay_invalid); return; }
-        if (node < 1 || node > 100 || (!update && (!nodes.available() || rules.length() > 12_000))) {
+        final int node = picker.selected();
+        if (!update && (!nodes.available() || rules.length() > 12_000)) {
             status.setText(R.string.relay_invalid); return;
         }
         String requested = MODES[mode.getSelectedItemPosition()];
@@ -162,9 +159,11 @@ final class RelayPanel {
             main.post(() -> {
                 if (destroyed) return;
                 busy = false; hasSession = cleanupPending;
+                if (!hasSession) picker.sessionEnded();
                 if (error) status.setText(cleanupPending ? R.string.relay_unconfirmed : R.string.relay_failed);
                 else if (confirmed != null) {
                     ready = confirmed;
+                    picker.session(confirmed.labels, confirmed.node);
                     status.setText(activity.getString(R.string.relay_ready, confirmed.proxy, confirmed.node,
                             activity.getString(confirmed.mode.equals("rule") ? R.string.relay_rule :
                                     confirmed.mode.equals("global") ? R.string.relay_global : R.string.relay_direct)));
@@ -177,6 +176,7 @@ final class RelayPanel {
 
     void destroy() {
         destroyed = true;
+        picker.destroy();
         main.removeCallbacks(watch);
         status.setText("");
         ready = null;

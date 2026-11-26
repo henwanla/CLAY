@@ -41,13 +41,13 @@ public func relayConfig(
     // Mihomo reads this as YAML. Preserve the Swift encoding rather than
     // re-serializing the nested object with Android's slash-escaping JSON writer.
     guard let engine = try? JSONSerialization.data(withJSONObject: config, options: [.withoutEscapingSlashes]),
-          let data = try? JSONSerialization.data(withJSONObject: ["engineConfig": String(decoding: engine, as: UTF8.self), "nodeIDs": ids]),
+          let data = try? JSONSerialization.data(withJSONObject: ["engineConfig": String(decoding: engine, as: UTF8.self), "nodeIDs": ids, "nodeLabels": profiles.map(pickerLabel)]),
           data.count <= capacity else { return -1 }
     data.copyBytes(to: output, count: data.count)
     return Int32(data.count)
 }
 
-// The JNI adapter owns the memory; only sanitized JSON may cross back into Java.
+// Operations 0 and 1 return redacted previews. Operation 2 is for the protected, in-app node picker.
 @_cdecl("clay_android_preview")
 public func preview(
     _ operation: Int32,
@@ -72,6 +72,7 @@ public func preview(
             } else {
                 result = ["error": "invalidHost"]
             }
+        case 2: result = ["nodeLabels": ProfileImporter.read(source).profiles.map(pickerLabel)]
         default: result = ["error": "previewFailed"]
         }
     } else {
@@ -81,6 +82,18 @@ public func preview(
           data.count <= outputCapacity else { return -1 }
     data.copyBytes(to: output, count: data.count)
     return Int32(data.count)
+}
+
+// Display labels have no structured credential fields. Strip controls and hide
+// pasted URLs in names; keep the labels in the protected window and in memory.
+private func pickerLabel(_ profile: NodeProfile) -> String {
+    let safe = profile.name.unicodeScalars.lazy.filter {
+        !CharacterSet.controlCharacters.contains($0) && !CharacterSet.newlines.contains($0)
+    }.prefix(48)
+    let title = String(String.UnicodeScalarView(safe)).trimmingCharacters(in: .whitespacesAndNewlines)
+    let kind = profile.protocolName == "ss" ? "Shadowsocks" : profile.protocolName.uppercased()
+    let detail = "\(kind) / \(profile.transport.uppercased())"
+    return title.isEmpty || profile.name.contains("://") ? detail : "\(title) · \(detail)"
 }
 
 private func decode(_ bytes: UnsafePointer<UInt8>?, _ count: Int32, max: Int) -> String? {

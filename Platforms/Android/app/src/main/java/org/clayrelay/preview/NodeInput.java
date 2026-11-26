@@ -1,5 +1,7 @@
 package org.clayrelay.preview;
 
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.widget.EditText;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
@@ -11,16 +13,29 @@ final class NodeInput {
     private byte[] selected;
     private String selectedID, selectedLabel;
 
-    NodeInput(EditText manual) { this.manual = manual; }
+    private Runnable listener;
+
+    NodeInput(EditText manual) {
+        this.manual = manual;
+        manual.addTextChangedListener(new TextWatcher() {
+            public void beforeTextChanged(CharSequence text, int start, int count, int after) { }
+            public void onTextChanged(CharSequence text, int start, int before, int count) { }
+            public void afterTextChanged(Editable text) { if (selected == null) changed(); }
+        });
+    }
+
+    void onChange(Runnable listener) { this.listener = listener; }
+    private void changed() { if (listener != null) listener.run(); }
     String subscriptionID() { return selectedID; }
     String subscriptionLabel() { return selectedLabel; }
     boolean available() { return selected != null || manual.length() > 0 && manual.length() <= SubscriptionDownload.MAX_BYTES; }
 
     void use(SubscriptionStore.Record entry) {
-        clearSubscription();
+        if (selected != null) Arrays.fill(selected, (byte) 0);
         selected = entry.data.clone();
         selectedID = entry.info.id;
         selectedLabel = entry.info.label;
+        changed();
     }
 
     byte[] snapshot() {
@@ -33,7 +48,9 @@ final class NodeInput {
     }
 
     void clearSubscription() {
-        if (selected != null) Arrays.fill(selected, (byte) 0);
+        if (selected == null) return;
+        Arrays.fill(selected, (byte) 0);
         selected = null; selectedID = null; selectedLabel = null;
+        changed();
     }
 }

@@ -39,7 +39,10 @@
     <string name="clear">Clear</string>
     <string name="relay_title">Local proxy preview</string>
     <string name="relay_intro">Uses the pasted nodes and the rule list above. Enter the address and session credentials in the app you want to proxy.</string>
-    <string name="relay_index">Node number (in import order)</string>
+    <string name="node_picker_title">Select node</string>
+    <string name="node_picker_default">Select node · first by default</string>
+    <string name="node_picker_selected">%1$d · %2$s</string>
+    <string name="node_picker_empty">No compatible nodes · select again</string>
     <string name="relay_mode">Routing mode</string>
     <string name="relay_rule">Rule</string>
     <string name="relay_global">Global</string>
@@ -51,7 +54,7 @@
     <string name="relay_starting">Starting or updating the local session…</string>
     <string name="relay_stopping">Stopping the local session…</string>
     <string name="relay_ended">The local process ended.</string>
-    <string name="relay_invalid">Choose a valid node number and check the rule list.</string>
+    <string name="relay_invalid">Check the selected node and rule list.</string>
     <string name="relay_failed">Could not start or stop the local session. Check the node and rules.</string>
     <string name="relay_unconfirmed">Could not confirm the change. Retry Apply or stop the session.</string>
     <string name="relay_ready">Proxy 127.0.0.1:%1$d · Node %2$d · %3$s</string>

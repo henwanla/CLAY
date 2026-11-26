@@ -13,6 +13,8 @@ import android.os.Handler;
 import android.os.Looper;
 import java.io.File;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -43,8 +45,12 @@ public final class ClayVpnService extends VpnService {
         final int message, node;
         final String mode;
         final boolean busy;
+        final List<String> labels;
         Snapshot(int message, int node, String mode, boolean busy) {
-            this.message = message; this.node = node; this.mode = mode; this.busy = busy;
+            this(message, node, mode, busy, Collections.emptyList());
+        }
+        Snapshot(int message, int node, String mode, boolean busy, List<String> labels) {
+            this.message = message; this.node = node; this.mode = mode; this.busy = busy; this.labels = labels;
         }
     }
 
@@ -150,7 +156,7 @@ public final class ClayVpnService extends VpnService {
             try {
                 RelaySession.State current = engine.refresh();
                 if (!engine.contains(node)) { MAIN.post(() -> {
-                    if (!ending && owner == this) publish(new Snapshot(R.string.relay_invalid, current.node, current.mode, false));
+                    if (!ending && owner == this) publish(new Snapshot(R.string.relay_invalid, current.node, current.mode, false, current.labels));
                 }); return; }
                 RelaySession.State confirmed = engine.change(node, mode);
                 MAIN.post(() -> { if (!ending && owner == this) confirmed(confirmed); });
@@ -159,7 +165,7 @@ public final class ClayVpnService extends VpnService {
     }
 
     private void confirmed(RelaySession.State state) {
-        publish(new Snapshot(R.string.vpn_ready, state.node, state.mode, false));
+        publish(new Snapshot(R.string.vpn_ready, state.node, state.mode, false, state.labels));
     }
 
     private void finish(int message) {

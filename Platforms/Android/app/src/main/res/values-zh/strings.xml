@@ -35,7 +35,10 @@
     <string name="clear">清空</string>
     <string name="relay_title">本机代理预览</string>
     <string name="relay_intro">使用上面粘贴的节点和规则。请在需要代理的应用中手动填入地址和本次会话凭据。</string>
-    <string name="relay_index">节点编号（按导入顺序）</string>
+    <string name="node_picker_title">选择节点</string>
+    <string name="node_picker_default">选择节点 · 默认第一个</string>
+    <string name="node_picker_selected">%1$d · %2$s</string>
+    <string name="node_picker_empty">没有兼容的节点 · 重新选择</string>
     <string name="relay_mode">流量模式</string>
     <string name="relay_rule">规则</string>
     <string name="relay_global">全局</string>
@@ -47,7 +50,7 @@
     <string name="relay_starting">正在启动或更新本机会话…</string>
     <string name="relay_stopping">正在停止本机会话…</string>
     <string name="relay_ended">本机进程已退出。</string>
-    <string name="relay_invalid">请检查节点编号和规则列表。</string>
+    <string name="relay_invalid">请检查所选节点和规则列表。</string>
     <string name="relay_failed">未能启动或停止本机会话。请检查节点和规则。</string>
     <string name="relay_unconfirmed">未能确认修改。请重试或停止代理。</string>
     <string name="relay_ready">代理 127.0.0.1:%1$d · 节点 %2$d · %3$s</string>

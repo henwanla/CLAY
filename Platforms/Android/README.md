@@ -98,6 +98,12 @@ python3 Platforms/Android/smoke-portable.py \
 
 可用 `--adb` 和 `--adb-port` 指定隔离的 ADB 安装及端口。测试只使用 `/data/local/tmp` 的随机临时目录，退出时清理。首次实测在单独 ADB 端口的无窗口模拟器中执行，未连接真机。API 24 的老加载器会报告新版 NDK 的两个 ELF 元数据提示；脚本只过滤原样匹配的提示，其余成功命令的标准错误仍会使测试失败。
 
+### 节点选择 / Node picker
+
+本机代理和 VPN 都可以点「选择节点」，查看当前来源的名称、协议和传输方式。默认选首个兼容节点。已连接时，从该会话的节点列表选择并点「应用节点和模式」；编辑粘贴文本或改用订阅缓存只影响下次启动，运行中的节点列表和连接保持原样。普通节点预览和系统磁贴不显示私密名称；选择窗口受 Android 截屏保护。
+
+In Relay and VPN, **Select node** lists local display names, protocols, and transports. The first compatible node is selected by default. While connected, choose from the active session's list and tap **Apply node and mode**. Editing pasted input or selecting another cache affects the next session. The node picker is protected from screenshots; the ordinary preview and system tile omit names.
+
 ### VPN 技术预览 / VPN technical preview
 
 另一个 ARM64 调试 APK（Android 8.0+，包名 `org.clayrelay.vpn`）可和离线版及本机代理版共存。先选择订阅缓存或粘贴节点，填入可选规则和可信的 IPv4 DNS，选择节点与模式，点「启动 VPN」并确认 Android 系统提示。关闭界面后由前台服务继续运行，可在通知、快捷设置磁贴或应用内停止。节点和模式从内核读回，变更时会结束现有连接。规则更新需重新启动会话。

@@ -64,8 +64,9 @@ final class RelayChecks {
                 ((CompoundButton) activity.findViewById(MainActivity.ID_PAC_DIRECT)).setChecked(false);
                 ((CompoundButton) activity.findViewById(MainActivity.ID_PAC_BYPASS)).setChecked(false);
                 ((Spinner) activity.findViewById(RelayPanel.ID_MODE)).setSelection(2);
-                activity.findViewById(RelayPanel.ID_START).performClick();
             });
+            NodePickerChecks.choose(test, activity, RelayPanel.ID_NODE, 1, "Fixture-A");
+            test.runOnMainSync(() -> activity.findViewById(RelayPanel.ID_START).performClick());
             String status = await(test, activity, RelayPanel.ID_APPLY, RelayPanel.ID_STATUS, "relay ready");
             Matcher address = Pattern.compile("127\\.0\\.0\\.1:([0-9]{1,5})").matcher(status);
             require(address.find(), "reported loopback address");
@@ -82,11 +83,9 @@ final class RelayChecks {
                     "proxy rejects wrong credentials");
             require(fetch(local, port, origin.getLocalPort(), password, "direct forwarding").contains(marker),
                     "authenticated HTTP traffic forwarded");
-            test.runOnMainSync(() -> {
-                ((EditText) activity.findViewById(RelayPanel.ID_NODE)).setText("2");
-                ((Spinner) activity.findViewById(RelayPanel.ID_MODE)).setSelection(1);
-                activity.findViewById(RelayPanel.ID_APPLY).performClick();
-            });
+            // Change the draft source to an invalid manual input while the cached session runs.
+            test.runOnMainSync(() -> activity.findViewById(SubscriptionPanel.ID_MANUAL).performClick());
+            select(test, activity, 2, 1);
             status = await(test, activity, RelayPanel.ID_APPLY, RelayPanel.ID_STATUS, "node and mode read back");
             require(status.contains("127.0.0.1:" + port) && status.contains("2 · " + activity.getString(R.string.relay_global)),
                     "node and mode changed without replacing proxy");
@@ -115,8 +114,14 @@ final class RelayChecks {
 
             test.runOnMainSync(() -> {
                 ((EditText) activity.findViewById(MainActivity.ID_NODE_INPUT)).setText(fixture.nodes());
-                ((EditText) activity.findViewById(RelayPanel.ID_NODE)).setText("1");
-                activity.findViewById(SubscriptionPanel.ID_MANUAL).performClick();
+            });
+            NodePickerChecks.choose(test, activity, RelayPanel.ID_NODE, 2, "Fixture-B");
+            test.runOnMainSync(() -> {
+                String firstOnly = fixture.nodes().split(String.valueOf((char) 10), 2)[0];
+                ((EditText) activity.findViewById(MainActivity.ID_NODE_INPUT)).setText(firstOnly);
+                NodePicker picker = activity.findViewById(RelayPanel.ID_NODE);
+                require(picker.selected() == 1 && !picker.getText().toString().contains("Fixture-B"),
+                        "editing the source invalidates the previous draft selection");
                 activity.findViewById(RelayPanel.ID_START).performClick();
             });
             require(await(test, activity, RelayPanel.ID_APPLY, RelayPanel.ID_STATUS, "manual relay ready")
@@ -128,8 +133,8 @@ final class RelayChecks {
     }
 
     private static void select(Instrumentation test, Activity activity, int node, int mode) {
+        NodePickerChecks.choose(test, activity, RelayPanel.ID_NODE, node, node == 1 ? "Fixture-A" : "Fixture-B");
         test.runOnMainSync(() -> {
-            ((EditText) activity.findViewById(RelayPanel.ID_NODE)).setText(Integer.toString(node));
             ((Spinner) activity.findViewById(RelayPanel.ID_MODE)).setSelection(mode);
             activity.findViewById(RelayPanel.ID_APPLY).performClick();
         });

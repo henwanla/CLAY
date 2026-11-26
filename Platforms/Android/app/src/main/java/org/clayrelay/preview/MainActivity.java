@@ -103,7 +103,8 @@ public final class MainActivity extends Activity {
     }
 
     @Override protected void onPause() {
-        if (relay != null) relay.hideCredentials();
+        if (relay != null) { relay.hideCredentials(); relay.hidePicker(); }
+        if (vpn != null) vpn.hidePicker();
         super.onPause();
     }
 

@@ -23,6 +23,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -42,13 +43,15 @@ final class RelaySession implements AutoCloseable {
     private int proxy, control;
     private String secret, password;
     private String[] ids;
+    private List<String> labels;
     private boolean vpn;
 
     static final class State {
         final int proxy, node;
         final String password, mode;
-        State(int proxy, int node, String password, String mode) {
-            this.proxy = proxy; this.node = node; this.password = password; this.mode = mode;
+        final List<String> labels;
+        State(int proxy, int node, String password, String mode, List<String> labels) {
+            this.proxy = proxy; this.node = node; this.password = password; this.mode = mode; this.labels = labels;
         }
     }
 
@@ -93,6 +96,8 @@ final class RelaySession implements AutoCloseable {
                 try {
                     JSONObject envelope = new JSONObject(new String(generated, StandardCharsets.UTF_8));
                     JSONArray all = envelope.getJSONArray("nodeIDs");
+                    labels = NativePreview.labels(envelope.getJSONArray("nodeLabels"));
+                    if (labels.size() != all.length()) throw new IOException();
                     ids = new String[all.length()];
                     for (int i = 0; i < ids.length; i++) {
                         ids[i] = all.getString(i);
@@ -165,7 +170,7 @@ final class RelaySession implements AutoCloseable {
         String selected = request("GET", "/proxies/CLAY", null).getString("now");
         int index = Arrays.asList(ids).indexOf(selected);
         if (index < 0 || !running()) throw new IOException();
-        return new State(proxy, index + 1, password, mode);
+        return new State(proxy, index + 1, password, mode, labels);
     }
 
     private JSONObject request(String method, String path, JSONObject object) throws Exception {
@@ -213,7 +218,7 @@ final class RelaySession implements AutoCloseable {
     }
 
     @Override public void close() throws IOException {
-        secret = null; password = null; ids = null;
+        secret = null; password = null; ids = null; labels = null;
         if (child != null) {
             child.destroy();
             long deadline = SystemClock.elapsedRealtime() + 2500;

@@ -26,7 +26,8 @@ final class VpnPanel {
     private static final int[] MODE_TEXT = {R.string.relay_rule, R.string.relay_global, R.string.relay_direct};
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Activity activity;
-    private final EditText rules, index, dns;
+    private final EditText rules, dns;
+    private final NodePicker picker;
     private final NodeInput source;
     private final CheckBox direct, bypass;
     private final Spinner mode;
@@ -42,8 +43,8 @@ final class VpnPanel {
         prompt.setText(R.string.vpn_intro);
         card.addView(prompt);
         dns = field(card, ID_DNS, R.string.vpn_dns, InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
-        index = field(card, ID_NODE, R.string.relay_index, InputType.TYPE_CLASS_NUMBER);
-        index.setText("1");
+        picker = new NodePicker(activity, source, ID_NODE);
+        card.addView(picker);
         mode = new Spinner(activity);
         mode.setId(ID_MODE); mode.setSaveEnabled(false);
         mode.setContentDescription(activity.getString(R.string.relay_mode));
@@ -58,11 +59,7 @@ final class VpnPanel {
         status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         card.addView(status);
         start.setOnClickListener(v -> start());
-        apply.setOnClickListener(v -> {
-            int node = selected();
-            if (node == 0) status.setText(R.string.relay_invalid);
-            else ClayVpnService.apply(node, MODES[mode.getSelectedItemPosition()]);
-        });
+        apply.setOnClickListener(v -> ClayVpnService.apply(picker.selected(), MODES[mode.getSelectedItemPosition()]));
         stop.setOnClickListener(v -> ClayVpnService.stopFromPanel());
         render();
         main.postDelayed(tick, 250);
@@ -71,11 +68,13 @@ final class VpnPanel {
     private final Runnable tick = new Runnable() {
         @Override public void run() { render(); main.postDelayed(this, 250); }
     };
-    void destroy() { main.removeCallbacks(tick); discard(); }
+    void hidePicker() { picker.hide(); }
+    void destroy() { main.removeCallbacks(tick); picker.destroy(); discard(); }
 
     private void render() {
         ClayVpnService.Snapshot next = ClayVpnService.state();
         boolean connected = next.node > 0;
+        picker.allow(!asks && !next.busy);
         start.setEnabled(!asks && !next.busy && !connected);
         dns.setEnabled(!asks && !next.busy && !connected);
         apply.setEnabled(!next.busy && connected);
@@ -83,12 +82,15 @@ final class VpnPanel {
         if (next == last) return;
         last = next;
         if (connected) {
-            index.setText(Integer.toString(next.node));
+            picker.session(next.labels, next.node);
             int position = next.mode.equals("rule") ? 0 : next.mode.equals("global") ? 1 : 2;
             mode.setSelection(position);
             String active = activity.getString(R.string.vpn_ready, next.node, activity.getString(MODE_TEXT[position]));
             status.setText(next.message == R.string.vpn_ready ? active : active + "\n" + activity.getString(next.message));
-        } else status.setText(next.message);
+        } else {
+            if (!next.busy) picker.sessionEnded();
+            status.setText(next.message);
+        }
     }
 
     private EditText field(LinearLayout card, int id, int title, int type) {
@@ -108,19 +110,12 @@ final class VpnPanel {
         return button;
     }
 
-    private int selected() {
-        try {
-            int value = Integer.parseInt(index.getText().toString().trim());
-            return value >= 1 && value <= 100 ? value : 0;
-        } catch (NumberFormatException invalid) { return 0; }
-    }
-
     private void start() {
         if (asks || pending != null) return;
         if (!validRequest()) { status.setText(R.string.vpn_invalid); return; }
         byte[] material = source.snapshot();
         if (material == null || material.length == 0) { status.setText(R.string.vpn_invalid); return; }
-        pending = new ClayVpnService.Draft(material, selected(), MODES[mode.getSelectedItemPosition()],
+        pending = new ClayVpnService.Draft(material, picker.selected(), MODES[mode.getSelectedItemPosition()],
                 rules.getText().toString(), (direct.isChecked() ? 1 : 0) | (bypass.isChecked() ? 2 : 0),
                 dns.getText().toString().trim());
         if (Build.VERSION.SDK_INT >= 33 && !askedNotifications && activity.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
@@ -169,7 +164,7 @@ final class VpnPanel {
         String[] parts = server.split("\\.");
         for (String part : parts) if (Integer.parseInt(part) > 255) return false;
         int first = Integer.parseInt(parts[0]);
-        return first > 0 && first != 127 && first < 224 && !server.startsWith("198.18.0.") && selected() != 0
+        return first > 0 && first != 127 && first < 224 && !server.startsWith("198.18.0.")
                 && source.available() && rules.length() <= 12_000;
     }
 }

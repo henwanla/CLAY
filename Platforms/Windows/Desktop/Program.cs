@@ -11,7 +11,13 @@ internal static class Program
         if (args is ["--smoke", var binary, var fixture])
         {
             try { SmokeAsync(binary, fixture).GetAwaiter().GetResult(); return 0; }
-            catch { Console.Error.WriteLine("Windows desktop session check failed."); return 1; }
+            catch (BridgeException error)
+            {
+                // Report fixed labels only. Never dump a process stream or exception message.
+                Console.Error.WriteLine($"Windows desktop session check failed at {error.Step} (exit code {error.ExitCode?.ToString() ?? "unknown"}).");
+                return 1;
+            }
+            catch (Exception error) { Console.Error.WriteLine($"Windows desktop session check failed: {error.GetType().Name}."); return 1; }
         }
 
         ApplicationConfiguration.Initialize();
@@ -45,14 +51,17 @@ internal static class Program
             var inspection = await PortableSession.InspectAsync(cli, profile);
             if (inspection.Nodes.Count != 2 || inspection.Nodes.Any(n => n.Kind != "ss/tcp/aead" || n.ToString().Contains("hidden-entry")))
                 throw new IOException();
+            Console.WriteLine("Windows desktop check: profile inspection passed");
             using var engine = File.OpenRead(fixture);
             var digest = Convert.ToHexString(await SHA256.HashDataAsync(engine));
             string address;
             await using (var session = await PortableSession.StartAsync(cli, inspection, fixture, digest, rule, "global", 1))
             {
+                Console.WriteLine("Windows desktop check: no-console session started");
                 address = session.Address;
                 if (await session.ApplyAsync(new Route("rule", 2)) != new Route("rule", 2) || session.Address != address)
                     throw new IOException();
+                Console.WriteLine("Windows desktop check: combined switch confirmed");
             }
             using var probe = new System.Net.Sockets.TcpClient();
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));

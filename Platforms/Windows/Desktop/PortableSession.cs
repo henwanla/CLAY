@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace Clay.Windows;
@@ -13,6 +14,11 @@ internal sealed record Inspection(string Path, byte[] Digest, IReadOnlyList<Node
 internal sealed record Route(string Mode, int Node);
 internal sealed class ProfileChangedException : Exception { }
 internal sealed class SessionCleanupException : Exception { }
+internal sealed class BridgeException(string step, int? exitCode = null) : IOException
+{
+    internal string Step { get; } = step;
+    internal int? ExitCode { get; } = exitCode;
+}
 
 internal sealed class PortableSession : IAsyncDisposable
 {
@@ -55,7 +61,7 @@ internal sealed class PortableSession : IAsyncDisposable
                 nodes.Add(new Node(node, match.Groups[2].Value));
             }
             await process.WaitForExitAsync(timeout.Token);
-            if (process.ExitCode != 0 || nodes.Count == 0) throw new IOException();
+            if (process.ExitCode != 0 || nodes.Count == 0) throw new BridgeException("inspect-result", process.ExitCode);
             return new Inspection(path, digest, nodes);
         }
         finally
@@ -81,8 +87,8 @@ internal sealed class PortableSession : IAsyncDisposable
         try
         {
             var match = Ready.Match(await session.ReadAsync(TimeSpan.FromSeconds(20)));
-            if (!match.Success || !ushort.TryParse(match.Groups[1].Value, out var port) || port == 0) throw new IOException();
-            if (await session.RefreshAsync() != new Route(mode, node)) throw new IOException();
+            if (!match.Success || !ushort.TryParse(match.Groups[1].Value, out var port) || port == 0) throw new BridgeException("ready-message");
+            if (await session.RefreshAsync() != new Route(mode, node)) throw new BridgeException("initial-state");
             session.Address = $"127.0.0.1:{port}";
             return session;
         }
@@ -96,7 +102,7 @@ internal sealed class PortableSession : IAsyncDisposable
     internal async Task<Route> RefreshAsync()
     {
         var match = Status.Match(await ExchangeAsync("status"));
-        if (!match.Success || !int.TryParse(match.Groups[2].Value, out var node) || !nodes.Contains(node)) throw new IOException();
+        if (!match.Success || !int.TryParse(match.Groups[2].Value, out var node) || !nodes.Contains(node)) throw new BridgeException("status-message");
         return new Route(match.Groups[1].Value, node);
     }
 
@@ -128,7 +134,7 @@ internal sealed class PortableSession : IAsyncDisposable
     private async Task<string> ReadAsync(CancellationToken token)
     {
         var line = await cli.StandardOutput.ReadLineAsync(token);
-        return line is { Length: > 0 and <= 160 } ? line : throw new IOException();
+        return line is { Length: > 0 and <= 160 } ? line : throw new BridgeException("missing-reply", cli.HasExited ? cli.ExitCode : null);
     }
 
     public async ValueTask DisposeAsync()
@@ -168,7 +174,8 @@ internal sealed class PortableSession : IAsyncDisposable
         var info = new ProcessStartInfo(executable)
         {
             WorkingDirectory = Path.GetDirectoryName(executable)!, UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true
+            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
+            StandardInputEncoding = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false), StandardOutputEncoding = Encoding.UTF8
         };
         // Only the paths Windows and the Swift runtime need. Do not inherit
         // CLI tokens, developer settings, or the user's HTTP proxy environment.

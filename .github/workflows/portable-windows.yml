@@ -99,3 +99,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Desktop build failed: $LASTEXITCODE" }
           dotnet (Join-Path $desktop 'Clay.Windows.dll') --smoke $binary $fixture
           if ($LASTEXITCODE -ne 0) { throw "Desktop session bridge failed: $LASTEXITCODE" }
+          $packageDir = Join-Path $env:RUNNER_TEMP 'clay-windows-preview'
+          $archive = ./scripts/package-windows.ps1 -DesktopBuild $desktop -PortableExe $binary -OutputDirectory $packageDir
+          $unpacked = Join-Path $env:RUNNER_TEMP 'clay-windows-unpacked'
+          Expand-Archive -LiteralPath $archive -DestinationPath $unpacked
+          dotnet (Join-Path $unpacked 'Clay.Windows.dll') --smoke (Join-Path $unpacked 'clay-portable.exe') $fixture
+          if ($LASTEXITCODE -ne 0) { throw "Extracted Windows package failed: $LASTEXITCODE" }
+      - name: Upload the verified Windows preview
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: CLAY-Windows-x64-preview
+          path: ${{ runner.temp }}/clay-windows-preview/
+          if-no-files-found: error
+          retention-days: 14

@@ -20,6 +20,10 @@ This preview does not configure the Windows system proxy, register for login sta
 
 桌面预览不会设置系统代理、注册开机启动或下载在线订阅，不保存配置路径、节点凭据和流量历史。CI 构建原生 Windows App，用合成回环控制器验收窗口所用的会话桥接；Explorer 托盘外观和实际桌面交互需另行验收。
 
+The [Windows GitHub Actions workflow](https://github.com/henwanla/CLAY/actions/workflows/portable-windows.yml) packages successful branch builds as the **CLAY-Windows-x64-preview** artifact for 14 days. Extract the ZIP, compare its SHA-256 against the accompanying file, and follow `START-HERE.txt`. The package is unsigned and requires the .NET 10 Desktop Runtime, Swift runtime and a separately verified Mihomo. It is a preview artifact, separate from the public macOS Release.
+
+[Windows 构建记录](https://github.com/henwanla/CLAY/actions/workflows/portable-windows.yml)会为通过验证的分支提供 **CLAY-Windows-x64-preview**，保留 14 天。核对 ZIP 的 SHA-256 后按 `START-HERE.txt` 解压试用。预览包未签名，需准备 .NET 10 Desktop Runtime、Swift 运行时和已核验的 Mihomo。正式 Release 仍是 macOS 版。
+
 ## Portable CLI / 便携命令行
 
 Windows 10/11 runtime preview. Build with Swift for Windows and provide a native Mihomo executable and its expected SHA-256 from a trusted source. CLAY does not download the executable or import remote subscriptions on Windows.

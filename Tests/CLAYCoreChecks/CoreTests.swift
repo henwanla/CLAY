@@ -5,6 +5,10 @@ import Darwin
 @main struct CoreTests {
     @MainActor static func main() async throws {
         let tests = Self()
+        if CommandLine.arguments.count == 2, CommandLine.arguments[1] == "--packet-fixture" {
+            FileHandle.standardOutput.write(try tests.packetProfileFixture())
+            return
+        }
         if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--subscription-fixture" {
             try await tests.testSubscriptionFixture(CommandLine.arguments[2])
             print("CLAY subscription download and refresh checks passed")
@@ -447,4 +451,38 @@ private func XCTAssertTrue(_ value: Bool, _ label: String = "", line: Int = #lin
 private func XCTAssertFalse(_ value: Bool, line: Int = #line) { XCTAssertTrue(!value, line: line) }
 private func XCTAssertEqual<T: Equatable>(_ given: T, _ expected: T, line: Int = #line) {
     XCTAssertTrue(given == expected, "expected \(expected), got \(given)", line: line)
+}
+
+extension CoreTests {
+    func packetProfileFixture() throws -> Data {
+        let input = """
+        proxies:
+          - {name: Demo VMess, type: vmess, server: 127.0.0.1, port: 443, uuid: \(uuid), network: ws, ws-opts: {path: /demo, headers: {Host: example.test}}, tls: true, servername: example.test}
+          - {name: Demo VLESS, type: vless, server: 127.0.0.1, port: 443, uuid: \(uuid), network: grpc, grpc-opts: {grpc-service-name: demo}, tls: true, udp: true, packet-encoding: xudp}
+          - {name: Demo Shadowsocks, type: ss, server: 127.0.0.1, port: 443, cipher: aes-128-gcm, password: example}
+          - {name: Demo Trojan, type: trojan, server: 127.0.0.1, port: 443, password: example, sni: example.test, alpn: [h2]}
+          - {name: Demo Hysteria2, type: hysteria2, server: 127.0.0.1, port: 443, password: example, sni: example.test, obfs: salamander, obfs-password: demo}
+        """
+        let nodes = ProfileImporter.read(input).profiles
+        XCTAssertEqual(nodes.map(\.protocolName), ["vmess", "vless", "ss", "trojan", "hysteria2"])
+        let policy = PACPolicy(rules: try PACPolicy.importRules("""
+        DOMAIN,first.example.test,PROXY
+        DOMAIN-SUFFIX,example.test,DIRECT
+        DOMAIN-KEYWORD,fixture,DIRECT
+        DOMAIN,192.0.2.1,PROXY
+        DOMAIN,2001:db8::1,DIRECT
+        IP-CIDR,198.51.100.0/24,PROXY,no-resolve
+        """), defaultDecision: .proxy, bypassLocal: true)
+        let data = try CoreConfig.makePacketProfile(nodes: nodes, policy: policy)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        XCTAssertEqual(Set(object.keys), Set(["proxies", "rules"]))
+        let proxies = try XCTUnwrap(object["proxies"] as? [[String: Any]])
+        XCTAssertEqual(proxies.compactMap { $0["name"] as? String }, nodes.map(\.localName))
+        let rules = try XCTUnwrap(object["rules"] as? [String])
+        XCTAssertEqual(Array(rules.dropFirst(4).prefix(6)), ["DOMAIN,first.example.test,CLAY", "DOMAIN-SUFFIX,example.test,DIRECT",
+                       "DOMAIN-KEYWORD,fixture,DIRECT", "IP-CIDR,192.0.2.1/32,CLAY,no-resolve",
+                       "IP-CIDR6,2001:db8:0:0:0:0:0:1/128,DIRECT,no-resolve", "IP-CIDR,198.51.100.0/24,CLAY,no-resolve"])
+        XCTAssertEqual(rules.last, "MATCH,CLAY")
+        return data
+    }
 }

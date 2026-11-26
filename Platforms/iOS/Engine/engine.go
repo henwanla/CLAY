@@ -1,0 +1,332 @@
+// SPDX-License-Identifier: MIT
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/binary"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/netip"
+	"regexp"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/metacubex/gvisor/pkg/buffer"
+	glog "github.com/metacubex/gvisor/pkg/log"
+	"github.com/metacubex/gvisor/pkg/tcpip"
+	"github.com/metacubex/gvisor/pkg/tcpip/header"
+	"github.com/metacubex/gvisor/pkg/tcpip/link/channel"
+	"github.com/metacubex/gvisor/pkg/tcpip/stack"
+	tun "github.com/metacubex/sing-tun"
+	M "github.com/metacubex/sing/common/metadata"
+
+	"github.com/metacubex/mihomo/component/process"
+	"github.com/metacubex/mihomo/config"
+	C "github.com/metacubex/mihomo/constant"
+	"github.com/metacubex/mihomo/hub/executor"
+	"github.com/metacubex/mihomo/listener/sing"
+	"github.com/metacubex/mihomo/log"
+	"github.com/metacubex/mihomo/tunnel"
+	"github.com/metacubex/mihomo/tunnel/statistic"
+)
+
+const mtu = 1500
+const maxProfileBytes = 2 * 1024 * 1024
+const maxNodes = 100
+const inactive = -1
+
+var nodeName = regexp.MustCompile("^node-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+var errProfile = errors.New("invalid packet profile")
+var errActive = errors.New("session already running")
+
+var nodeKeys = map[string]bool{
+	"name": true, "type": true, "server": true, "port": true, "uuid": true, "network": true, "udp": true,
+	"packet-encoding": true, "cipher": true, "alterId": true, "flow": true, "tls": true, "skip-cert-verify": true,
+	"servername": true, "client-fingerprint": true, "alpn": true, "reality-opts": true, "ws-opts": true, "grpc-opts": true,
+	"password": true, "sni": true, "obfs": true, "obfs-password": true, "fingerprint": true,
+}
+
+var nestedKeys = map[string]map[string]bool{
+	"reality-opts": {"public-key": true, "short-id": true, "support-x25519mlkem768": true},
+	"ws-opts":      {"path": true, "headers": true},
+	"grpc-opts":    {"grpc-service-name": true},
+}
+
+type profile struct {
+	Proxies []map[string]any `json:"proxies"`
+	Rules   []string         `json:"rules"`
+}
+
+// An upper layer converts user profiles into this private representation with CLAYCore.
+// No raw provider YAML, controller, listener, paths or remote lists reach the engine.
+func loadProfile(data []byte, chosen, mode int) (*config.Config, error) {
+	if len(data) == 0 || len(data) > maxProfileBytes {
+		return nil, errProfile
+	}
+	var p profile
+	d := json.NewDecoder(bytes.NewReader(data))
+	d.DisallowUnknownFields()
+	if d.Decode(&p) != nil || d.Decode(new(any)) != io.EOF || chosen < 1 || chosen > len(p.Proxies) ||
+		len(p.Proxies) > maxNodes || len(p.Rules) == 0 || len(p.Rules) > 1024 {
+		return nil, errProfile
+	}
+	for i, line := range p.Rules {
+		if !validRule(line, i == len(p.Rules)-1) {
+			return nil, errProfile
+		}
+	}
+	var useMode tunnel.TunnelMode
+	switch mode {
+	case 0:
+		useMode = tunnel.Rule
+	case 1:
+		useMode = tunnel.Global
+	case 2:
+		useMode = tunnel.Direct
+	default:
+		return nil, errProfile
+	}
+	ids := make([]string, len(p.Proxies))
+	seen := make(map[string]bool, len(ids))
+	for index, proxy := range p.Proxies {
+		for key, value := range proxy {
+			if !nodeKeys[key] {
+				return nil, errProfile
+			}
+			if allowed, nested := nestedKeys[key]; nested {
+				fields, ok := value.(map[string]any)
+				if !ok {
+					return nil, errProfile
+				}
+				for field, value := range fields {
+					if !allowed[field] {
+						return nil, errProfile
+					}
+					if field == "headers" {
+						headers, ok := value.(map[string]any)
+						if _, host := headers["Host"].(string); !ok || len(headers) != 1 || !host {
+							return nil, errProfile
+						}
+					}
+				}
+			}
+		}
+		id, _ := proxy["name"].(string)
+		if !nodeName.MatchString(id) || seen[id] {
+			return nil, errProfile
+		}
+		seen[id] = true
+		switch proxy["type"] {
+		case "vmess", "vless", "ss", "trojan", "hysteria2":
+		default:
+			return nil, errProfile
+		}
+		ids[index] = id
+	}
+	ordered := append([]string{ids[chosen-1]}, ids[:chosen-1]...)
+	ordered = append(ordered, ids[chosen:]...)
+	raw := config.DefaultRawConfig()
+	raw.Mode, raw.LogLevel, raw.IPv6, raw.BindAddress = useMode, log.SILENT, false, "127.0.0.1"
+	raw.FindProcessMode = process.FindProcessOff
+	raw.Profile.StoreSelected, raw.GeoAutoUpdate = false, false
+	raw.Proxy, raw.Rule = p.Proxies, p.Rules
+	raw.ProxyGroup = []map[string]any{
+		{"name": "CLAY", "type": "select", "proxies": ordered},
+		{"name": "GLOBAL", "type": "select", "proxies": []string{"CLAY"}},
+	}
+	return config.ParseRawConfig(raw)
+}
+
+func validRule(line string, last bool) bool {
+	parts := strings.Split(line, ",")
+	if last {
+		return len(parts) == 2 && parts[0] == "MATCH" && validAction(parts[1])
+	}
+	if len(parts) < 3 || !validAction(parts[2]) || len(parts[1]) == 0 {
+		return false
+	}
+	switch parts[0] {
+	case "DOMAIN", "DOMAIN-SUFFIX", "DOMAIN-KEYWORD":
+		return len(parts) == 3
+	case "DOMAIN-REGEX":
+		return len(parts) == 3 && parts[1] == "^[^.]+$" // Shared PAC local-name rule only.
+	case "IP-CIDR", "IP-CIDR6":
+		return len(parts) == 4 && parts[3] == "no-resolve"
+	default:
+		return false
+	}
+}
+
+func validAction(action string) bool { return action == "CLAY" || action == "DIRECT" }
+
+type packetLink struct{ *channel.Endpoint }
+
+// The datagrams are plain IP packets. Do not borrow a utun descriptor or prepend
+// Apple's private four-byte family header. This endpoint has no interface privileges.
+func (link *packetLink) NewEndpoint() (stack.LinkEndpoint, stack.NICOptions, error) {
+	return link.Endpoint, stack.NICOptions{}, nil
+}
+func (link *packetLink) Read(_ []byte) (int, error)  { return 0, errors.ErrUnsupported }
+func (link *packetLink) Write(_ []byte) (int, error) { return 0, errors.ErrUnsupported }
+func (link *packetLink) Close() error                { link.Endpoint.Close(); return nil }
+func (link *packetLink) WritePacket(packet *stack.PacketBuffer) (int, error) {
+	var list stack.PacketBufferList
+	list.PushBack(packet)
+	if count, err := link.WritePackets(list); err != nil || count != 1 {
+		return 0, errors.New("packet queue full")
+	}
+	return packet.Size(), nil
+}
+
+type transportHandler struct{ *sing.ListenerHandler }
+
+func (transportHandler) PrepareConnection(string, M.Socksaddr, M.Socksaddr, tun.DirectRouteContext, time.Duration) (tun.DirectRouteDestination, error) {
+	return nil, tun.ErrDrop // Do not create a native ICMP socket on mobile.
+}
+
+type session struct {
+	id     uint64
+	ctx    context.Context
+	cancel context.CancelFunc
+	link   *packetLink
+	stack  tun.Stack
+}
+
+var engine struct {
+	sync.Mutex
+	live   *session
+	lastID uint64
+}
+
+func start(data []byte, chosen, mode int) (uint64, error) {
+	engine.Lock()
+	defer engine.Unlock()
+	if engine.live != nil {
+		return 0, errActive
+	}
+	log.SetLevel(log.SILENT)
+	glog.SetTarget(&glog.Writer{Next: io.Discard})
+	cfg, err := loadProfile(data, chosen, mode)
+	if err != nil {
+		return 0, errProfile
+	} // The underlying error may contain credentials.
+	ctx, cancel := context.WithCancel(context.Background())
+	link := &packetLink{channel.New(128, mtu, "")}
+	handler, err := sing.NewListenerHandler(sing.ListenerConfig{Tunnel: tunnel.Tunnel, Type: C.TUN})
+	if err != nil {
+		cancel()
+		link.Close()
+		return 0, err
+	}
+	g, err := tun.NewStack("gvisor", tun.StackOptions{
+		Context: ctx, Tun: link, TunOptions: tun.Options{MTU: mtu, Inet4Address: []netip.Prefix{netip.MustParsePrefix("198.18.0.1/30")}},
+		UDPTimeout: 30 * time.Second, ICMPTimeout: time.Second, Handler: transportHandler{handler}, Logger: log.SingLogger,
+	})
+	if err != nil {
+		cancel()
+		link.Close()
+		return 0, err
+	}
+	if err := g.Start(); err != nil {
+		cancel()
+		g.Close()
+		link.Close()
+		return 0, err
+	}
+	executor.ApplyConfig(cfg, true)
+	engine.lastID++
+	engine.live = &session{engine.lastID, ctx, cancel, link, g}
+	return engine.live.id, nil
+}
+
+func stop(id uint64) {
+	engine.Lock()
+	defer engine.Unlock()
+	live := engine.live
+	if live == nil || live.id != id {
+		return
+	}
+	engine.live = nil
+	tunnel.OnSuspend()
+	live.cancel()
+	live.stack.Close()
+	live.link.Close()
+	statistic.DefaultManager.Range(func(c statistic.Tracker) bool { _ = c.Close(); return true })
+	for _, proxy := range tunnel.Proxies() {
+		_ = proxy.Close()
+	}
+	for _, provider := range tunnel.Providers() {
+		if closer, ok := provider.(io.Closer); ok {
+			_ = closer.Close()
+		}
+	}
+	tunnel.UpdateProxies(nil, nil)
+	tunnel.UpdateRules(nil, nil, nil)
+}
+
+func protocol(packet []byte) tcpip.NetworkProtocolNumber {
+	if len(packet) < header.IPv4MinimumSize || len(packet) > mtu {
+		return 0
+	}
+	// This technical preview accepts IPv4 only. Do not silently emit IPv6 traffic.
+	if packet[0]>>4 != 4 || int(packet[0]&15)*4 < header.IPv4MinimumSize || int(packet[0]&15)*4 > len(packet) ||
+		int(binary.BigEndian.Uint16(packet[2:4])) != len(packet) {
+		return 0
+	}
+	return header.IPv4ProtocolNumber
+}
+
+func offer(id uint64, packet []byte) bool {
+	ip := protocol(packet)
+	if ip == 0 {
+		return false
+	}
+	engine.Lock()
+	defer engine.Unlock()
+	if engine.live == nil || engine.live.id != id {
+		return false
+	}
+	pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{Payload: buffer.MakeWithData(packet)})
+	defer pkt.DecRef()
+	engine.live.link.InjectInbound(ip, pkt)
+	return true
+}
+
+func receive(id uint64, out []byte, wait time.Duration) int {
+	engine.Lock()
+	live := engine.live
+	engine.Unlock()
+	if live == nil || live.id != id {
+		return inactive
+	}
+	ctx, cancel := context.WithTimeout(live.ctx, wait)
+	defer cancel()
+	for live.ctx.Err() == nil {
+		pkt := live.link.ReadContext(ctx)
+		if pkt == nil {
+			break
+		}
+		view := pkt.ToView()
+		pkt.DecRef()
+		data := view.AsSlice()
+		if protocol(data) != 0 && len(data) <= len(out) {
+			n := copy(out, data)
+			view.Release()
+			if live.ctx.Err() != nil {
+				return inactive
+			}
+			return n
+		}
+		view.Release()
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	if live.ctx.Err() != nil {
+		return inactive
+	}
+	return 0
+}

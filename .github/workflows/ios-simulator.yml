@@ -8,6 +8,7 @@ on:
       - 'Sources/CLAYCore/**'
       - 'Vendor/Yams/**'
       - 'Platforms/iOS/**'
+      - 'Tests/CLAYCoreChecks/**'
       - .github/workflows/ios-simulator.yml
   pull_request:
     branches: [main, develop]
@@ -16,6 +17,7 @@ on:
       - 'Sources/CLAYCore/**'
       - 'Vendor/Yams/**'
       - 'Platforms/iOS/**'
+      - 'Tests/CLAYCoreChecks/**'
       - .github/workflows/ios-simulator.yml
   workflow_dispatch:
 
@@ -51,3 +53,39 @@ jobs:
           for locale in en zh-Hans ja; do
             test -s "$app/$locale.lproj/Localizable.strings"
           done
+
+  packet-engine:
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - name: Check out source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Install pinned Go toolchain
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version: '1.24.3'
+          check-latest: false
+          cache: false
+      - name: Check the packet bridge and link for both iOS SDKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/clay-packet"
+          mkdir -m 700 "$root"
+          curl --proto '=https' --proto-redir '=https' --fail --silent --show-error --location --retry 3 --max-time 90 \
+            -o "$root/mihomo.tgz" https://codeload.github.com/MetaCubeX/mihomo/tar.gz/refs/tags/v1.19.34
+          engine=Platforms/iOS/Engine
+          bash "$engine/build.sh" "$root/mihomo.tgz" host-test "$root/host"
+          bash "$engine/build.sh" "$root/mihomo.tgz" macos "$root/host"
+          bash "$engine/link-check.sh" macos "$root/host"
+          bash scripts/swift-local.sh build -c release --product CLAYCoreChecks
+          .build/release/CLAYCoreChecks --packet-fixture | "$root/host/abi-smoke"
+          for sdk in iphoneos iphonesimulator; do
+            bash "$engine/build.sh" "$root/mihomo.tgz" "$sdk" "$root/$sdk"
+            bash "$engine/link-check.sh" "$sdk" "$root/$sdk"
+            [[ "$(xcrun lipo -archs "$root/$sdk/abi-smoke")" == arm64 ]]
+          done
+          xcrun vtool -show-build "$root/iphoneos/abi-smoke" | grep -Eq 'platform[[:space:]]+IOS$'
+          xcrun vtool -show-build "$root/iphonesimulator/abi-smoke" | grep -Eq 'platform[[:space:]]+IOSSIMULATOR$'

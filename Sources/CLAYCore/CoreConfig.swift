@@ -22,13 +22,34 @@ public enum CoreConfig {
             "ipv6": false, "log-level": "silent", "external-controller": "127.0.0.1:\(controlPort)", "secret": secret,
             "geo-auto-update": false, "find-process-mode": "off", "profile": ["store-selected": false],
             "tun": ["enable": false],
-            "proxies": ordered.map { node in var p = node.options; p["name"] = node.localName; return p },
+            "proxies": engineNodes(ordered),
             "proxy-groups": [
                 ["name": "CLAY", "type": "select", "proxies": ordered.map(\.localName)],
                 ["name": "GLOBAL", "type": "select", "proxies": ["CLAY"]]
             ],
             "rules": policy.map(rules(for:)) ?? ["MATCH,CLAY"]
         ], options: [.sortedKeys, .withoutEscapingSlashes])
+    }
+
+    /// In-memory input for the experimental packet engine. Contains credentials.
+    /// Node indexes are one-based and follow the input order.
+    public static func makePacketProfile(nodes: [NodeProfile], policy: PACPolicy? = nil) throws -> Data {
+        guard !nodes.isEmpty else { throw SessionError.noNode }
+        guard nodes.count <= 100, Set(nodes.map(\.id)).count == nodes.count else { throw SessionError.setupFailed }
+        let rows = policy.map(rules(for:)) ?? ["MATCH,CLAY"]
+        guard rows.count <= 1024 else { throw SessionError.setupFailed }
+        let data = try JSONSerialization.data(withJSONObject: ["proxies": engineNodes(nodes), "rules": rows],
+                                              options: [.sortedKeys, .withoutEscapingSlashes])
+        guard data.count <= 2 * 1024 * 1024 else { throw SessionError.setupFailed }
+        return data
+    }
+
+    private static func engineNodes(_ nodes: [NodeProfile]) -> [[String: Any]] {
+        nodes.map { node in
+            var fields = node.options
+            fields["name"] = node.localName
+            return fields
+        }
     }
 
     private static func rules(for policy: PACPolicy) -> [String] {

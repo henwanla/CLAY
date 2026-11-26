@@ -13,6 +13,8 @@ from gi.repository import GLib, Gtk
 
 from gnome_pac import GnomePac, RECOVERY_NEEDED, ReleaseError
 from session import DesktopError, MODES, Session, default_pac, inspect
+from subscription_dialog import SubscriptionDialog
+from subscriptions import Manager, Store, wipe
 from tray import create_tray
 
 
@@ -34,6 +36,8 @@ class Window(Gtk.Window):
         self.process_seen_ended = None
         self.poll_ticks = 0
         self.preview = None
+        self.selected_subscription = None
+        self.subscription_dialog = None
         self.busy = False
         self.closing = False
         self.destroyed = False
@@ -41,7 +45,7 @@ class Window(Gtk.Window):
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         self.add(root)
-        intro = Gtk.Label(label="Use a local profile with a verified Mihomo executable.", xalign=0)
+        intro = Gtk.Label(label="Use a local profile or a saved subscription with a verified Mihomo executable.", xalign=0, wrap=True)
         root.pack_start(intro, False, False, 0)
         grid = Gtk.Grid(column_spacing=12, row_spacing=8)
         root.pack_start(grid, False, False, 0)
@@ -58,28 +62,33 @@ class Window(Gtk.Window):
         self.load = Gtk.Button(label="Load nodes")
         self.load.connect("clicked", self.load_profile)
         row(0, "Profile", self.profile, self.load)
+        self.subscriptions = Gtk.Button(label="Subscriptions…")
+        self.subscriptions.connect("clicked", self.open_subscriptions)
+        grid.attach(self.subscriptions, 1, 1, 1, 1)
+        self.source_label = Gtk.Label(label="Local file", xalign=0, wrap=True)
+        grid.attach(self.source_label, 2, 1, 1, 1)
         self.engine = self.chooser("Choose an extracted Mihomo executable")
-        row(1, "Mihomo", self.engine)
+        row(2, "Mihomo", self.engine)
         self.fingerprint = Gtk.Entry(max_length=64, placeholder_text="Expected hash for this executable")
-        row(2, "SHA-256", self.fingerprint)
+        row(3, "SHA-256", self.fingerprint)
 
         self.use_rules = Gtk.CheckButton(label="Use rules file")
         self.use_rules.connect("toggled", lambda *_: self.sync_controls())
         self.rules = self.chooser("Choose a local PAC rules file")
-        grid.attach(self.use_rules, 0, 3, 1, 1)
-        grid.attach(self.rules, 1, 3, 1, 1)
+        grid.attach(self.use_rules, 0, 4, 1, 1)
+        grid.attach(self.rules, 1, 4, 1, 1)
 
         self.nodes = Gtk.ComboBoxText()
         self.set_node = Gtk.Button(label="Apply node")
         self.set_node.connect("clicked", self.change_node)
-        row(4, "Node", self.nodes, self.set_node)
+        row(5, "Node", self.nodes, self.set_node)
         self.modes = Gtk.ComboBoxText()
         for mode in MODES:
             self.modes.append(mode, mode.title())
         self.modes.set_active_id("rule")
         self.set_mode = Gtk.Button(label="Apply mode")
         self.set_mode.connect("clicked", self.change_mode)
-        row(5, "Routing mode", self.modes, self.set_mode)
+        row(6, "Routing mode", self.modes, self.set_mode)
 
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         root.pack_start(actions, False, False, 0)
@@ -125,10 +134,10 @@ class Window(Gtk.Window):
 
     def sync_controls(self):
         running = self.session.process is not None
-        active = self.busy or self.closing
+        active = self.busy or self.closing or self.subscription_dialog is not None
         confirmed = not active and self.session.state is not None
         editable = not active and not running
-        for widget in (self.profile, self.load, self.engine, self.fingerprint, self.use_rules):
+        for widget in (self.profile, self.load, self.subscriptions, self.engine, self.fingerprint, self.use_rules):
             widget.set_sensitive(editable)
         self.rules.set_sensitive(editable and self.use_rules.get_active())
         self.nodes.set_sensitive(confirmed or (editable and self.preview is not None))
@@ -171,10 +180,42 @@ class Window(Gtk.Window):
         self.system_status.set_text(message)
 
     def profile_changed(self, *_):
+        self.clear_subscription()
         self.preview = None
         self.nodes.remove_all()
         self.status.set_text("Load the selected profile to list its nodes.")
         self.sync_controls()
+
+    def open_subscriptions(self, *_):
+        if not self.subscriptions.get_sensitive():
+            return
+        self.subscription_dialog = SubscriptionDialog(self, Manager(self.session.binary, Store()))
+        self.subscription_dialog.connect("destroy", self.subscriptions_closed)
+        self.sync_controls()
+        self.subscription_dialog.show_all()
+
+    def subscriptions_closed(self, *_):
+        self.subscription_dialog = None
+        if self.closing:
+            self.request_stop()
+        elif not self.destroyed:
+            self.sync_controls()
+
+    def apply_subscription(self, selection):
+        self.clear_subscription()
+        self.selected_subscription = selection
+        self.source_label.set_text("Saved subscription")
+        self.show_preview(selection[1])
+
+    def subscription_removed(self, item):
+        if self.selected_subscription is not None and self.selected_subscription[0].id == item:
+            self.profile_changed()
+
+    def clear_subscription(self):
+        if self.selected_subscription is not None:
+            wipe(self.selected_subscription[2])
+            self.selected_subscription = None
+        self.source_label.set_text("Local file")
 
     def task(self, message, action, completed, *, system_only=False):
         if self.busy:
@@ -228,33 +269,35 @@ class Window(Gtk.Window):
         if not path:
             self.status.set_text("Choose a local profile file first.")
             return
+        self.clear_subscription()
         self.preview = None
         self.nodes.remove_all()
+        self.task("Inspecting profile…", lambda: inspect(self.session.binary, path, self.cancel), self.show_preview)
 
-        def loaded(preview):
-            self.preview = preview
-            for index, node in enumerate(preview.nodes, start=1):
-                self.nodes.append(str(index), f"{index} · {node}")
-            self.nodes.set_active(0)
-            message = f"Loaded {len(preview.nodes)} supported nodes."
-            if preview.skipped:
-                message += f" Skipped {preview.skipped} entries."
-            self.status.set_text(message)
-
-        self.task("Inspecting profile…", lambda: inspect(self.session.binary, path, self.cancel), loaded)
+    def show_preview(self, preview):
+        self.preview = preview
+        self.nodes.remove_all()
+        for index, node in enumerate(preview.nodes, start=1):
+            self.nodes.append(str(index), f"{index} · {node}")
+        self.nodes.set_active(0)
+        message = f"Loaded {len(preview.nodes)} supported nodes."
+        if preview.skipped:
+            message += f" Skipped {preview.skipped} entries."
+        self.status.set_text(message)
 
     def start_session(self, *_, connect_gnome=False):
         rules = self.rules.get_filename() if self.use_rules.get_active() else None
-        if self.preview is None or self.busy:
+        if self.preview is None or not self.start.get_sensitive():
             return
         if self.use_rules.get_active() and not rules:
             self.status.set_text("Choose a rules file, or turn off the rules file option.")
             return
         path, preview = self.profile.get_filename(), self.preview
+        source = self.selected_subscription[2] if self.selected_subscription is not None else None
         node, mode = int(self.nodes.get_active_id()), self.modes.get_active_id()
         engine, digest = self.engine.get_filename(), self.fingerprint.get_text().strip()
         def start():
-            state = self.session.start(path, preview, node, engine, digest, mode, rules)
+            state = self.session.start(path, preview, node, engine, digest, mode, rules, source=source)
             if connect_gnome and not self.cancel.is_set():
                 try:
                     self.enable_gnome(state)
@@ -361,6 +404,9 @@ class Window(Gtk.Window):
 
     def request_quit(self):
         self.closing = True
+        if self.subscription_dialog is not None:
+            self.subscription_dialog.request_close()
+            return
         self.request_stop()
 
     def show_window(self):
@@ -375,6 +421,7 @@ class Window(Gtk.Window):
 
     def window_destroyed(self, *_):
         self.destroyed = True
+        self.clear_subscription()
         GLib.source_remove(self.poll_source)
         if self.tray is not None:
             self.tray.close()

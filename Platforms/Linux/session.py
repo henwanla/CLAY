@@ -1,6 +1,6 @@
 """Private adapter around clay-portable's line protocol."""
 
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 import hashlib
 import os
@@ -94,12 +94,52 @@ class Lines:
                     self.buffer.extend(data)
 
 
-def inspect(binary, path, cancel=None):
-    with snapshot(path) as (profile, digest):
+def source_args(path, source, expected=None):
+    if source is None:
+        return snapshot(path, expected)
+    if not 0 < len(source) <= MAX_PROFILE_BYTES:
+        raise DesktopError("The profile must be nonempty and 2 MiB or smaller.")
+    digest = hashlib.sha256(source).hexdigest()
+    if expected is not None and expected != digest:
+        raise DesktopError("The cached profile changed. Choose the saved nodes again.")
+    return nullcontext(("--profile-stdin", digest))
+
+
+def send_frame(process, source, deadline, cancel):
+    fd = process.stdin.fileno()
+    try:
+        os.set_blocking(fd, False)
+        with selectors.DefaultSelector() as selector:
+            selector.register(fd, selectors.EVENT_WRITE)
+            for data in (len(source).to_bytes(4, "big"), source):
+                with memoryview(data) as view:
+                    offset = 0
+                    while offset < len(view):
+                        if cancel is not None and cancel.is_set():
+                            raise DesktopError("Operation stopped.")
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            raise DesktopError("The local command did not read the profile in time.")
+                        if selector.select(min(remaining, 0.1)):
+                            try:
+                                offset += os.write(fd, view[offset:offset + 65536])
+                            except BlockingIOError:
+                                continue
+    except OSError:
+        raise DesktopError("The local command could not read the cached profile.") from None
+    finally:
+        os.set_blocking(fd, True)
+
+
+def inspect(binary, path=None, cancel=None, *, source=None):
+    with source_args(path, source) as (profile, digest):
         with launch(binary, "inspect", profile, "--numbered") as process:
             try:
                 lines = Lines(process.stdout)
                 deadline = time.monotonic() + 8
+                if source is not None:
+                    send_frame(process, source, deadline, cancel)
+                process.stdin.close()
                 header = re.fullmatch(rb"nodes=([1-9][0-9]{0,2})", lines.read(deadline, cancel) or b"")
                 if not header or int(header[1]) > MAX_PROFILES:
                     raise DesktopError("No supported nodes were found in this profile.")
@@ -175,7 +215,7 @@ class Session:
         self.process = None
         self.state = None
 
-    def start(self, path, preview, node, engine, digest, mode, rules=None):
+    def start(self, path, preview, node, engine, digest, mode, rules=None, *, source=None):
         if self.process is not None:
             raise DesktopError("Stop the current session first.")
         if mode not in MODES or not 1 <= node <= len(preview.nodes):
@@ -186,13 +226,16 @@ class Session:
             raise DesktopError("Choose a local Mihomo executable.")
         self.count = len(preview.nodes)
         try:
-            with snapshot(path, preview.digest) as (profile, _):
+            with source_args(path, source, preview.digest) as (profile, _):
                 command = ["mihomo-run", profile, str(node), engine, digest, "--all-nodes", "--interactive", "--mode", mode]
                 if rules:
                     command += ["--pac-rules", rules]
                 self.process = launch(self.binary, *command)
                 self.lines = Lines(self.process.stdout)
-                line = self.lines.read(time.monotonic() + 15, self.cancel)
+                deadline = time.monotonic() + 15
+                if source is not None:
+                    send_frame(self.process, source, deadline, self.cancel)
+                line = self.lines.read(deadline, self.cancel)
                 if line is None:
                     raise DesktopError("Mihomo did not start. Check the executable, SHA-256, and selected rules file.")
                 ready = READY.fullmatch(line)

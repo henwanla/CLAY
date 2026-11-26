@@ -397,6 +397,21 @@ def window_checks(binary, directory, profile, gnome=False):
 
         host.click(until, "Open CLAY")
         until(window.get_visible)
+        if gnome:
+            from subscriptions import Manager, Store
+
+            fixture = Manager(binary, Store(), lambda *_: bytearray(PROFILE.encode("utf-8")))
+            entry = fixture.add("Saved fixture", "https://empty.example.invalid/fixture", threading.Event())
+            click(window.subscriptions)
+            dialog = window.subscription_dialog
+            until(lambda: not dialog.busy)
+            assert dialog.saved.get_active_id() == entry.id.hex and dialog.use.get_sensitive()
+            assert not dialog.url.get_visibility() and "https://" not in dialog.saved.get_active_text()
+            assert not window.start.get_sensitive()
+            dialog.use.clicked()
+            until(lambda: window.subscription_dialog is None)
+            assert window.selected_subscription[0] == entry and window.source_label.get_text() == "Saved subscription"
+            profile.write_text("invalid local profile", encoding="utf-8")
         # The synthetic core only accepts this startup pair, regardless of
         # what route we selected in the previous session. Require a new report.
         window.nodes.set_active_id("2")
@@ -409,6 +424,11 @@ def window_checks(binary, directory, profile, gnome=False):
         assert pid != previous_pid and Path(f"/proc/{pid}").exists()
         if gnome:
             assert window.pac.confirmed() and gsettings("get", "mode") == "'auto'", window.system_status.get_text()
+            assert not window.subscriptions.get_sensitive()
+            host.click(until, "Node 1")
+            until(lambda: not window.busy and window.session.state == State("global", 1, proxy))
+            host.click(until, "Direct")
+            until(lambda: not window.busy and window.session.state == State("direct", 1, proxy))
         window.close()
         until(lambda: not window.get_visible())
         host.click(until, "Quit CLAY")
@@ -427,7 +447,7 @@ def window_checks(binary, directory, profile, gnome=False):
         host.close()
     print("PASS GTK and D-Bus tray: background session, node/mode readback, host loss, stop and quit cleanup")
     if gnome:
-        print("PASS GTK GNOME PAC: manual path unchanged, apply from tray, stable URL on switch, conflict preserves listener, quit restores settings")
+        print("PASS GTK GNOME PAC and encrypted subscription: manual path, tray routing, recovery, file-free cached start and quit")
 
 
 def main():
@@ -441,7 +461,8 @@ def main():
         assert fixture.is_absolute() and fixture.is_dir() and stat.S_IMODE(fixture.stat().st_mode) == 0o700
         assert os.environ.get("GSETTINGS_BACKEND") == "dconf" and os.environ.get("DBUS_SESSION_BUS_ADDRESS")
         assert os.environ.get("DCONF_PROFILE") == str(fixture / "dconf-profile")
-        for suffix in ("config", "state", "runtime"):
+        assert Path.home() == fixture / "home"
+        for suffix in ("config", "state", "runtime", "data"):
             assert os.environ.get(f"XDG_{suffix.upper()}_HOME" if suffix != "runtime" else "XDG_RUNTIME_DIR") == str(fixture / suffix)
     binary = options.cli.resolve(strict=True)
     with tempfile.TemporaryDirectory(prefix="clay-desktop-check-") as scratch:

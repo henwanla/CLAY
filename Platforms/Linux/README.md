@@ -15,11 +15,15 @@ swift build -c release --product clay-portable
 3. Select a node and routing mode. For Rule mode, you can choose a file of CLAY PAC rules. **Start session** starts a manual proxy. A loopback address appears after Mihomo reports the requested settings. Enter it in individual applications as their HTTP or SOCKS5 proxy.
 4. To change nodes or mode in the running session, select the new value and click **Apply**. If a change cannot be confirmed, click **Refresh status** to check the current state. Click **Stop** to end the session or **Quit CLAY** to stop and exit.
 
+For subscriptions, install `python3-cryptography` and `libsecret-tools` and unlock your desktop Secret Service keyring (for example GNOME Keyring). While stopped, open **Subscriptions…**, enter a name and HTTPS address, then choose **Download and save** and **Use saved nodes**. **Refresh** updates the encrypted cache only after the new nodes pass validation; choose **Use saved nodes** again to apply it. Choose a local file and click **Load nodes** to switch back.
+
+The downloader uses system certificate trust, allows only same-origin HTTPS redirects, and limits both download and decompression to 2 MiB. CLAY encrypts up to 12 saved feeds with AES-256-GCM; URLs, names and cached nodes are stored under the user's data directory, with the key in Secret Service. Downloads happen only when requested. A locked or missing keyring prevents saving. The selected copy goes to the local CLI over a private pipe. Mihomo still receives its temporary owner-only runtime config while it runs.
+
 For the optional tray, install `gir1.2-ayatanaappindicator3-0.1` and use a desktop panel with StatusNotifierItem/AppIndicator support. When CLAY confirms a tray host, closing the window during a session keeps the proxy running. Open the tray menu to reopen CLAY, switch mode or node, refresh, stop, or quit. The menu shows up to 12 node numbers; **All nodes…** reopens the full picker. **Quit CLAY** in either place stops and exits. If the tray goes away while the window is hidden, CLAY brings the window back. Without the binding or a confirmed host, closing the window stops the session as before.
 
 On GNOME, **Connect GNOME** starts the core and applies a PAC to apps that follow GNOME proxy settings. If a manual session is running, choose **Apply to GNOME** from the window or tray. The PAC keeps local destinations direct and sends other requests to Mihomo, where Rule, Global and Direct take effect. Switching modes or nodes does not replace the PAC URL. Manual usage remains available on other desktops or when system proxy settings are locked.
 
-Use **Restore GNOME proxy** to restore the previous GNOME mode and script without stopping the core. Stop and Quit restore settings that CLAY still owns before closing the listener. If the process is terminated abruptly, reopen CLAY in GNOME to recover. If another app changes the settings, CLAY preserves newer values. If the script still points to CLAY but the mode or address no longer matches, remove CLAY's script address in GNOME Network Proxy and retry. The recovery snapshot is stored locally with owner-only permissions; it may contain the prior PAC URL and is removed after recovery. It isn't sent anywhere. KDE system proxy, TUN, login startup and remote subscription refresh are outside this preview. The tray exports node numbers and confirmed modes to the local session bus; profile paths, engine logs and node credentials are not included.
+Use **Restore GNOME proxy** to restore the previous GNOME mode and script without stopping the core. Stop and Quit restore settings that CLAY still owns before closing the listener. If the process is terminated abruptly, reopen CLAY in GNOME to recover. If another app changes the settings, CLAY preserves newer values. If the script still points to CLAY but the mode or address no longer matches, remove CLAY's script address in GNOME Network Proxy and retry. The recovery snapshot is stored locally with owner-only permissions; it may contain the prior PAC URL and is removed after recovery. It isn't sent anywhere. KDE system proxy, TUN, and login startup are outside this preview. The tray exports node numbers and confirmed modes to the local session bus; profile paths, engine logs and node credentials are not included.
 
 ## 中文说明
 
@@ -30,18 +34,22 @@ Linux 桌面预览可以读取本地节点配置、启动通过 SHA-256 校验�
 3. 选好节点和模式，按需为 Rule 模式添加 CLAY PAC 规则文件。**Start session** 启动手动代理，内核确认后会显示 HTTP／SOCKS5 本机地址，可在需要代理的应用中填写。
 4. 运行时可通过 **Apply** 切换，结果未确认时可用 **Refresh status** 重新核对。点击 **Stop** 停止代理，**Quit CLAY** 停止并退出。
 
+订阅功能需要 `python3-cryptography`、`libsecret-tools` 以及已解锁的系统钥匙串（Secret Service，如 GNOME Keyring）。停止会话后打开 **Subscriptions…**，填写名称和 HTTPS 地址，点击 **Download and save** 后用 **Use saved nodes** 加载。**Refresh** 只有在新节点通过验证后才会替换缓存，刷新后须重新选择才会生效。需要切回本地配置时，选择文件并点击 **Load nodes**。
+
+下载使用系统证书信任，只允许同源 HTTPS 跳转，线上及解压后的内容各不超过 2 MiB。最多保存 12 份订阅，名称、地址、节点等以 AES-256-GCM 加密写入当前用户的数据目录，密钥保存在 Secret Service。每次添加或刷新都由用户主动触发；钥匙串不可用时不能保存。选中的节点通过本机管道传给 CLI，Mihomo 运行期间仍需要一份仅当前用户可读的临时运行配置。
+
 可选托盘：安装上面的 Ayatana 绑定，并使用支持 StatusNotifierItem／AppIndicator 的桌面面板。确认托盘可用后，运行中关闭窗口会保留会话。可从托盘打开窗口、切换节点和规则／全局／直连，或刷新、停止和退出。菜单显示最多 12 个节点编号，**All nodes…** 可打开完整列表。托盘消失时会重新显示窗口；绑定未安装或托盘未确认时，关闭窗口会停止代理并退出。
 
 在 GNOME 中可用 **Connect GNOME** 启动并应用系统 PAC。手动会话已启动时，可从窗口或托盘选择 **Apply to GNOME**。遵循 GNOME 代理设置的应用会保留本地地址直连，其他流量交给内核的规则／全局／直连模式。切节点或模式不改变 PAC 地址。其他桌面或系统设置锁定时仍可手动接入。
 
-**Restore GNOME proxy** 恢复原 GNOME 模式和脚本地址，同时保留内核。停止或退出会先恢复仍由 CLAY 管理的设置，再关监听。异常退出后，在 GNOME 重新打开 CLAY 会尝试恢复。检测到外部新设置时会保留；若脚本仍指向 CLAY，但模式或地址已被改过，请在 GNOME 的「网络代理」中移除 CLAY 脚本地址，再重试。恢复记录保存在当前用户专用目录，可能包含原 PAC 地址，恢复后删除，不会上传。暂不支持 KDE 系统代理、TUN、开机启动和在线订阅刷新；托盘不展示节点名、服务器或凭据。
+**Restore GNOME proxy** 恢复原 GNOME 模式和脚本地址，同时保留内核。停止或退出会先恢复仍由 CLAY 管理的设置，再关监听。异常退出后，在 GNOME 重新打开 CLAY 会尝试恢复。检测到外部新设置时会保留；若脚本仍指向 CLAY，但模式或地址已被改过，请在 GNOME 的「网络代理」中移除 CLAY 脚本地址，再重试。恢复记录保存在当前用户专用目录，可能包含原 PAC 地址，恢复后删除，不会上传。暂不支持 KDE 系统代理、TUN 和开机启动；托盘不展示节点名、服务器或凭据。
 
 ## Synthetic checks / 测试
 
-The adapter check works on macOS or Linux. Ubuntu’s GTK check uses the real Linux CLI, a synthetic engine, private dconf storage, and a tray watcher on a private session bus. It verifies exported menu actions, independent system settings readback, restart recovery and background cleanup without external network access, a real desktop panel, or a browser.
+The adapter check works on macOS or Linux. Ubuntu’s GTK check uses the real Linux CLI, a synthetic engine, private dconf storage, and a tray watcher and Secret Service on a private session bus. It verifies exported menu actions, independent system settings readback, restart recovery, background cleanup, and a cached subscription session. The download fixture makes no external requests.
 
 ```sh
 python3 Platforms/Linux/smoke-desktop.py .build/release/clay-portable --adapter-only
-sudo apt install gir1.2-ayatanaappindicator3-0.1 dbus-daemon xvfb xauth gsettings-desktop-schemas dconf-gsettings-backend dconf-service libglib2.0-bin
+sudo apt install gir1.2-ayatanaappindicator3-0.1 dbus-daemon xvfb xauth gsettings-desktop-schemas dconf-gsettings-backend dconf-service libglib2.0-bin python3-cryptography libsecret-tools gnome-keyring
 bash Platforms/Linux/smoke-gnome.sh .build/release/clay-portable
 ```

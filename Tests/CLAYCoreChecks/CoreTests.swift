@@ -34,6 +34,7 @@ import Darwin
         tests.testPasswordNodesRejectUnsupportedOrAmbiguousInput()
         try tests.testHysteria2Nodes()
         tests.testHysteria2RejectsUnsupportedOrAmbiguousInput()
+        try tests.testTuicV5()
         try tests.testFullConfigurationImportsOutboundButNotSystemInputs()
         tests.testOfflineSubscriptionTextNeverFetchesURLs()
         try tests.testDistinctEngineNodeNames()
@@ -266,6 +267,59 @@ import Darwin
             XCTAssertTrue(result.profiles.isEmpty)
             XCTAssertEqual(result.issues, [.unsupportedOption: 1])
         }
+    }
+
+    func testTuicV5() throws {
+        let endpoint = "@[::1]:8443?sni=origin.test&alpn=h3,h3-29&congestion_control=bbr&udp_relay_mode=quic&allowInsecure=0"
+        let rawPassword = "00+1%3Apass%40word%252F"
+        let uri = "tuic://\(uuid.uppercased()):\(rawPassword)\(endpoint)#Example%20TUIC"
+        let encodedSeparator = "tuic://\(uuid)%3A\(rawPassword)\(endpoint)"
+        let parsed = SubscriptionImporter.parse(Data([uri, encodedSeparator].joined(separator: "\n").utf8).base64EncodedString())
+        XCTAssertEqual(parsed.issues, [:])
+        XCTAssertEqual(parsed.profiles.map(\.name), ["Example TUIC", "TUIC"])
+        let node = try XCTUnwrap(parsed.profiles.first)
+        let encoded = try XCTUnwrap(parsed.profiles.last)
+        XCTAssertTrue(node.hasSameConnection(as: encoded))
+        XCTAssertEqual([node.protocolName, node.transport, node.security], ["tuic", "quic", "tls"])
+        let options = try fields(node)
+        XCTAssertEqual(options["uuid"] as? String, uuid)
+        XCTAssertEqual(options["password"] as? String, "00+1:pass@word%2F")
+        XCTAssertEqual(options["sni"] as? String, "origin.test")
+        XCTAssertEqual(options["alpn"] as? [String], ["h3", "h3-29"])
+        XCTAssertEqual(options["udp-relay-mode"] as? String, "quic")
+        XCTAssertEqual(options["congestion-controller"] as? String, "bbr")
+        XCTAssertEqual(options["skip-cert-verify"] as? Bool, false)
+        let yaml = "{proxies: [{type: tuic, server: '::1', port: 8443, uuid: \(uuid), password: '00+1:pass@word%2F', sni: origin.test, alpn: [h3, h3-29], udp-relay-mode: quic, congestion-controller: bbr, disable-sni: false, reduce-rtt: false}]}"
+        XCTAssertTrue(node.hasSameConnection(as: try XCTUnwrap(ProfileImporter.read(yaml).profiles.first)))
+        let defaults = try XCTUnwrap(ProfileImporter.read("tuic://\(uuid)%3A0000@origin.test:443?#v2rayN").profiles.first)
+        let defaultsFields = try fields(defaults)
+        XCTAssertEqual(defaultsFields["alpn"] as? [String], ["h3"])
+        XCTAssertEqual(defaultsFields["udp-relay-mode"] as? String, "native")
+        XCTAssertEqual(defaultsFields["password"] as? String, "0000")
+
+        let root = "tuic://\(uuid):fixture@origin.test:443?"
+        for option in ["insecure=1", "reduce_rtt=true", "disable_sni=1", "security=none", "udp_relay_mode=other",
+                       "congestion_control=other", "alpn=h3,,alt", "sni=bad/name", "token=fixture"] {
+            XCTAssertEqual(ProfileImporter.read(root + option).issues, [.unsupportedOption: 1])
+        }
+        XCTAssertEqual(ProfileImporter.read(root + "sni=a.test&s%6Ei=b.test").issues, [.malformed: 1])
+        for credentials in ["fixture", "invalid:fixture", "\(uuid):", "\(uuid):bad%0Asecret"] {
+            XCTAssertEqual(ProfileImporter.read("tuic://\(credentials)@origin.test:443").issues, [.invalidAccount: 1])
+        }
+        let base = "type: tuic, server: origin.test, port: 443, uuid: \(uuid), password: 0000"
+        let digest = String(repeating: "AB:", count: 31) + "AB"
+        let pinned = "{proxies: [{\(base), fingerprint: '\(digest)'}]}"
+        let pinnedFields = try fields(XCTUnwrap(ProfileImporter.read(pinned).profiles.first))
+        XCTAssertEqual(pinnedFields["fingerprint"] as? String, String(repeating: "ab", count: 32))
+        XCTAssertEqual(pinnedFields["password"] as? String, "0000")
+        for option in ["skip-cert-verify: true, fingerprint: '\(digest)'", "token: fixture", "reduce-rtt: true",
+                       "disable-sni: true", "udp: false", "alpn: []", "certificate: /tmp/unknown"] {
+            XCTAssertEqual(ProfileImporter.read("{proxies: [{\(base), \(option)}]}").issues, [.unsupportedOption: 1])
+        }
+        let badBoolean = """
+        {"proxies":[{"type":"tuic","server":"origin.test","port":443,"uuid":"\(uuid)","password":"0000","reduce-rtt":0}]}
+        """
+        XCTAssertEqual(ProfileImporter.read(badBoolean).issues, [.malformed: 1])
     }
 
     func testFullConfigurationImportsOutboundButNotSystemInputs() throws {

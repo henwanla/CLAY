@@ -68,7 +68,8 @@ enum ClashYAML {
         private var eventCount = 0
         private static let maxEvents = 200_000
         private static let maxDepth = 64
-        private static let booleanFields: Set<String> = ["udp", "tls", "skip-cert-verify", "support-x25519mlkem768"]
+        private static let booleanFields: Set<String> = ["udp", "tls", "skip-cert-verify", "support-x25519mlkem768",
+                                                         "disable-sni", "reduce-rtt"]
 
         init(_ input: UnsafeRawBufferPointer) throws {
             guard let start = input.bindMemory(to: UInt8.self).baseAddress,

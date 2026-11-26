@@ -74,9 +74,11 @@ When CLAY shows **系统代理已启用**, the default macOS proxy points to CLA
 - **Subscriptions** can be added, manually refreshed, selected, or removed. A failed refresh keeps the last usable list. Changes apply after restarting the proxy. New builds migrate the old JSON to an encrypted cache and keep its key in a separate private local directory. A process or backup with access to both can still read the subscriptions. Do not edit the migrated cache with an older build. Subscription downloads follow same-origin redirects; for a move to another site, use the trusted final URL. Manual imports last until you quit the app.
 - **Diagnostics** can compare two rounds of node probes and copy a report without node names, server addresses, UUIDs, subscription URLs, or raw configuration. Probes send a request through the node to a 204 endpoint at gstatic.com.
 
-**Compatibility:** VMess and VLESS share links, Base64 lists, V2Ray/Xray JSON outbounds, Shadowsocks SIP002 (supported AEAD ciphers), TCP/TLS Trojan, Hysteria2 (`hysteria2://` or `hy2://`), and inline `proxies` from Clash/Mihomo YAML or JSON. A subscription has a 2 MiB download limit and can import up to 100 compatible nodes. CLAY does not run imported providers, policy groups, rules, DNS, inbounds, or TUN settings.
+**Compatibility:** VMess and VLESS share links, Base64 lists, V2Ray/Xray JSON outbounds, Shadowsocks SIP002 (supported AEAD ciphers), TCP/TLS Trojan, Hysteria2 (`hysteria2://` or `hy2://`), TUIC v5 (`tuic://`), and inline `proxies` from Clash/Mihomo YAML or JSON. A subscription has a 2 MiB download limit and can import up to 100 compatible nodes. CLAY does not run imported providers, policy groups, rules, DNS, inbounds, or TUN settings.
 
 The development build adds Hysteria2 with a fixed port, SNI, Salamander, and Gecko. Share links default to port 443 and require TLS certificate validation. Links with `insecure=1`, `pinSHA256`, port hopping, or Realms are not imported. Inline Clash/Mihomo Hysteria2 and Trojan nodes can provide a SHA-256 `fingerprint` to use Mihomo's native certificate pinning. Shadowsocks plugins and Trojan settings that bypass certificate validation are not imported.
+
+TUIC v5 in development builds requires a UUID, password, and port. It supports SNI, ALPN, congestion control, and `native` or `quic` UDP relay. Share links use standard TLS validation; inline Clash/Mihomo nodes can also use Mihomo's native SHA-256 `fingerprint`. Imports reject TUIC v4 tokens, disabled SNI, skipped certificate verification, and 0-RTT.
 
 ## Build and verify
 

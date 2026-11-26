@@ -38,6 +38,10 @@ bash scripts/swift-local.sh build -c release --product CLAYCoreChecks
 
 The host test imports a synthetic Clash profile with the shared Swift code, then sends IPv4 through the packet bridge to local protocol servers. It checks TCP for VMess, VLESS, Shadowsocks AEAD, Trojan TLS and Hysteria2 (plain, Salamander and Gecko), plus UDP for all except the Shadowsocks fixture. It verifies routing to the chosen node on each start and rejects untrusted certificates, mismatched pins and wrong passwords. The Lab tests switch between all seven TCP variants within a single packet session, check that the previous upstream socket closes, and verify that invalid updates leave the previous node in place. Neither the host tests nor the iOS SDK link checks exercise the device VPN or system DNS.
 
+TUIC v5 的两种 UDP 中继（native、quic）也已在同一组宿主测试中通过 TCP 与 UDP 验证，并纳入 Lab 在线切换的 TCP 回归。错误密码、错误证书指纹及无指纹的自签名证书均不能取得应答。当前 Lab 仍只开放固定 IPv4/TCP 测试目标。
+
+Both TUIC v5 UDP relay modes (native and quic) now pass TCP and UDP in the same host suite and TCP live switching in the Lab. Wrong passwords, mismatched certificate pins, and unpinned self-signed certificates yield no response. The Lab still exposes only its fixed IPv4/TCP test target.
+
 CI repeats Lab TCP switching and restart tests with Go's race detector, then checks arm64 linkage for both iOS SDKs. Before distributing a binary, include the corresponding Mihomo source, bridge source, build instructions, and required license files.
 
 ## CLAY 隧道实验 / CLAY Tunnel Lab

@@ -121,11 +121,11 @@ with tempfile.TemporaryDirectory(prefix='clay-fixtures-') as tmp, ExitStack() as
             try: server.wait(timeout=3)
             except subprocess.TimeoutExpired: server.kill(); server.wait()
 
-    # Native Hysteria2 uses UDP/QUIC. A generated cert and its native Mihomo
+    # Hysteria2 and TUIC v5 use UDP/QUIC. A generated cert and its native Mihomo
     # fingerprint keep the fixture off the system trust store.
     fingerprint = hashlib.sha256(subprocess.check_output(
         ['/usr/bin/openssl', 'x509', '-outform', 'DER', '-in', cert], env=env)).hexdigest()
-    hy2_config = {'log-level': 'info', 'mode': 'rule', 'ipv6': False, 'listeners': [], 'rules': [
+    quic_config = {'log-level': 'info', 'mode': 'rule', 'ipv6': False, 'listeners': [], 'rules': [
         f'AND,((IP-CIDR,127.0.0.1/32),(DST-PORT,{origin.server_port})),DIRECT', 'MATCH,REJECT',
     ]}
     nodes = []
@@ -141,25 +141,35 @@ with tempfile.TemporaryDirectory(prefix='clay-fixtures-') as tmp, ExitStack() as
             if obfs:
                 fields = {'obfs': obfs, 'obfs-password': secrets.token_hex(24)}
                 node.update(fields); listener.update(fields)
-            nodes.append(node); hy2_config['listeners'].append(listener)
+            nodes.append(node); quic_config['listeners'].append(listener)
+        for relay in ('native', 'quic'):
+            udp = pending.enter_context(socket.socket(type=socket.SOCK_DGRAM)); udp.bind(('127.0.0.1', 0))
+            port = udp.getsockname()[1]
+            password = secrets.token_hex(24)
+            name = 'tuic-' + relay
+            nodes.append({'name': name, 'type': 'tuic', 'server': '127.0.0.1', 'port': port, 'uuid': account,
+                          'password': password, 'sni': 'clay.test', 'fingerprint': fingerprint, 'udp-relay-mode': relay})
+            quic_config['listeners'].append({'name': name, 'type': 'tuic', 'listen': '127.0.0.1', 'port': str(port),
+                                            'users': {account: password}, 'certificate': str(cert), 'private-key': str(key)})
 
-    hy2_profiles = tmp / 'hy2-profiles.json'; hy2_profiles.write_text(json.dumps({'proxies': nodes})); hy2_profiles.chmod(0o600)
-    hy2_server = tmp / 'hy2-server.json'; hy2_server.write_text(json.dumps(hy2_config)); hy2_server.chmod(0o600)
-    subprocess.run([tool, 'verify-config', hy2_profiles, engine], env=env, timeout=15, check=True)
-    hy2_log = tmp / 'hy2-server.log'
-    with hy2_log.open('w') as log, subprocess.Popen([engine, '-d', tmp, '-f', hy2_server], cwd=tmp, env=env, stdout=log, stderr=subprocess.STDOUT) as server:
+    quic_profiles = tmp / 'quic-profiles.json'; quic_profiles.write_text(json.dumps({'proxies': nodes})); quic_profiles.chmod(0o600)
+    quic_server = tmp / 'quic-server.json'; quic_server.write_text(json.dumps(quic_config)); quic_server.chmod(0o600)
+    subprocess.run([tool, 'verify-config', quic_profiles, engine], env=env, timeout=15, check=True)
+    quic_log = tmp / 'quic-server.log'
+    with quic_log.open('w') as log, subprocess.Popen([engine, '-d', tmp, '-f', quic_server], cwd=tmp, env=env, stdout=log, stderr=subprocess.STDOUT) as server:
         try:
             for _ in range(100):
-                if server.poll() is not None: raise RuntimeError('Synthetic Hysteria2 server failed')
-                output = hy2_log.read_text()
-                if all(f'Hysteria2[{node["name"]}] proxy listening' in output for node in nodes): break
+                if server.poll() is not None: raise RuntimeError('Synthetic QUIC server failed')
+                output = quic_log.read_text()
+                if all(f'[{node["name"]}] proxy listening' in output for node in nodes): break
                 time.sleep(.05)
-            else: raise RuntimeError('Synthetic Hysteria2 server did not bind all listeners')
-            subprocess.run([tool, 'smoke', hy2_profiles, engine, target, token], env=env, timeout=40, check=True)
-            hy2_profiles.write_text(json.dumps({'proxies': [{**nodes[0], 'fingerprint': secrets.token_hex(32)}]}))
-            failed = subprocess.run([tool, 'smoke', hy2_profiles, engine, target, token], text=True, capture_output=True, env=env, timeout=20)
-            assert failed.returncode == 1 and 'FAIL probeFailed' in failed.stdout, 'Invalid Hysteria2 certificate was not rejected'
-            print('PASS Hysteria2 plain, Salamander and Gecko forwarding; invalid certificate refused')
+            else: raise RuntimeError('Synthetic QUIC server did not bind all listeners')
+            subprocess.run([tool, 'smoke', quic_profiles, engine, target, token], env=env, timeout=40, check=True)
+            for node in (nodes[0], nodes[-1]):
+                quic_profiles.write_text(json.dumps({'proxies': [{**node, 'fingerprint': secrets.token_hex(32)}]}))
+                failed = subprocess.run([tool, 'smoke', quic_profiles, engine, target, token], text=True, capture_output=True, env=env, timeout=20)
+                assert failed.returncode == 1 and 'FAIL probeFailed' in failed.stdout, 'Invalid QUIC certificate was not rejected'
+            print('PASS Hysteria2 and TUIC forwarding; invalid certificates refused')
         finally:
             server.terminate()
             try: server.wait(timeout=3)

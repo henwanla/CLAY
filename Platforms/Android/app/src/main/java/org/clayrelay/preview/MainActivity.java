@@ -259,6 +259,7 @@ public final class MainActivity extends Activity {
             case "ss": return "Shadowsocks";
             case "trojan": return "Trojan";
             case "hysteria2": return "Hysteria2";
+            case "tuic": return "TUIC";
             default: return "—";
         }
     }

@@ -41,10 +41,12 @@ def offline_checks(directory):
     vmess = {"ps": NODE_LABEL, "add": NODE_HOST, "id": NODE_ID, "port": "443", "tls": "tls"}
     vmess_url = b"vmess://" + base64.b64encode(json.dumps(vmess).encode())
     hy2_url = f"hy2://{NODE_PASSWORD.decode()}@{NODE_HOST}?obfs=salamander&obfs-password={OBFS_PASSWORD.decode()}#{NODE_LABEL}"
+    tuic_url = f"tuic://{NODE_ID}%3A{NODE_PASSWORD.decode()}@{NODE_HOST}:443?udp_relay_mode=quic#{NODE_LABEL}"
     links = directory / "节点 profiles.txt"
-    links.write_text("\ufeff" + node + vmess_url.decode() + "\n" + hy2_url + "\nhttps://never-fetch.example.test/private\n", encoding="utf-8")
-    assert run("inspect", links) == b"nodes=3\nhysteria2/quic/tls=1\nvless/tcp/tls=1\nvmess/tcp/tls=1\nskipped.unsupportedProtocol=1\n"
-    assert run("inspect", links, "--numbered") == (b"nodes=3\nnode=1 vless/tcp/tls\nnode=2 vmess/tcp/tls\nnode=3 hysteria2/quic/tls\n"
+    links.write_text("\ufeff" + "\n".join([node.rstrip(), vmess_url.decode(), hy2_url, tuic_url,
+                                           "https://never-fetch.example.test/private", ""]), encoding="utf-8")
+    assert run("inspect", links) == b"nodes=4\nhysteria2/quic/tls=1\ntuic/quic/tls=1\nvless/tcp/tls=1\nvmess/tcp/tls=1\nskipped.unsupportedProtocol=1\n"
+    assert run("inspect", links, "--numbered") == (b"nodes=4\nnode=1 vless/tcp/tls\nnode=2 vmess/tcp/tls\nnode=3 hysteria2/quic/tls\nnode=4 tuic/quic/tls\n"
                                                    b"skipped.unsupportedProtocol=1\n")
     raw = links.read_bytes()
     assert run("inspect", "--profile-stdin", "--numbered", data=len(raw).to_bytes(4, "big") + raw) == run("inspect", links, "--numbered")
@@ -81,12 +83,22 @@ proxies:
     password: {NODE_PASSWORD.decode()}
     obfs: gecko
     obfs-password: {OBFS_PASSWORD.decode()}
+  - type: tuic
+    name: {NODE_LABEL}
+    server: {NODE_HOST}
+    port: 443
+    uuid: {NODE_ID}
+    password: {NODE_PASSWORD.decode()}
+    udp-relay-mode: native
+    reduce-rtt: false
   - type: unsupported-fixture
     name: Ignored
 """, encoding="utf-8")
-    assert run("inspect", yaml) == b"nodes=4\nhysteria2/quic/tls=1\nss/tcp/aead=1\ntrojan/tcp/tls=1\nvless/tcp/tls=1\nskipped.unsupportedProtocol=1\n"
-    assert run("inspect", yaml, "--numbered") == (b"nodes=4\nnode=1 vless/tcp/tls\nnode=2 ss/tcp/aead\n"
-                                                  b"node=3 trojan/tcp/tls\nnode=4 hysteria2/quic/tls\nskipped.unsupportedProtocol=1\n")
+    assert run("inspect", yaml) == (b"nodes=5\nhysteria2/quic/tls=1\nss/tcp/aead=1\ntrojan/tcp/tls=1\ntuic/quic/tls=1\n"
+                                     b"vless/tcp/tls=1\nskipped.unsupportedProtocol=1\n")
+    assert run("inspect", yaml, "--numbered") == (b"nodes=5\nnode=1 vless/tcp/tls\nnode=2 ss/tcp/aead\n"
+                                                  b"node=3 trojan/tcp/tls\nnode=4 hysteria2/quic/tls\nnode=5 tuic/quic/tls\n"
+                                                  b"skipped.unsupportedProtocol=1\n")
 
     # JSON numbers 0/1 do not stand in for true/false, or vice versa.
     json_file = directory / "typed-fields.json"

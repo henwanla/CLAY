@@ -39,6 +39,8 @@ const maxNodes = 100
 const inactive = -1
 
 var nodeName = regexp.MustCompile("^node-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+var tuicAccount = regexp.MustCompile("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+var certificateDigest = regexp.MustCompile("^[0-9a-f]{64}$")
 var errProfile = errors.New("invalid packet profile")
 var errActive = errors.New("session already running")
 
@@ -53,6 +55,12 @@ var nestedKeys = map[string]map[string]bool{
 	"reality-opts": {"public-key": true, "short-id": true, "support-x25519mlkem768": true},
 	"ws-opts":      {"path": true, "headers": true},
 	"grpc-opts":    {"grpc-service-name": true},
+}
+
+var tuicKeys = map[string]bool{
+	"name": true, "type": true, "server": true, "port": true, "uuid": true, "password": true,
+	"sni": true, "alpn": true, "skip-cert-verify": true, "fingerprint": true,
+	"udp-relay-mode": true, "congestion-controller": true,
 }
 
 type profile struct {
@@ -81,8 +89,15 @@ func decodeProfile(data []byte) (profile, []string, error) {
 	ids := make([]string, len(p.Proxies))
 	seen := make(map[string]bool, len(ids))
 	for index, proxy := range p.Proxies {
+		allowedKeys := nodeKeys
+		if proxy["type"] == "tuic" {
+			allowedKeys = tuicKeys
+			if !validTuic(proxy) {
+				return profile{}, nil, errProfile
+			}
+		}
 		for key, value := range proxy {
-			if !nodeKeys[key] {
+			if !allowedKeys[key] {
 				return profile{}, nil, errProfile
 			}
 			if allowed, nested := nestedKeys[key]; nested {
@@ -109,13 +124,49 @@ func decodeProfile(data []byte) (profile, []string, error) {
 		}
 		seen[id] = true
 		switch proxy["type"] {
-		case "vmess", "vless", "ss", "trojan", "hysteria2":
+		case "vmess", "vless", "ss", "trojan", "hysteria2", "tuic":
 		default:
 			return profile{}, nil, errProfile
 		}
 		ids[index] = id
 	}
 	return p, ids, nil
+}
+
+func validTuic(node map[string]any) bool {
+	account, _ := node["uuid"].(string)
+	password, _ := node["password"].(string)
+	if !tuicAccount.MatchString(account) || password == "" || strings.IndexFunc(password, func(c rune) bool { return c < 32 || c == 127 }) >= 0 ||
+		node["skip-cert-verify"] != false || (node["udp-relay-mode"] != "native" && node["udp-relay-mode"] != "quic") {
+		return false
+	}
+	if congestion, ok := node["congestion-controller"]; ok && congestion != "cubic" && congestion != "new_reno" && congestion != "bbr" {
+		return false
+	}
+	if value, ok := node["sni"]; ok {
+		if sni, isString := value.(string); !isString || sni == "" {
+			return false
+		}
+	}
+	if value, ok := node["fingerprint"]; ok {
+		if pin, isString := value.(string); !isString || !certificateDigest.MatchString(pin) {
+			return false
+		}
+	}
+	alpn, ok := node["alpn"].([]any)
+	if !ok || len(alpn) == 0 {
+		return false
+	}
+	length := 0
+	for _, value := range alpn {
+		protocol, _ := value.(string)
+		length += 1 + len(protocol)
+		if len(protocol) == 0 || len(protocol) > 255 || length > 65535 ||
+			strings.IndexFunc(protocol, func(c rune) bool { return c < 33 || c > 126 }) >= 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func loadProfile(data []byte, chosen, mode int) (*config.Config, error) {

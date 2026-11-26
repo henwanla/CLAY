@@ -144,6 +144,13 @@ func TestImportedProtocols(t *testing.T) {
 		listener, err := inbound.NewHysteria2(&in)
 		add(label, listener, err, out, true)
 	}
+	tuicIndex := len(nodes)
+	for _, relay := range []string{"native", "quic"} {
+		listener, err := inbound.NewTuic(&inbound.TuicOption{BaseOption: base("tuic"),
+			Certificate: cert, PrivateKey: private, Users: map[string]string{account: password}})
+		add("tuic-"+relay, listener, err, map[string]any{"type": "tuic", "uuid": account, "password": password,
+			"fingerprint": pin, "udp-relay-mode": relay, "congestion-controller": "cubic"}, true)
+	}
 
 	data := normalizedFixtures(t, nodes...)
 	for index, check := range variants {
@@ -180,19 +187,20 @@ func TestImportedProtocols(t *testing.T) {
 			})
 		}
 	})
-	const trojanIndex = 3
-	for _, check := range []struct{ label, key, value string }{
-		{"trojan-untrusted-cert", "fingerprint", ""},
-		{"trojan-wrong-pin", "fingerprint", strings.Repeat("00", 32)},
-		{"trojan-wrong-password", "password", "different-fixture-password"},
-		{"hy2-wrong-pin", "fingerprint", strings.Repeat("00", 32)},
+	for _, check := range []struct {
+		label, key, value string
+		index             int
+	}{
+		{"trojan-untrusted-cert", "fingerprint", "", 3},
+		{"trojan-wrong-pin", "fingerprint", strings.Repeat("00", 32), 3},
+		{"trojan-wrong-password", "password", "different-fixture-password", 3},
+		{"hy2-wrong-pin", "fingerprint", strings.Repeat("00", 32), 4},
+		{"tuic-untrusted-cert", "fingerprint", "", tuicIndex},
+		{"tuic-wrong-pin", "fingerprint", strings.Repeat("00", 32), tuicIndex},
+		{"tuic-wrong-password", "password", "different-fixture-password", tuicIndex},
 	} {
 		t.Run(check.label, func(t *testing.T) {
-			index := trojanIndex
-			if check.label == "hy2-wrong-pin" {
-				index++
-			}
-			wrong := cloneFields(nodes[index])
+			wrong := cloneFields(nodes[check.index])
 			if check.value == "" {
 				delete(wrong, check.key)
 			} else {
@@ -207,6 +215,29 @@ func TestImportedProtocols(t *testing.T) {
 			defer closePeer()
 			checkNoReply(t, peer, ctx)
 		})
+	}
+}
+
+func TestTuicRejectsUnsafePrivateProfile(t *testing.T) {
+	for _, altered := range []map[string]any{
+		{"skip-cert-verify": true}, {"disable-sni": true}, {"reduce-rtt": true}, {"token": "fixture"},
+		{"certificate": "/tmp/unknown"}, {"udp-relay-mode": "invalid"}, {"alpn": []string{}},
+		{"uuid": "invalid"}, {"password": ""}, {"fingerprint": "invalid"},
+		{"type": "trojan"}, // TUIC options are not accepted on other node types.
+	} {
+		base := map[string]any{"name": "node-478733c8-afad-47f1-8ee0-cee758e7447f", "type": "tuic",
+			"server": "127.0.0.1", "port": 443, "uuid": "478733c8-afad-47f1-8ee0-cee758e7447f", "password": "fixture",
+			"skip-cert-verify": false, "alpn": []string{"h3"}, "udp-relay-mode": "native"}
+		for key, value := range altered {
+			base[key] = value
+		}
+		data, err := json.Marshal(profile{Proxies: []map[string]any{base}, Rules: []string{"MATCH,CLAY"}})
+		if err != nil {
+			t.Fatal("unable to encode fixture")
+		}
+		if _, _, err := decodeProfile(data); err != errProfile {
+			t.Fatal("accepted unsafe or ambiguous TUIC options")
+		}
 	}
 }
 

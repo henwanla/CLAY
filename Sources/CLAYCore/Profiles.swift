@@ -11,6 +11,7 @@ private enum PasswordProtocol {
     case shadowsocks(cipher: String)
     case trojan(sni: String, alpn: [String]?, certificatePin: String?)
     case hysteria2(sni: String, obfs: String?, obfsPassword: String?, fingerprint: String?)
+    case tuic(account: String, sni: String, alpn: [String], certificatePin: String?, relay: String, congestion: String?)
 }
 
 public struct NodeProfile: Identifiable {
@@ -93,8 +94,7 @@ public struct NodeProfile: Identifiable {
         case .trojan(let sni, let alpn, let certificatePin):
             guard sni.isEmpty || Self.validPasswordNodeHost(sni) else { throw ImportError.unsupportedOption }
             if let alpn {
-                guard alpn.allSatisfy({ (1...255).contains($0.utf8.count) && $0.utf8.allSatisfy { (33...126).contains($0) } }),
-                      alpn.reduce(0, { $0 + $1.utf8.count + 1 }) <= 65_535 else { throw ImportError.unsupportedOption }
+                guard Self.validALPN(alpn) else { throw ImportError.unsupportedOption }
                 fields["alpn"] = alpn
             }
             self.protocolName = "trojan"
@@ -122,6 +122,24 @@ public struct NodeProfile: Identifiable {
             fields.removeValue(forKey: "udp") // Mihomo's Hysteria2 adapter always supports UDP.
             fields["skip-cert-verify"] = false
             if !sni.isEmpty { fields["sni"] = sni }
+        case .tuic(let account, let sni, let alpn, let certificatePin, let relay, let congestion):
+            guard let uuid = UUID(uuidString: account) else { throw ImportError.invalidAccount }
+            guard udp, sni.isEmpty || Self.validPasswordNodeHost(sni),
+                  !alpn.isEmpty, Self.validALPN(alpn), ["native", "quic"].contains(relay),
+                  congestion.map({ ["cubic", "new_reno", "bbr"].contains($0) }) ?? true
+            else { throw ImportError.unsupportedOption }
+            self.protocolName = "tuic"
+            self.security = "tls"
+            self.transport = "quic"
+            fallback = "TUIC"
+            fields.removeValue(forKey: "udp") // Mihomo's TUIC adapter always supports UDP.
+            fields["uuid"] = uuid.uuidString.lowercased()
+            fields["alpn"] = alpn
+            fields["udp-relay-mode"] = relay
+            fields["congestion-controller"] = congestion
+            fields["skip-cert-verify"] = false
+            if let certificatePin { fields["fingerprint"] = try Self.certificateFingerprint(certificatePin) }
+            if !sni.isEmpty { fields["sni"] = sni }
         }
         self.name = Self.title(name, fallback: fallback)
         fields["type"] = protocolName
@@ -130,6 +148,11 @@ public struct NodeProfile: Identifiable {
 
     private static func validPassword(_ password: String) -> Bool {
         !password.isEmpty && !password.utf8.contains { $0 < 32 || $0 == 127 }
+    }
+
+    private static func validALPN(_ values: [String]) -> Bool {
+        values.allSatisfy({ (1...255).contains($0.utf8.count) && $0.utf8.allSatisfy { (33...126).contains($0) } }) &&
+            values.reduce(0, { $0 + $1.utf8.count + 1 }) <= 65_535
     }
 
     private static func certificateFingerprint(_ value: String) throws -> String {
@@ -181,7 +204,7 @@ public struct ImportResult {
 
 public enum ProfileImporter {
     public static let maxBytes = 2 * 1024 * 1024
-    private static let linkSchemes = ["vmess://", "vless://", "ss://", "trojan://", "hysteria2://", "hy2://"]
+    private static let linkSchemes = ["vmess://", "vless://", "ss://", "trojan://", "hysteria2://", "hy2://", "tuic://"]
 
     public static func read(_ text: String) -> ImportResult {
         var result = ImportResult()
@@ -239,7 +262,7 @@ public enum ProfileImporter {
 
     private static func fromClashProxy(_ item: Any) throws -> NodeProfile {
         guard let p = item as? [String: Any], let kind = p["type"] as? String else { throw ImportError.malformed }
-        if ["ss", "trojan", "hysteria2"].contains(kind) { return try fromClashPasswordProxy(p, kind: kind) }
+        if ["ss", "trojan", "hysteria2", "tuic"].contains(kind) { return try fromClashPasswordProxy(p, kind: kind) }
         guard ["vless", "vmess"].contains(kind) else { throw ImportError.unsupportedProtocol }
         guard let server = p["server"] as? String, let port = int(p["port"]), let account = p["uuid"] as? String else {
             throw ImportError.invalidAccount
@@ -286,6 +309,8 @@ public enum ProfileImporter {
         switch kind {
         case "ss": extra = ["cipher"]
         case "hysteria2": extra = ["sni", "obfs", "obfs-password", "skip-cert-verify", "fingerprint"]
+        case "tuic": extra = ["uuid", "sni", "alpn", "fingerprint", "udp-relay-mode", "congestion-controller",
+                              "skip-cert-verify", "disable-sni", "reduce-rtt"]
         default: extra = ["network", "tls", "sni", "alpn", "skip-cert-verify", "fingerprint"]
         }
         guard Set(p.keys).isSubset(of: common.union(extra)) else { throw ImportError.unsupportedOption }
@@ -302,6 +327,16 @@ public enum ProfileImporter {
             mode = .hysteria2(sni: try clashValue(p, "sni", as: String.self) ?? "",
                               obfs: try clashValue(p, "obfs", as: String.self),
                               obfsPassword: try clashValue(p, "obfs-password", as: String.self), fingerprint: fingerprint)
+        } else if kind == "tuic" {
+            guard let account = try clashValue(p, "uuid", as: String.self) else { throw ImportError.invalidAccount }
+            for flag in ["skip-cert-verify", "disable-sni", "reduce-rtt"] {
+                guard try clashValue(p, flag, as: Bool.self) != true else { throw ImportError.unsupportedOption }
+            }
+            mode = .tuic(account: account, sni: try clashValue(p, "sni", as: String.self) ?? "",
+                         alpn: try clashValue(p, "alpn", as: [String].self) ?? ["h3"],
+                         certificatePin: try clashValue(p, "fingerprint", as: String.self),
+                         relay: try clashValue(p, "udp-relay-mode", as: String.self) ?? "native",
+                         congestion: try clashValue(p, "congestion-controller", as: String.self))
         } else {
             guard (try clashValue(p, "network", as: String.self) ?? "tcp") == "tcp" else { throw ImportError.unsupportedTransport }
             guard try clashValue(p, "tls", as: Bool.self) != false, try clashValue(p, "skip-cert-verify", as: Bool.self) != true
@@ -310,7 +345,7 @@ public enum ProfileImporter {
                            certificatePin: try clashValue(p, "fingerprint", as: String.self))
         }
         return try NodeProfile(name: clashValue(p, "name", as: String.self) ?? "", server: server, port: port,
-                               password: password, udp: clashValue(p, "udp", as: Bool.self) ?? (kind == "hysteria2"), mode: mode)
+                               password: password, udp: clashValue(p, "udp", as: Bool.self) ?? ["hysteria2", "tuic"].contains(kind), mode: mode)
     }
 
     private static func fromPasswordLink(_ payload: String, kind: String) throws -> NodeProfile {
@@ -372,9 +407,8 @@ public enum ProfileImporter {
             }
         } else {
             guard let decoded = authority[0].removingPercentEncoding else { throw ImportError.malformed }
-            password = decoded
             var query: [String: String] = [:]
-            if queried.count == 2 {
+            if queried.count == 2, kind != "tuic" || !queried[1].isEmpty {
                 for entry in queried[1].split(separator: "&", omittingEmptySubsequences: false) {
                     let pair = entry.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
                     // Hysteria follows form-style URL query decoding; its userinfo above does not.
@@ -387,12 +421,35 @@ public enum ProfileImporter {
                 }
             }
             if kind == "hysteria2" {
+                password = decoded
                 // URI pinSHA256 checks the leaf and can require CA validation as well.
                 // Do not translate it to Mihomo's different, native fingerprint trust mode.
                 guard Set(query.keys).isSubset(of: ["sni", "obfs", "obfs-password", "insecure"]), (query["insecure"] ?? "0") == "0"
                 else { throw ImportError.unsupportedOption }
                 mode = .hysteria2(sni: query["sni"] ?? "", obfs: query["obfs"], obfsPassword: query["obfs-password"], fingerprint: nil)
+            } else if kind == "tuic" {
+                let flags: Set<String> = ["allowInsecure", "allow_insecure", "insecure", "disable_sni", "reduce_rtt"]
+                guard Set(query.keys).isSubset(of: flags.union(["sni", "alpn", "congestion_control", "udp_relay_mode", "security"])),
+                      (query["security"] ?? "tls") == "tls",
+                      flags.allSatisfy({ ["0", "false"].contains(query[$0] ?? "0") })
+                else { throw ImportError.unsupportedOption }
+                // v2rayN percent-encodes the entire userinfo; other exporters leave the colon literal.
+                let parts = authority[0].split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+                let account: String
+                if parts.count == 2, let user = parts[0].removingPercentEncoding, let pass = parts[1].removingPercentEncoding {
+                    account = user
+                    password = pass
+                } else {
+                    let fields = decoded.split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+                    guard fields.count == 2 else { throw ImportError.invalidAccount }
+                    account = String(fields[0])
+                    password = String(fields[1])
+                }
+                mode = .tuic(account: account, sni: query["sni"] ?? "",
+                             alpn: query["alpn"]?.components(separatedBy: ",") ?? ["h3"], certificatePin: nil,
+                             relay: query["udp_relay_mode"] ?? "native", congestion: query["congestion_control"])
             } else {
+                password = decoded
                 guard Set(query.keys).isSubset(of: ["type", "security", "sni", "alpn", "allowInsecure"]),
                       (query["security"] ?? "tls") == "tls", ["0", "false"].contains(query["allowInsecure"] ?? "0")
                 else { throw ImportError.unsupportedOption }
@@ -408,6 +465,7 @@ public enum ProfileImporter {
         if link.hasPrefix("trojan://") { return try fromPasswordLink(String(link.dropFirst(9)), kind: "trojan") }
         if link.hasPrefix("hysteria2://") { return try fromPasswordLink(String(link.dropFirst(12)), kind: "hysteria2") }
         if link.hasPrefix("hy2://") { return try fromPasswordLink(String(link.dropFirst(6)), kind: "hysteria2") }
+        if link.hasPrefix("tuic://") { return try fromPasswordLink(String(link.dropFirst(7)), kind: "tuic") }
         if link.hasPrefix("vmess://") {
             guard let data = Base64.decode(String(link.dropFirst(8))), let p = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let server = p["add"] as? String, let account = p["id"] as? String, let port = int(p["port"]) else { throw ImportError.malformed }

@@ -164,10 +164,13 @@ func newPeer(t *testing.T, id uint64) (*stack.Stack, context.Context, func()) {
 	}()
 	return peer, ctx, func() {
 		cancel()
+		// Close both packet queues before joining the workers. A receive may
+		// already be waiting on the engine session's context, not the peer's.
+		local.Close()
+		stop(id)
 		<-done1
 		<-done2
 		peer.Close()
-		local.Close()
 	}
 }
 

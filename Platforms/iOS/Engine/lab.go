@@ -15,6 +15,7 @@ import (
 	N "github.com/metacubex/sing/common/network"
 
 	"github.com/metacubex/mihomo/adapter"
+	"github.com/metacubex/mihomo/component/dialer"
 	C "github.com/metacubex/mihomo/constant"
 )
 
@@ -35,12 +36,51 @@ func parseLab(data []byte, mode int) (*labRoute, error) {
 	if err != nil || len(p.Proxies) != 1 || len(p.Rules) != 1 || p.Rules[0] != "MATCH,CLAY" {
 		return nil, errProfile
 	}
-	proxy, err := adapter.ParseProxy(p.Proxies[0])
+	ctx, cancel := context.WithCancel(context.Background())
+	var options []adapter.ProxyOption
+	if p.Proxies[0]["type"] == "tuic" {
+		// The pinned adapter's Close does not retire pooled QUIC connections.
+		// Tie their underlying sockets to this route, including pending handshakes.
+		options = append(options, adapter.WithDialerForAPI(labPacketDialer{Dialer: dialer.NewDialer(), route: ctx}))
+	}
+	proxy, err := adapter.ParseProxy(p.Proxies[0], options...)
 	if err != nil {
+		cancel()
 		return nil, errProfile
 	}
-	ctx, cancel := context.WithCancel(context.Background())
 	return &labRoute{proxy: proxy, ctx: ctx, cancel: cancel, flows: make(map[*labFlow]bool)}, nil
+}
+
+type labPacketDialer struct {
+	C.Dialer
+	route context.Context
+}
+
+func (d labPacketDialer) ListenPacket(ctx context.Context, network, address string, remote netip.AddrPort) (net.PacketConn, error) {
+	if err := d.route.Err(); err != nil {
+		return nil, err
+	}
+	socket, err := d.Dialer.ListenPacket(ctx, network, address, remote)
+	if err != nil {
+		return nil, err
+	}
+	stop := context.AfterFunc(d.route, func() { _ = socket.Close() })
+	conn := &labPacketConn{PacketConn: socket, stop: stop}
+	if err := d.route.Err(); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return conn, nil
+}
+
+type labPacketConn struct {
+	net.PacketConn
+	stop func() bool
+}
+
+func (c *labPacketConn) Close() error {
+	c.stop()
+	return c.PacketConn.Close()
 }
 
 func startLab(data []byte, mode int) (uint64, error) {

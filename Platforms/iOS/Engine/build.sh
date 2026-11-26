@@ -47,8 +47,8 @@ cp "$engine"/*.go clay_packet_engine/
 if [[ "$target" == host-test ]]; then
   "$compiler" test -mod=readonly -tags with_gvisor -count=1 -timeout=30s -v ./clay_packet_engine
 elif [[ "$target" == host-race ]]; then
-  "$compiler" test -mod=readonly -tags with_gvisor -race -count=2 -timeout=45s \
-    -run '^(TestLabSwitchClosesActiveTCP|TestImportedProtocols)$/^lab-live-switch-across-protocols$' ./clay_packet_engine
+  "$compiler" test -mod=readonly -tags with_gvisor -race -count=2 -timeout=90s -v \
+    -run '^(TestLabSwitchClosesActiveTCP|TestLabTuicPacketLifetime|TestImportedProtocols)$/^lab-live-switch-across-protocols$' ./clay_packet_engine
 else
   "$compiler" build -mod=readonly -tags with_gvisor -trimpath -buildmode=c-archive \
     -ldflags '-w -s -buildid=' -o "$out/libCLAYPacketEngine.a" ./clay_packet_engine

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/netip"
@@ -19,6 +20,7 @@ import (
 	"github.com/metacubex/gvisor/pkg/tcpip/header"
 	"github.com/metacubex/gvisor/pkg/tcpip/stack"
 	"github.com/metacubex/mihomo/component/ca"
+	"github.com/metacubex/mihomo/component/dialer"
 	"github.com/metacubex/mihomo/component/nat"
 	C "github.com/metacubex/mihomo/constant"
 	"github.com/metacubex/mihomo/listener/inbound"
@@ -215,6 +217,29 @@ func TestImportedProtocols(t *testing.T) {
 			defer closePeer()
 			checkNoReply(t, peer, ctx)
 		})
+	}
+}
+
+func TestLabTuicPacketLifetime(t *testing.T) {
+	route, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d := labPacketDialer{Dialer: dialer.NewDialer(), route: route}
+	remote := netip.MustParseAddrPort("127.0.0.1:9") // The test does not send any packet.
+	conn, err := d.ListenPacket(context.Background(), "udp", "127.0.0.1:0", remote)
+	if err != nil {
+		t.Fatal("unable to create loopback QUIC transport socket")
+	}
+	defer conn.Close()
+	_ = conn.SetReadDeadline(time.Now().Add(time.Second))
+	cancel()
+	if _, _, err := conn.ReadFrom(make([]byte, 8)); !errors.Is(err, net.ErrClosed) {
+		t.Fatal("retired lab route did not close its QUIC socket")
+	}
+	if stray, err := d.ListenPacket(context.Background(), "udp", "127.0.0.1:0", remote); !errors.Is(err, context.Canceled) {
+		if stray != nil {
+			_ = stray.Close()
+		}
+		t.Fatal("retired lab route can still open a new socket")
 	}
 }
 

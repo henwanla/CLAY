@@ -60,6 +60,8 @@ Linux 桌面预览可以读取本地节点配置、启动通过 SHA-256 校验�
 
 The adapter check works on macOS or Linux. Ubuntu’s GTK check uses the real Linux CLI, a synthetic engine, private dconf storage, and a tray watcher and Secret Service on a private session bus. It verifies exported menu actions, independent system settings readback, restart recovery, background cleanup, and a cached subscription session. The download fixture makes no external requests.
 
+The Plasma test uses native KConfig and Ubuntu’s libproxy KDE backend on an isolated configuration. It verifies actual PAC decisions, restoration of inherited and explicit settings, rejection of locked or ambiguous configurations, and tray controls. A Qt/KF5 build of the helper is used in this runner to check the same configuration format. A full Plasma session and browsers are outside the fixture.
+
 ```sh
 python3 Platforms/Linux/smoke-desktop.py .build/release/clay-portable --adapter-only
 sudo apt install gir1.2-ayatanaappindicator3-0.1 dbus-daemon xvfb xauth gsettings-desktop-schemas dconf-gsettings-backend dconf-service libglib2.0-bin python3-cryptography libsecret-tools gnome-keyring

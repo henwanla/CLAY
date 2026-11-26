@@ -2,7 +2,7 @@
 
 [简体中文](README.md) · [Changelog](CHANGELOG.md) · [GitHub Releases](https://github.com/henwanla/CLAY/releases)
 
-CLAY is a native macOS proxy app with subscriptions, menu bar controls, PAC routing, live traffic, and a connection inspector. The [0.3.3 desktop preview](https://github.com/henwanla/CLAY/releases/tag/v0.3.3) has downloads for Apple Silicon with macOS 13 or later, Windows x64, and Ubuntu 24.04 x86-64. See the platform notes below for mobile previews and their test coverage.
+CLAY is a native macOS proxy app with subscriptions, menu bar controls, PAC routing, live traffic, and a connection inspector. The [0.3.4 desktop preview](https://github.com/henwanla/CLAY/releases/tag/v0.3.4) has downloads for Apple Silicon with macOS 13 or later, Windows x64, and Ubuntu 24.04 x86-64. See the platform notes below for mobile previews and their test coverage.
 
 ## Screenshots
 
@@ -20,7 +20,7 @@ The macOS Overview shows traffic, the selected node, and the routing mode. The s
 ## Getting started
 
 1. **Local preview (build 4 and later):** Open `CLAY.app`. If you have not selected another core, CLAY uses the bundled Mihomo with a pinned fingerprint. To use a different trusted core, choose it in Settings (**设置**). Verify the source and select it again after replacing or upgrading an external core.
-2. **GitHub release:** Download `CLAY-0.3.3-macos-arm64.zip` and the matching `.zip.sha256`. In the download directory, run `shasum -a 256 -c CLAY-0.3.3-macos-arm64.zip.sha256` before extracting the ZIP. The public package requires you to install Mihomo separately, as shown below. The app has an ad hoc signature and has no Developer ID signature or notarization. If macOS blocks the package, you can build it from source under your usual security policy.
+2. **GitHub release:** Download `CLAY-0.3.4-macos-arm64.zip` and the matching `.zip.sha256`. In the download directory, run `shasum -a 256 -c CLAY-0.3.4-macos-arm64.zip.sha256` before extracting the ZIP. The public package requires you to install Mihomo separately, as shown below. The app has an ad hoc signature and has no Developer ID signature or notarization. If macOS blocks the package, you can build it from source under your usual security policy.
 3. Under Subscriptions (**订阅**), select Add subscription (**添加订阅…**) and enter your provider’s HTTPS link. Under Nodes (**节点**), you can also paste share links or import UTF-8 JSON, YAML, or text files.
 4. Choose a node and select Connect macOS (**连接 macOS**) from the main window or menu bar. CLAY starts the local proxy and sets up system PAC for the current primary network service or the service you choose in PAC Rules. For manual setup, use Start local proxy only (**仅启动本机代理**) and enter the HTTP/SOCKS5 address from Overview (**概览**) in the app. If you are still using 0.3.0, use Start (**启动**) and then Apply to macOS (**应用到 macOS**) under PAC Rules.
 5. Closing the window keeps CLAY and its proxy running. In new builds, the menu bar also lets you switch nodes and routing modes. Quit CLAY or press `⌘Q` to end the session. CLAY does not launch automatically at login.
@@ -102,7 +102,7 @@ The [Android ARM64 offline preview](Platforms/Android/README.md) checks profiles
 
 The [Android local relay preview](Platforms/Android/README.md#本机代理预览--local-relay-preview) uses a separate app ID. Clients that accept authenticated HTTP or SOCKS5 proxies can connect manually over loopback. The app can switch nodes and Rule, Global, or Direct mode. Only clients configured with the manual proxy are affected.
 
-The separate [Android VPN technical preview](Platforms/Android/README.md#vpn-技术预览--vpn-technical-preview) is a development APK with IPv4 system routing, a foreground service, and node and mode switching. Its Quick Settings tile opens CLAY or stops the running VPN. Relay and VPN both support [manual HTTPS subscription refresh with encrypted node caching](Platforms/Android/README.md#订阅--subscriptions). The Android 15 emulator checks IP rules, HTTP/TLS domain rules on selected TCP ports, and plain UDP DNS. Physical devices, network switching, and encrypted DNS need more testing. There is no public VPN APK yet.
+The separate [Android VPN technical preview](Platforms/Android/README.md#vpn-技术预览--vpn-technical-preview) is a development APK with IPv4 system routing, a foreground service, and node and mode switching. Its Quick Settings tile opens CLAY or stops the running VPN. The notification shows the tunnel phase without exposing profile details, and an old notification cannot stop a restarted session. Relay and VPN both support [manual HTTPS subscription refresh with encrypted node caching](Platforms/Android/README.md#订阅--subscriptions). The Android 15 emulator checks IP rules, HTTP/TLS domain rules on selected TCP ports, and plain UDP DNS. Physical devices, network switching, and encrypted DNS need more testing. There is no public VPN APK yet.
 
 [iOS and iPadOS](Platforms/iOS/README.md) have an offline profile checker and a separate CLAY Tunnel Lab. The lab has an encrypted subscription cache, routes one chosen IPv4/TCP test endpoint, and supports changing the node and mode while connected. It still needs testing on a signed physical device.
 

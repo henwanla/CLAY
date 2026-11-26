@@ -34,9 +34,9 @@ CI 在临时 Windows 用户配置中验收系统 PAC、原生 PAC 决策、加�
 
 ## Download for Windows x64 / 下载试用包
 
-Download the Windows x64 ZIP and its matching SHA-256 file from the [0.3.3 preview](https://github.com/henwanla/CLAY/releases/tag/v0.3.3). Compare the companion hash with `(Get-FileHash -Algorithm SHA256 .\FILE.zip).Hash` using the downloaded filename. Extract only after the hashes match and follow `START-HERE.txt`. The preview is unsigned and requires the .NET 10 Desktop Runtime, Swift runtime, and a separately verified Mihomo executable. For newer branch builds, see the 14-day **CLAY-Windows-x64-preview** artifact in [Windows Actions](https://github.com/henwanla/CLAY/actions/workflows/portable-windows.yml?query=branch%3Amain).
+Download the Windows x64 ZIP and its matching SHA-256 file from the [0.3.4 preview](https://github.com/henwanla/CLAY/releases/tag/v0.3.4). Compare the companion hash with `(Get-FileHash -Algorithm SHA256 .\FILE.zip).Hash` using the downloaded filename. Extract only after the hashes match and follow `START-HERE.txt`. The preview is unsigned and requires the .NET 10 Desktop Runtime, Swift runtime, and a separately verified Mihomo executable. For newer branch builds, see the 14-day **CLAY-Windows-x64-preview** artifact in [Windows Actions](https://github.com/henwanla/CLAY/actions/workflows/portable-windows.yml?query=branch%3Amain).
 
-从 [0.3.3 预览版](https://github.com/henwanla/CLAY/releases/tag/v0.3.3) 下载 Windows x64 的 ZIP 和校验文件。用上述 PowerShell 命令核对 ZIP 的 SHA-256 后再解压，按 `START-HERE.txt` 试用。预览包未签名，需准备 .NET 10 Desktop Runtime、Swift 运行时和已核验的 Mihomo。
+从 [0.3.4 预览版](https://github.com/henwanla/CLAY/releases/tag/v0.3.4) 下载 Windows x64 的 ZIP 和校验文件。用上述 PowerShell 命令核对 ZIP 的 SHA-256 后再解压，按 `START-HERE.txt` 试用。预览包未签名，需准备 .NET 10 Desktop Runtime、Swift 运行时和已核验的 Mihomo。
 
 ## Subscriptions / 订阅管理
 

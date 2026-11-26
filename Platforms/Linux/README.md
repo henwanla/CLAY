@@ -4,7 +4,7 @@ Use this GTK 3 window to load nodes from a local profile, start a SHA-256 verifi
 
 ## Download for Ubuntu 24.04 x86-64 / 下载试用包
 
-Download the Linux x64 `.tar.gz` and its matching `.sha256` from the [0.3.3 preview](https://github.com/henwanla/CLAY/releases/tag/v0.3.3). In the download directory, run `sha256sum -c FILE.tar.gz.sha256` with the actual filename. Extract the verified archive, enter the extracted directory, and run `./start-clay`. Install the base window dependencies first:
+Download the Linux x64 `.tar.gz` and its matching `.sha256` from the [0.3.4 preview](https://github.com/henwanla/CLAY/releases/tag/v0.3.4). In the download directory, run `sha256sum -c FILE.tar.gz.sha256` with the actual filename. Extract the verified archive, enter the extracted directory, and run `./start-clay`. Install the base window dependencies first:
 
 ~~~sh
 sudo apt install python3-gi gir1.2-gtk-3.0 curl coreutils libstdc++6
@@ -12,7 +12,7 @@ sudo apt install python3-gi gir1.2-gtk-3.0 curl coreutils libstdc++6
 
 The unsigned preview runs as your user on Ubuntu 24.04 x86-64. It needs no Swift installation and contains no Mihomo or profiles. The included KDE helper uses Ubuntu's `libkf5configcore5`; on distributions without it, use manual proxy or build the KF6 helper below. For newer branch builds, see the 30-day **CLAY-Linux-x64-preview** artifact in [Linux Actions](https://github.com/henwanla/CLAY/actions/workflows/portable-linux.yml?query=branch%3Amain).
 
-从 [0.3.3 预览版](https://github.com/henwanla/CLAY/releases/tag/v0.3.3) 下载 Linux x64 的 tar.gz 与校验文件。在同一目录运行 `sha256sum -c FILE.tar.gz.sha256`（换成实际文件名），通过后解压，进入解压目录运行 `./start-clay`。这个未签名预览以 Ubuntu 24.04 x86-64 为测试基线，无需安装 Swift。请另行准备并校验 Mihomo。
+从 [0.3.4 预览版](https://github.com/henwanla/CLAY/releases/tag/v0.3.4) 下载 Linux x64 的 tar.gz 与校验文件。在同一目录运行 `sha256sum -c FILE.tar.gz.sha256`（换成实际文件名），通过后解压，进入解压目录运行 `./start-clay`。这个未签名预览以 Ubuntu 24.04 x86-64 为测试基线，无需安装 Swift。请另行准备并校验 Mihomo。
 
 ## Build from source / 源码构建
 

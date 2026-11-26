@@ -1,9 +1,14 @@
 # 更新记录 / Changelog
 
-## 开发中 / Unreleased
+## 0.3.4 · 桌面预览 / Desktop preview
 
-- macOS 试用包可直接切回随附 Mihomo。外部内核移走或校验失败时，显示恢复方式并保持停止。菜单栏显示节点编号及协议，主窗口保留节点名。
-- Local macOS previews can switch back to the bundled Mihomo. A missing or changed external executable leaves the session stopped with recovery guidance. The menu bar shows node numbers and protocols; full names stay in the window.
+- macOS 试用包可直接切回随附 Mihomo。外部内核移走或校验失败时，显示恢复方式并保持停止。菜单栏显示节点编号及协议，主窗口保留节点名。公开包仍需单独准备已校验的 Mihomo。
+- 共享导入和 Mihomo 会话支持 Shadowsocks 2022。支持三种套件的导入；AES-128-GCM 已用合成节点验证实际转发。
+- Android VPN 预览的通知显示启动、切换、运行或停止，不显示节点或订阅；旧通知不能停止之后的会话。iOS 隧道实验可为每次实验指定 IPv4 测试端点。移动端仍为源码预览。
+
+- Local macOS previews can switch back to the bundled Mihomo. A missing or changed external executable leaves the session stopped with recovery guidance. The menu bar shows node numbers and protocols; full names stay in the window. Public downloads still require a separately verified Mihomo.
+- The shared importer and Mihomo sessions support Shadowsocks 2022. Three ciphers are accepted on import; AES-128-GCM forwarding was verified with a synthetic node.
+- The Android VPN preview notification displays the tunnel phase without exposing profiles, and its Stop action cannot affect a later session. The iOS Tunnel Lab accepts a test IPv4 endpoint for each run. Mobile builds remain source previews.
 
 ## 0.3.3 · 桌面预览 / Desktop preview
 

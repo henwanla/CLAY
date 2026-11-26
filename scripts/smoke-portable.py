@@ -41,6 +41,9 @@ def offline_checks(directory):
     links = directory / "节点 profiles.txt"
     links.write_text("\ufeff" + node + vmess_url.decode() + "\nhttps://never-fetch.example.test/private\n", encoding="utf-8")
     assert run("inspect", links) == b"nodes=2\nvless/tcp/tls=1\nvmess/tcp/tls=1\nskipped.unsupportedProtocol=1\n"
+    assert run("inspect", links, "--numbered") == (b"nodes=2\nnode=1 vless/tcp/tls\nnode=2 vmess/tcp/tls\n"
+                                                   b"skipped.unsupportedProtocol=1\n")
+    run("inspect", links, "--unknown", code=64)
     yaml = directory / "profile.yaml"
     yaml.write_text(f"""proxy-providers:
   remote:
@@ -68,6 +71,8 @@ proxies:
     name: Ignored
 """, encoding="utf-8")
     assert run("inspect", yaml) == b"nodes=3\nss/tcp/aead=1\ntrojan/tcp/tls=1\nvless/tcp/tls=1\nskipped.unsupportedProtocol=1\n"
+    assert run("inspect", yaml, "--numbered") == (b"nodes=3\nnode=1 vless/tcp/tls\nnode=2 ss/tcp/aead\n"
+                                                  b"node=3 trojan/tcp/tls\nskipped.unsupportedProtocol=1\n")
 
     # JSON numbers 0/1 do not stand in for true/false, or vice versa.
     json_file = directory / "typed-fields.json"

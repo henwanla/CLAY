@@ -35,7 +35,7 @@ private struct PortableCLI {
 
     private static var usage: String {
         let common = """
-        clay-portable inspect FILE
+        clay-portable inspect FILE [--numbered]
         clay-portable pac-check RULES [HOST] [--default-direct] [--no-local-bypass]
         clay-portable pac-script RULES PORT [--default-direct] [--no-local-bypass]
         clay-portable mihomo-status PORT < SECRET_FILE  (Linux/macOS, requires /usr/bin/curl)
@@ -51,12 +51,20 @@ private struct PortableCLI {
         guard arguments.count >= 2 else { throw CommandError.usage }
         switch arguments[0] {
         case "inspect":
-            guard arguments.count == 2 else { throw CommandError.usage }
+            let numbered = arguments.count == 3 && arguments[2] == "--numbered"
+            guard arguments.count == 2 || numbered else { throw CommandError.usage }
             let report = ProfileImporter.read(try readText(arguments[1]))
             guard !report.profiles.isEmpty else { throw CommandError.noNodes }
             let groups = Dictionary(grouping: report.profiles) { "\($0.protocolName)/\($0.transport)/\($0.security)" }
             print("nodes=\(report.profiles.count)")
-            for mode in groups.keys.sorted() { print("\(mode)=\(groups[mode]?.count ?? 0)") }
+            if numbered {
+                // Match mihomo-run ordering without exposing custom names or endpoint details.
+                for (index, profile) in report.profiles.enumerated() {
+                    print("node=\(index + 1) \(profile.protocolName)/\(profile.transport)/\(profile.security)")
+                }
+            } else {
+                for mode in groups.keys.sorted() { print("\(mode)=\(groups[mode]?.count ?? 0)") }
+            }
             for issue in report.issues.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
                 print("skipped.\(issue.rawValue)=\(report.issues[issue] ?? 0)")
             }

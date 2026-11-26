@@ -31,3 +31,9 @@ jobs:
         run: python3 scripts/smoke-portable.py .build/release/clay-portable
       - name: Verify foreground runtime and loopback ownership
         run: python3 scripts/smoke-linux-runtime.py .build/release/clay-portable
+      - name: Install GTK test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-gi gir1.2-gtk-3.0 xvfb xauth
+      - name: Exercise the GTK preview in a virtual display
+        run: xvfb-run -a /usr/bin/python3 -B Platforms/Linux/smoke-desktop.py .build/release/clay-portable

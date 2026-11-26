@@ -106,7 +106,13 @@ private struct StatusMenu: View {
             Button("停止代理") { model.stop() }.disabled(model.busy || pac.busy)
         } else {
             Button("仅启动本机代理") { model.start() }.disabled(!model.canStartManual)
-            if model.engine == nil { Button("设置 Mihomo 内核…") { showDashboard(.settings) } }
+            if let issue = model.engineIssue { Text(issue) }
+            if model.engine == nil {
+                if model.offersBundledEngine {
+                    Button("使用随附 Mihomo") { model.useBundledEngine() }.disabled(!model.canChangeEngine)
+                }
+                Button("设置 Mihomo 内核…") { showDashboard(.settings) }
+            }
             if model.nodes.isEmpty {
                 Button("导入节点…") { showDashboard(.nodes); model.presentImport = true }.disabled(model.busy)
                 Button("添加订阅…") { showDashboard(.subscriptions); model.presentSubscription = true }
@@ -144,11 +150,8 @@ private struct StatusMenu: View {
     }
 
     private func nodeMenuTitle(_ node: NodeProfile) -> String {
-        let name = node.name.components(separatedBy: .controlCharacters.union(.newlines))
-            .joined(separator: " ").trimmingCharacters(in: .whitespaces)
-        if name.isEmpty { return "未命名节点" }
-        let prefix = name.prefix(42)
-        return prefix.endIndex == name.endIndex ? name : String(prefix) + "…"
+        guard let number = model.nodeNumber(node.id) else { return "未选" }
+        return "#\(number) · \(node.protocolName.uppercased())"
     }
 
     private func showDashboard(_ page: Page? = nil) {
@@ -291,8 +294,9 @@ private struct Dashboard: View {
         if model.engine == nil || model.nodes.isEmpty {
             panel("连接前的准备", symbol: "checklist") {
                 if model.engine == nil {
-                    Text("缺少 Mihomo 内核。请先选择一个可信的可执行文件。").font(.callout).foregroundStyle(.secondary)
-                    Button("选择 Mihomo…") { model.chooseEngine() }.disabled(model.busy || pac.busy)
+                    Text(model.engineIssue ?? "缺少 Mihomo 内核。请先选择一个可信的可执行文件。")
+                        .font(.callout).foregroundStyle(.secondary)
+                    engineActions
                 }
                 if model.nodes.isEmpty {
                     Text("当前没有节点。请添加服务商的订阅，或导入已有节点。").font(.callout).foregroundStyle(.secondary)
@@ -304,6 +308,14 @@ private struct Dashboard: View {
                 }
             }
         }
+    }
+    private var engineActions: some View {
+        HStack {
+            if model.offersBundledEngine {
+                Button("使用随附 Mihomo") { model.useBundledEngine() }
+            }
+            Button("选择 Mihomo…") { model.chooseEngine() }
+        }.disabled(!model.canChangeEngine)
     }
     private var overview: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -377,7 +389,10 @@ private struct Dashboard: View {
                 HStack(spacing: 13) {
                     Image(systemName: current ? "largecircle.fill.circle" : "circle").foregroundStyle(current ? clay : .secondary)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(n.name).font(.headline).lineLimit(1)
+                        HStack(spacing: 6) {
+                            if let number = model.nodeNumber(n.id) { Text("#\(number)").font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
+                            Text(n.name).font(.headline).lineLimit(1)
+                        }
                         Text("\(n.protocolName.uppercased()) · \(n.transport) · \(n.security)").font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
@@ -454,8 +469,15 @@ private struct Dashboard: View {
     }
     private var settings: some View {
         panel("代理内核", symbol: "cpu") {
-            Text(model.engine?.lastPathComponent ?? "未选择可执行文件").font(.headline)
-            Button("选择 Mihomo…") { model.chooseEngine() }.disabled(model.running || model.busy)
+            if model.usesBundledEngine {
+                Text("随附 Mihomo").font(.headline)
+            } else if let engine = model.engine {
+                Text("外部内核 · \(engine.lastPathComponent)").font(.headline)
+            } else {
+                Text("未选择可执行文件").font(.headline)
+            }
+            if let issue = model.engineIssue { Text(issue).font(.callout).foregroundStyle(.orange) }
+            engineActions
             Text("CLAY 单独启动 Mihomo，只监听 127.0.0.1。手动导入仅在本次使用中保留；订阅会保存在此 Mac。")
                 .foregroundStyle(.secondary)
         }

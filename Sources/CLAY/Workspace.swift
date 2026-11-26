@@ -30,7 +30,8 @@ enum Probe {
 @MainActor final class Workspace: ObservableObject {
     @Published var nodes: [NodeProfile] = []
     @Published var active: UUID?
-    @Published private(set) var engine: URL?
+    @Published private var engineSelection: EngineSelection?
+    @Published private(set) var engineIssue: String?
     @Published private(set) var routingMode: CoreRoutingMode = .global
     @Published private(set) var routingConfirmed = true
     @Published private(set) var runningRules: PACPolicy?
@@ -67,6 +68,7 @@ enum Probe {
     private var trafficSegment = 0
     private let store: SubscriptionStore
     private let preferences: UserDefaults
+    private let bundledEngine: URL?
     private var catalog = SubscriptionCatalog()
     private var subscriptionResults: [UUID: ImportResult] = [:]
     private var manualResults: ImportResult?
@@ -76,25 +78,29 @@ enum Probe {
         let path: String
         let fingerprint: String
     }
+    private struct EngineSelection {
+        let identity: TrustedEngine
+        let isBundled: Bool
+        var url: URL { URL(fileURLWithPath: identity.path) }
+    }
     private static let enginePreference = "clay.trusted-mihomo.v1"
     private static let routingPreference = "clay.routing-mode.v1"
     private static let previewEngineFingerprint = "a55a9073f9b7b1fa596a82c034d2dae3407ec34732102b6e42c5513ce3033f34"
-    private var trustedEngine: TrustedEngine?
-
-    init(store: SubscriptionStore = SubscriptionStore(), pac: PACControl? = nil, preferences: UserDefaults = .standard) {
+    init(store: SubscriptionStore = SubscriptionStore(), pac: PACControl? = nil, preferences: UserDefaults = .standard,
+         bundledEngine: URL? = Bundle.main.resourceURL?.appendingPathComponent("Mihomo/mihomo")) {
         self.store = store
         self.preferences = preferences
+        self.bundledEngine = bundledEngine?.standardizedFileURL
         self.pac = pac ?? PACControl()
-        if let data = preferences.data(forKey: Self.enginePreference),
-           let saved = try? JSONDecoder().decode(TrustedEngine.self, from: data),
+        let saved = preferences.data(forKey: Self.enginePreference).flatMap { try? JSONDecoder().decode(TrustedEngine.self, from: $0) }
+        if let saved,
+           !isBundledPath(URL(fileURLWithPath: saved.path)),
            FileManager.default.isExecutableFile(atPath: saved.path) {
-            trustedEngine = saved
-            engine = URL(fileURLWithPath: saved.path)
-        } else if let supplied = Bundle.main.resourceURL?.appendingPathComponent("Mihomo", isDirectory: true).appendingPathComponent("mihomo") {
-            if FileManager.default.isExecutableFile(atPath: supplied.path) {
-                trustedEngine = TrustedEngine(path: supplied.path, fingerprint: Self.previewEngineFingerprint)
-                engine = supplied
-            }
+            engineSelection = EngineSelection(identity: saved, isBundled: false)
+        } else if let bundled = availableBundledEngine {
+            engineSelection = bundled
+        } else if saved != nil {
+            engineIssue = "找不到之前选择的 Mihomo。请核对来源后重新选择。"
         }
         routingMode = preferences.string(forKey: Self.routingPreference).flatMap(CoreRoutingMode.init(rawValue:)) ?? .global
         do {
@@ -104,7 +110,22 @@ enum Probe {
             if selectedSubscription != nil { applySelectedSource() }
         } catch { subscriptionMessage = (error as? SubscriptionStorageError)?.localizedDescription ?? "无法读取本地订阅记录。" }
     }
+    var engine: URL? { engineSelection?.url }
+    var usesBundledEngine: Bool { engineSelection?.isBundled == true }
+    var canChangeEngine: Bool { !shuttingDown && !running && !busy && !pac.busy }
+    var offersBundledEngine: Bool { !usesBundledEngine && availableBundledEngine != nil }
+    private var availableBundledEngine: EngineSelection? {
+        guard let bundledEngine, FileManager.default.isExecutableFile(atPath: bundledEngine.path) else { return nil }
+        return EngineSelection(identity: TrustedEngine(path: bundledEngine.path, fingerprint: Self.previewEngineFingerprint),
+                               isBundled: true)
+    }
+    private func isBundledPath(_ file: URL) -> Bool {
+        guard let bundledEngine, file.isFileURL else { return false }
+        return file.standardizedFileURL.path == bundledEngine.path ||
+            file.resolvingSymlinksInPath().path == bundledEngine.resolvingSymlinksInPath().path
+    }
     var chosen: NodeProfile? { nodes.first { $0.id == active } }
+    func nodeNumber(_ id: UUID) -> Int? { nodes.firstIndex { $0.id == id }.map { $0 + 1 } }
     var running: Bool { proxyAddress != nil }
     var canStartManual: Bool {
         !shuttingDown && !busy && !running && !pac.busy && !pac.hasLiveOwnership && !pac.needsRecovery && engine != nil && chosen != nil
@@ -119,6 +140,7 @@ enum Probe {
         if pac.systemService != nil, running { return pac.modeLabel }
         if running { return "本机代理运行中 · macOS 未接入" }
         if pendingStart != nil { return "正在启动本机代理" }
+        if engine == nil && engineIssue != nil { return "Mihomo 未就绪" }
         return "代理已停止"
     }
     var canUseManual: Bool { manualResults != nil && selectedSubscription != nil }
@@ -186,19 +208,42 @@ enum Probe {
     }
 
     func chooseEngine() {
+        guard canChangeEngine else { return }
         let picker = NSOpenPanel(); picker.canChooseDirectories = false; picker.allowsMultipleSelection = false
         picker.message = "选择你信任的 Mihomo 可执行文件"
         guard picker.runModal() == .OK, let file = picker.url else { return }
         do { try trustEngine(file) }
-        catch { status = "无法读取或验证所选的可执行文件" }
+        catch { engineIssue = "无法读取或验证所选的 Mihomo。请核对来源后再选择。" }
+    }
+
+    func useBundledEngine() {
+        guard canChangeEngine else { return }
+        do { try selectBundledEngine(persist: true) }
+        catch { engineIssue = "随附的 Mihomo 未通过校验。请换用可信的外部内核，或重新解压试用包。" }
+    }
+
+    private func selectBundledEngine(persist: Bool) throws {
+        guard let bundled = availableBundledEngine,
+              try EngineIdentity.fingerprint(bundled.url) == bundled.identity.fingerprint else { throw SessionError.engineChanged }
+        if persist { preferences.removeObject(forKey: Self.enginePreference) }
+        didChooseEngine(bundled)
     }
 
     func trustEngine(_ selected: URL, persist: Bool = true) throws {
+        guard canChangeEngine else { return }
+        if isBundledPath(selected) {
+            try selectBundledEngine(persist: persist)
+            return
+        }
         let file = selected.resolvingSymlinksInPath()
         let trusted = TrustedEngine(path: file.path, fingerprint: try EngineIdentity.fingerprint(file))
         if persist { preferences.set(try JSONEncoder().encode(trusted), forKey: Self.enginePreference) }
-        trustedEngine = trusted
-        engine = file
+        didChooseEngine(EngineSelection(identity: trusted, isBundled: false))
+    }
+
+    private func didChooseEngine(_ selection: EngineSelection) {
+        engineSelection = selection
+        engineIssue = nil
         status = nodes.isEmpty ? "等待导入节点" : "可启动"
     }
     func importFile() -> Bool {
@@ -369,7 +414,7 @@ enum Probe {
     func start() { startSession() }
 
     private func startSession(systemRouting: PACControl.SystemRouting? = nil) {
-        guard canStartManual, let engine, let trustedEngine, let selected = chosen else { return }
+        guard canStartManual, let selection = engineSelection, let selected = chosen else { return }
         let policy = pac.policy
         busy = true; status = "正在启动 Mihomo…"
         pendingStart = Task { [weak self] in
@@ -383,8 +428,8 @@ enum Probe {
                 }
             }
             do {
-                let session = try await CoreSession.start(engine: engine, nodes: nodes, active: selected,
-                                                          expectedFingerprint: trustedEngine.fingerprint,
+                let session = try await CoreSession.start(engine: selection.url, nodes: nodes, active: selected,
+                                                          expectedFingerprint: selection.identity.fingerprint,
                                                           mode: routingMode, policy: policy)
                 if Task.isCancelled { session.stopAndWait(); return }
                 core = session; proxyAddress = session.proxyAddress; status = "本机代理已就绪"
@@ -392,11 +437,19 @@ enum Probe {
                 monitorTraffic(session)
                 if let systemRouting { publishPAC(to: .system(systemRouting)) }
             } catch let error as SessionError {
-                if error == .engineChanged {
-                    self.engine = nil
-                    self.trustedEngine = nil
+                if error == .engineChanged || error == .engineMissing {
+                    engineSelection = nil
+                    if selection.isBundled {
+                        engineIssue = "随附的 Mihomo 已变更或无法读取。请重新解压试用包，或选择可信的外部内核。"
+                    } else if offersBundledEngine {
+                        engineIssue = "外部 Mihomo 已变更或无法读取。可用随附内核，或核对来源后重新选择。"
+                    } else {
+                        engineIssue = "外部 Mihomo 已变更或无法读取。请核对来源后重新选择。"
+                    }
+                    status = "Mihomo 未启动"
+                } else {
+                    status = Self.sessionMessage(error)
                 }
-                status = Self.sessionMessage(error)
             }
             catch { status = "启动已取消或失败" }
         }
@@ -509,8 +562,8 @@ enum Probe {
         case .notProxyOutbound: return "已略过直连、拒绝或 DNS 出站" }
     }
     private static func sessionMessage(_ e: SessionError) -> String {
-        switch e { case .engineMissing: return "未找到可执行的 Mihomo"
-        case .engineChanged: return "Mihomo 文件已变更或无法验证。请核对来源后重新选择。"
+        switch e {
+        case .launchFailed: return "macOS 未能运行 Mihomo。请核对内核是否适用于本机，并确认文件可信且可执行。"
         case .exitedDuringStart: return "Mihomo 启动后立即退出，请检查内核版本和节点格式"
         case .controlUnavailable: return "未能确认 Mihomo 控制接口或代理端口已就绪"
         case .portsUnavailable: return "无法为本机代理分配独立端口"

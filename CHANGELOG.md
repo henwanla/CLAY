@@ -1,5 +1,10 @@
 # 更新记录 / Changelog
 
+## 开发中 / Unreleased
+
+- macOS 试用包可直接切回随附 Mihomo。外部内核移走或校验失败时，显示恢复方式并保持停止。菜单栏显示节点编号及协议，主窗口保留节点名。
+- Local macOS previews can switch back to the bundled Mihomo. A missing or changed external executable leaves the session stopped with recovery guidance. The menu bar shows node numbers and protocols; full names stay in the window.
+
 ## 0.3.3 · 桌面预览 / Desktop preview
 
 - macOS、Windows 和 Linux 实际切换节点或流量模式后，等待内核关闭其跟踪的已有连接；重复选择当前项不会中断。状态未确认时不会显示切换成功。

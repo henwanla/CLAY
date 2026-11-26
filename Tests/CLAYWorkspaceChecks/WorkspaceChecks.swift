@@ -82,6 +82,7 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
                 throw error
             }
             await model.shutdown()
+            try await checkBundledRecovery(engine: engine, origin: args[1], directory: directory.appendingPathComponent("engine-selection"))
             try await checkSystemConnection(engine: engine, origin: args[1], directory: directory.appendingPathComponent("system-connect"))
             try await checkNodeSwitch(engine: engine, origin: args[1], ports: [first, second])
             print("PASS running listener stays available through refresh and failure; stop and offline reload use the last successful list")
@@ -94,6 +95,83 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
             print("FAIL \(error)")
             exit(1)
         }
+    }
+
+    @MainActor private static func checkBundledRecovery(engine: URL, origin: String, directory: URL) async throws {
+        let suite = "CLAYEngineSelectionChecks-\(UUID())"
+        guard let preferences = UserDefaults(suiteName: suite) else { throw CheckFailed("could not isolate the engine preference") }
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let files = FileManager.default
+        try files.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let bundled = directory.appendingPathComponent("bundled-mihomo")
+        let external = directory.appendingPathComponent("external-mihomo")
+        try files.createSymbolicLink(at: bundled, withDestinationURL: engine)
+        try Data("#!/bin/sh\nexit 1\n".utf8).write(to: external)
+        try files.setAttributes([.posixPermissions: 0o700], ofItemAtPath: external.path)
+        let selectedPath = external.resolvingSymlinksInPath().path
+        let fixture = WorkspacePACFixture()
+        let store = SubscriptionStore(directory: directory.appendingPathComponent("catalog"), keyStore: TestSubscriptionKeyStore())
+        let manager = SystemPACManager(backend: fixture, journalDirectory: directory.appendingPathComponent("pac"))
+        let pac = PACControl(manager: manager, preferences: preferences)
+        let model = Workspace(store: store, pac: pac, preferences: preferences, bundledEngine: bundled)
+        model.pac.serviceID = WorkspacePACFixture.service.id
+        do {
+            try require(model.usesBundledEngine, "local preview did not default to its pinned engine")
+            try model.trustEngine(external)
+            let reload = Workspace(store: store, pac: pac, preferences: preferences, bundledEngine: bundled)
+            try require(reload.engine?.path == selectedPath && reload.offersBundledEngine,
+                        "explicit external selection was not retained with the recovery option available")
+
+            // A replacement bundle file remains subject to the upstream pin, even through a file-picker alias.
+            try files.removeItem(at: bundled)
+            try files.createSymbolicLink(at: bundled, withDestinationURL: external)
+            model.useBundledEngine()
+            try require(model.engine?.path == selectedPath && !model.usesBundledEngine && model.engineIssue != nil,
+                        "failed bundled verification changed the active selection")
+            do {
+                try model.trustEngine(bundled)
+                throw CheckFailed("picking the bundled path bypassed the fixed pin")
+            } catch SessionError.engineChanged { }
+            try files.removeItem(at: bundled)
+            try files.createSymbolicLink(at: bundled, withDestinationURL: engine)
+
+            try Data("#!/bin/sh\nexit 2\n".utf8).write(to: external)
+            try require(model.applyImport("vless://4624a73a-98ce-43e7-8868-4deba224779c@127.0.0.1:1234#engine-fixture"),
+                        "could not import a recovery fixture node")
+            model.connectSystem()
+            try await wait("changed external executable") { !model.busy }
+            try require(model.engine == nil && !model.running && model.engineIssue != nil && model.offersBundledEngine,
+                        "changed external executable did not leave the workspace stopped with a recovery action")
+            try require(fixture.attempts == 0 && fixture.matchesBaseline && model.pac.localURL == nil,
+                        "failed start touched system proxy settings or started a PAC listener")
+
+            model.useBundledEngine()
+            try require(model.usesBundledEngine && model.engineIssue == nil && !model.running && fixture.attempts == 0,
+                        "selecting the bundled engine did not safely clear the failure while stopped")
+            let restarted = Workspace(store: store, pac: pac, preferences: preferences, bundledEngine: bundled)
+            try require(restarted.usesBundledEngine, "the old external choice returned after restarting")
+
+            model.selectRoutingMode(.direct)
+            model.connectSystem()
+            try await wait("connection using the bundled engine") { !model.busy && !model.pac.busy }
+            guard let listener = model.proxyAddress else { throw CheckFailed("the recovered engine did not start") }
+            try require(model.pac.systemPACIsEffective && proxyFetch(origin, through: listener),
+                        "the pinned engine failed to relay data or attach PAC after recovery")
+            try require(!model.canChangeEngine && model.stop() && fixture.matchesBaseline,
+                        "running engine selection was enabled or stop did not restore the previous PAC")
+
+            try model.trustEngine(external)
+            try files.removeItem(at: external)
+            model.start()
+            try await wait("missing external executable") { !model.busy }
+            try require(model.engine == nil && model.engineIssue != nil && !model.running && model.offersBundledEngine,
+                        "a missing executable did not offer the same safe recovery")
+            print("PASS missing and changed engines stay stopped; explicit bundled recovery verifies the pin, resets the saved choice and restores the mock system PAC")
+        } catch {
+            await model.shutdown()
+            throw error
+        }
+        await model.shutdown()
     }
 
     @MainActor private static func checkEnginePin(engine: URL, model: Workspace) async throws {

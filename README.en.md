@@ -25,6 +25,8 @@ The macOS Overview shows traffic, the selected node, and the routing mode. The s
 4. Choose a node and select Connect macOS (**连接 macOS**) from the main window or menu bar. CLAY starts the local proxy and sets up system PAC for the current primary network service or the service you choose in PAC Rules. For manual setup, use Start local proxy only (**仅启动本机代理**) and enter the HTTP/SOCKS5 address from Overview (**概览**) in the app. If you are still using 0.3.0, use Start (**启动**) and then Apply to macOS (**应用到 macOS**) under PAC Rules.
 5. Closing the window keeps CLAY and its proxy running. In new builds, the menu bar also lets you switch nodes and routing modes. Quit CLAY or press `⌘Q` to end the session. CLAY does not launch automatically at login.
 
+In development builds, use **Settings → 使用随附 Mihomo** to switch back to the verified core in the local preview. If an external executable was replaced or moved, the app stays stopped and offers recovery in the window and menu bar. Connect again after choosing the core. The menu bar shows node numbers and protocols; match the number to the full name in the Nodes view.
+
 ### Install Mihomo for the public package
 
 From [Mihomo v1.19.34](https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.34), download `mihomo-darwin-arm64-v1.19.34.gz` from the official Assets list. Verify both the archive and the extracted executable:

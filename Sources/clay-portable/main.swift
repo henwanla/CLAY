@@ -9,6 +9,7 @@ import Musl
 #elseif canImport(Android)
 import Android
 #elseif os(Windows)
+import CWindowsRuntime
 import ucrt
 #endif
 
@@ -62,19 +63,17 @@ private struct PortableCLI {
             guard arguments.count == 2 || numbered else { throw CommandError.usage }
             let report = ProfileImporter.read(try readProfile(arguments[1]))
             guard !report.profiles.isEmpty else { throw CommandError.noNodes }
-            let groups = Dictionary(grouping: report.profiles) { "\($0.protocolName)/\($0.transport)/\($0.security)" }
-            print("nodes=\(report.profiles.count)")
-            if numbered {
-                // Match mihomo-run ordering without exposing custom names or endpoint details.
-                for (index, profile) in report.profiles.enumerated() {
-                    print("node=\(index + 1) \(profile.protocolName)/\(profile.transport)/\(profile.security)")
-                }
-            } else {
-                for mode in groups.keys.sorted() { print("\(mode)=\(groups[mode]?.count ?? 0)") }
-            }
-            for issue in report.issues.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
-                print("skipped.\(issue.rawValue)=\(report.issues[issue] ?? 0)")
-            }
+            printInspection(report, numbered: numbered, includeLabels: false)
+        #if os(macOS) || os(Linux) || os(Windows)
+        case "desktop-node-list":
+            guard arguments == ["desktop-node-list", "--profile-stdin"] else { throw CommandError.usage }
+            // Desktop parents use anonymous pipes in both directions. Reject
+            // a terminal or a redirect to disk before reading the profile.
+            guard desktopPipes() else { throw CommandError.profilePipe }
+            let report = ProfileImporter.read(try readProfile(arguments[1]))
+            guard !report.profiles.isEmpty else { throw CommandError.noNodes }
+            printInspection(report, numbered: true, includeLabels: true)
+        #endif
         case "pac-check", "pac-script":
             let values = arguments.dropFirst(2)
             let value = values.first.flatMap { $0.hasPrefix("--") ? nil : $0 }
@@ -131,6 +130,52 @@ private struct PortableCLI {
         default: throw CommandError.usage
         }
     }
+
+    private static func printInspection(_ report: ImportResult, numbered: Bool, includeLabels: Bool) {
+        func kind(_ profile: NodeProfile) -> String { "\(profile.protocolName)/\(profile.transport)/\(profile.security)" }
+        print("nodes=\(report.profiles.count)")
+        if numbered {
+            // Match mihomo-run ordering. Labels are opt-in for local window use only.
+            for (index, profile) in report.profiles.enumerated() {
+                let label = includeLabels ? " " + desktopLabel(profile.name) : ""
+                print("node=\(index + 1) \(kind(profile))\(label)")
+            }
+        } else {
+            let groups = Dictionary(grouping: report.profiles, by: kind)
+            for mode in groups.keys.sorted() { print("\(mode)=\(groups[mode]?.count ?? 0)") }
+        }
+        for issue in report.issues.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
+            print("skipped.\(issue.rawValue)=\(report.issues[issue] ?? 0)")
+        }
+    }
+
+    private static func desktopLabel(_ name: String) -> String {
+        var cleaned = ""
+        for scalar in name.unicodeScalars {
+            if CharacterSet.whitespacesAndNewlines.contains(scalar) {
+                if !cleaned.isEmpty && cleaned.last != " " { cleaned.append(" ") }
+            } else if !CharacterSet.controlCharacters.contains(scalar) {
+                cleaned.unicodeScalars.append(scalar)
+            }
+            if cleaned.unicodeScalars.count >= 64 { break }
+        }
+        let label = cleaned.trimmingCharacters(in: .whitespaces)
+        // Links pasted into a display label can carry proxy credentials.
+        guard !label.isEmpty, !label.contains("://") else { return "-" }
+        return Data(label.utf8).base64EncodedString()
+    }
+
+    #if os(macOS) || os(Linux) || os(Windows)
+    private static func desktopPipes() -> Bool {
+        #if os(Windows)
+        clay_win_stdio_is_piped() == 1
+        #else
+        var input = stat(), output = stat()
+        return fstat(STDIN_FILENO, &input) == 0 && fstat(STDOUT_FILENO, &output) == 0 &&
+            input.st_mode & mode_t(S_IFMT) == mode_t(S_IFIFO) && output.st_mode & mode_t(S_IFMT) == mode_t(S_IFIFO)
+        #endif
+    }
+    #endif
 
     private static func validPort(_ text: String) -> Int? {
         guard !text.isEmpty, text.utf8.allSatisfy({ (48...57).contains($0) }),

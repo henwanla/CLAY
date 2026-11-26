@@ -110,7 +110,7 @@ def storage_checks(binary, directory, keyring):
     assert stat.S_IMODE(directory.stat().st_mode) == 0o700 and stat.S_IMODE(record.stat().st_mode) == 0o600
     assert all(clear not in original for clear in (b"Fixture subscription", b"local-only", b"synthetic-selected"))
     selected, preview, snapshot = manager.select(entry.id, cancel)
-    assert selected == entry and preview.nodes == ("ss/tcp/aead", "trojan/tcp/tls") and snapshot == PROFILE
+    assert selected == entry and tuple(node.kind for node in preview.nodes) == ("ss/tcp/aead", "trojan/tcp/tls") and snapshot == PROFILE
     downloaded[:] = b"not a profile"
     reject(lambda: manager.refresh(entry.id, cancel), "No supported nodes")
     assert record.read_bytes() == original

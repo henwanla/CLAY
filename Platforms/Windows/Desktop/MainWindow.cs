@@ -94,6 +94,9 @@ internal sealed class MainWindow : Form
         mode.Items.AddRange(Modes);
         mode.SelectedIndex = 0;
         node.AccessibleName = L("Node", "节点", "ノード");
+        node.DisplayMember = nameof(Node.WindowCaption);
+        node.Width = 230;
+        node.DropDownWidth = 420;
         mode.AccessibleName = L("Routing mode", "路由模式", "ルーティングモード");
         pane.Controls.Add(Row(Label(node.AccessibleName), node, Label(mode.AccessibleName), mode));
         pane.Controls.Add(Row(start, system, apply, refresh, stop));

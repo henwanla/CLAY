@@ -38,5 +38,6 @@ int32_t clay_win_control(clay_win_session *session, int32_t operation, const cha
                          uint8_t *response, uint32_t capacity, uint32_t *count);
 // Also terminates the process tree and removes the private runtime files.
 int32_t clay_win_stop(clay_win_session *session);
+int32_t clay_win_stdio_is_piped(void);
 
 #endif

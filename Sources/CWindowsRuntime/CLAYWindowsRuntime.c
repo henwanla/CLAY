@@ -14,6 +14,11 @@
 #include <wchar.h>
 #include "CLAYWindowsRuntime.h"
 
+int32_t clay_win_stdio_is_piped(void) {
+    return GetFileType(GetStdHandle(STD_INPUT_HANDLE)) == FILE_TYPE_PIPE &&
+           GetFileType(GetStdHandle(STD_OUTPUT_HANDLE)) == FILE_TYPE_PIPE;
+}
+
 #define CONFIG_LIMIT (2U * 1024 * 1024)
 #define BINARY_LIMIT (512ULL * 1024 * 1024)
 #define LISTENER_TABLE_LIMIT (16U * 1024 * 1024)

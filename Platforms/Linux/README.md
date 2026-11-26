@@ -24,7 +24,7 @@ swift build -c release --product clay-portable
 /usr/bin/python3 Platforms/Linux/clay-desktop.py --cli .build/release/clay-portable
 ```
 
-1. Pick a local profile or a downloaded subscription file and click **Load nodes**. Node numbers follow the CLI import order. For privacy the picker shows only protocol, transport and security, without names or server addresses. If you edit the file, load it again.
+1. Pick a local profile or a downloaded subscription file and click **Load nodes**. The main window shows each node's name and protocol alongside its import number, so you can distinguish nodes with the same protocol. The tray keeps only the number. If you edit the file, load it again.
 2. Choose the extracted Mihomo executable for your architecture and enter the expected SHA-256 of the executable. If the publisher supplies only an archive checksum, verify the archive first, then use `sha256sum` on the extracted executable.
 3. Select a node and routing mode. For Rule mode, you can choose a file of CLAY PAC rules. **Start session** starts a manual proxy. A loopback address appears after Mihomo reports the requested settings. Enter it in individual applications as their HTTP or SOCKS5 proxy.
 4. To change nodes or mode in the running session, select the new value and click **Apply**. If a change cannot be confirmed, click **Refresh status** to check the current state. Click **Stop** to end the session or **Quit CLAY** to stop and exit.
@@ -53,7 +53,7 @@ Use **Connect Plasma**, **Apply to Plasma**, or **Restore Plasma proxy** in the 
 
 Linux 桌面预览可以读取本地节点配置、启动通过 SHA-256 校验的 Mihomo，并在会话中切换节点和路由模式。请在仓库根目录运行上面的安装、构建和启动命令。
 
-1. 选择本地配置或已下载的订阅文件，点 **Load nodes**。编号和命令行导入顺序一致，列表只显示协议、传输类型和安全模式。修改文件后请重新加载。
+1. 选择本地配置或已下载的订阅文件，点 **Load nodes**。主窗口显示节点名称、协议和导入编号，方便分辨同一协议下的多个节点。托盘只显示编号。修改文件后请重新加载。
 2. 选择解压后的 Mihomo 可执行文件，填写该文件的预期 SHA-256。若上游只提供压缩包校验值，先验证压缩包，再计算解压后的文件哈希。
 3. 选好节点和模式，按需为 Rule 模式添加 CLAY PAC 规则文件。**Start session** 启动手动代理，内核确认后会显示 HTTP／SOCKS5 本机地址，可在需要代理的应用中填写。
 4. 运行时可通过 **Apply** 切换，结果未确认时可用 **Refresh status** 重新核对。点击 **Stop** 停止代理，**Quit CLAY** 停止并退出。

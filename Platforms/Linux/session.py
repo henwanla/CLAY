@@ -1,6 +1,7 @@
 """Private adapter around clay-portable's line protocol."""
 
 from contextlib import contextmanager, nullcontext
+from base64 import b64decode
 from dataclasses import dataclass
 import hashlib
 import os
@@ -11,6 +12,7 @@ import stat
 import subprocess
 import tempfile
 import time
+import unicodedata
 
 
 MODES = ("rule", "global", "direct")
@@ -19,7 +21,7 @@ MAX_PROFILE_BYTES = 2 * 1024 * 1024
 CHILD_ENV = {"LANG": "C"}
 READY = re.compile(rb"mihomo=ready proxy=127\.0\.0\.1:([1-9][0-9]{0,4}) controller=127\.0\.0\.1:([1-9][0-9]{0,4})")
 STATUS = re.compile(rb"mode=(rule|global|direct) node=([1-9][0-9]{0,2})")
-NODE = re.compile(rb"node=([1-9][0-9]{0,2}) ([a-z0-9-]{1,24}/[a-z0-9-]{1,16}/[a-z0-9-]{1,16})")
+NODE = re.compile(rb"node=([1-9][0-9]{0,2}) ([a-z0-9-]{1,24}/[a-z0-9-]{1,16}/[a-z0-9-]{1,16}) ([A-Za-z0-9+/=]{1,344}|-)")
 
 
 class DesktopError(Exception):
@@ -28,9 +30,18 @@ class DesktopError(Exception):
 
 @dataclass(frozen=True)
 class Preview:
-    nodes: tuple[str, ...]
+    nodes: tuple["Node", ...]
     digest: str
     skipped: int
+
+
+@dataclass(frozen=True, repr=False)
+class Node:
+    kind: str
+    label: str
+
+    def caption(self, index):
+        return f"{index} · {self.label}  [{self.kind}]" if self.label else f"{index} · {self.kind}"
 
 
 @dataclass(frozen=True)
@@ -40,9 +51,7 @@ class State:
     port: int
 
 
-@contextmanager
-def snapshot(path, expected_digest=None):
-    """Inspect and start with the same bytes even if the source is edited."""
+def read_profile(path):
     try:
         # O_NONBLOCK keeps FIFOs from blocking before fstat rejects them.
         with os.fdopen(os.open(path, os.O_RDONLY | os.O_NONBLOCK), "rb") as source:
@@ -53,6 +62,13 @@ def snapshot(path, expected_digest=None):
         raise DesktopError("Choose a readable local profile file.") from None
     if len(content) > MAX_PROFILE_BYTES:
         raise DesktopError("The profile file must be 2 MiB or smaller.")
+    return content
+
+
+@contextmanager
+def snapshot(path, expected_digest=None):
+    """Run with the inspected bytes even if the source is edited later."""
+    content = read_profile(path)
     digest = hashlib.sha256(content).hexdigest()
     if expected_digest is not None and expected_digest != digest:
         raise DesktopError("The profile file changed. Load it again before starting.")
@@ -65,8 +81,9 @@ def snapshot(path, expected_digest=None):
 
 
 class Lines:
-    def __init__(self, stream):
+    def __init__(self, stream, limit=256):
         self.stream = stream
+        self.limit = limit
         self.buffer = bytearray()
 
     def read(self, deadline, cancel=None):
@@ -76,11 +93,11 @@ class Lines:
                 if cancel is not None and cancel.is_set():
                     raise DesktopError("Operation stopped.")
                 end = self.buffer.find(b"\n")
-                if 0 <= end <= 256:
+                if 0 <= end <= self.limit:
                     line = bytes(self.buffer[:end])
                     del self.buffer[:end + 1]
                     return line
-                if len(self.buffer) > 256:
+                if len(self.buffer) > self.limit:
                     raise DesktopError("The local command sent an invalid response.")
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
@@ -132,13 +149,14 @@ def send_frame(process, source, deadline, cancel):
 
 
 def inspect(binary, path=None, cancel=None, *, source=None):
-    with source_args(path, source) as (profile, digest):
-        with launch(binary, "inspect", profile, "--numbered") as process:
+    if source is None:
+        source = read_profile(path)
+    with source_args(None, source) as (profile, digest):
+        with launch(binary, "desktop-node-list", profile) as process:
             try:
-                lines = Lines(process.stdout)
+                lines = Lines(process.stdout, limit=416)
                 deadline = time.monotonic() + 8
-                if source is not None:
-                    send_frame(process, source, deadline, cancel)
+                send_frame(process, source, deadline, cancel)
                 process.stdin.close()
                 header = re.fullmatch(rb"nodes=([1-9][0-9]{0,2})", lines.read(deadline, cancel) or b"")
                 if not header or int(header[1]) > MAX_PROFILES:
@@ -148,7 +166,13 @@ def inspect(binary, path=None, cancel=None, *, source=None):
                     node = NODE.fullmatch(lines.read(deadline, cancel) or b"")
                     if not node or int(node[1]) != index:
                         raise DesktopError("The node list returned by the local command is invalid.")
-                    nodes.append(node[2].decode("ascii"))
+                    try:
+                        label = "" if node[3] == b"-" else b64decode(node[3], validate=True).decode("utf-8")
+                        if len(label) > 64 or "://" in label or any(unicodedata.category(c) in {"Cc", "Cf", "Zl", "Zp"} for c in label):
+                            raise ValueError
+                    except ValueError:
+                        raise DesktopError("The node list returned by the local command is invalid.") from None
+                    nodes.append(Node(node[2].decode("ascii"), label))
                 skipped = 0
                 for _ in range(16):
                     line = lines.read(deadline, cancel)

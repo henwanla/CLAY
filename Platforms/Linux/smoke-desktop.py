@@ -70,7 +70,7 @@ def expect_error(action, text):
 
 def adapter_checks(binary, directory, profile):
     preview = inspect(binary, profile)
-    assert preview.nodes == ("ss/tcp/aead", "trojan/tcp/tls")
+    assert tuple((n.kind, n.label) for n in preview.nodes) == (("ss/tcp/aead", "synthetic-private-name"), ("trojan/tcp/tls", "second"))
     assert preview.skipped == 1
     fixture = directory / "synthetic-cli"
     fixture.write_text(f"#!{sys.executable}\n" + ADAPTER_CLI, encoding="utf-8")
@@ -314,9 +314,11 @@ def window_checks(binary, directory, profile, gnome=False, plasma=False):
         until(lambda: window.profile.get_filename() == str(profile))
         click(window.load)
         assert window.nodes.get_active_id() == "1" and "ss/tcp/aead" in window.nodes.get_active_text()
+        assert "synthetic-private-name" in window.nodes.get_active_text()
         assert "private-label" not in window.nodes.get_active_text()
         assert "Skipped 1" in window.status.get_text()
         window.nodes.set_active_id("2")
+        assert "second" in window.nodes.get_active_text()
         assert window.engine.set_filename(str(engine))
         window.use_rules.set_active(True)
         assert window.rules.set_filename(str(rules))
@@ -346,7 +348,8 @@ def window_checks(binary, directory, profile, gnome=False, plasma=False):
         layout = host.layout(until)
         assert "Global · Node 2" in layout and "Open CLAY" in layout
         assert layout["Node 2"][1]["toggle-state"] == 1 and layout["Global"][1]["toggle-state"] == 1
-        assert not any("private-label" in title or "127.0.0.1" in title for title in layout)
+        assert not any(value in title for title in layout
+                       for value in ("synthetic-private-name", "second", "private-label", "127.0.0.1"))
         if gnome:
             host.click(until, "Apply to GNOME")
             until(lambda: not window.busy and window.pac.confirmed())
@@ -434,6 +437,7 @@ def window_checks(binary, directory, profile, gnome=False, plasma=False):
             dialog.use.clicked()
             until(lambda: window.subscription_dialog is None)
             assert window.selected_subscription[0] == entry and window.source_label.get_text() == "Saved subscription"
+            assert "synthetic-private-name" in window.nodes.get_active_text()
             profile.write_text("invalid local profile", encoding="utf-8")
         # The synthetic core only accepts this startup pair, regardless of
         # what route we selected in the previous session. Require a new report.

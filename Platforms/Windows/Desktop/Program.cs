@@ -62,11 +62,13 @@ internal static class Program
         {
             var profile = Path.Combine(scratch.FullName, "profile テスト.txt");
             var rule = Path.Combine(scratch.FullName, "rule.txt");
-            await File.WriteAllTextAsync(profile, "ss://aes-128-gcm:sample-one@example.invalid:443#hidden-entry\n" +
-                                                "ss://aes-128-gcm:sample-two@example.invalid:444#hidden-entry\n");
+            await File.WriteAllTextAsync(profile, "ss://aes-128-gcm:sample-one@example.invalid:443#hidden-entry-one\n" +
+                                                "ss://aes-128-gcm:sample-two@example.invalid:444#テスト%20节点\n");
             await File.WriteAllTextAsync(rule, "DOMAIN-SUFFIX,example.invalid,DIRECT\n");
             var inspection = await PortableSession.InspectAsync(cli, profile);
-            if (inspection.Nodes.Count != 2 || inspection.Nodes.Any(n => n.Kind != "ss/tcp/aead" || n.ToString().Contains("hidden-entry")))
+            if (inspection.Nodes.Count != 2 || inspection.Nodes[0].WindowCaption != "1 · hidden-entry-one  [ss/tcp/aead]" ||
+                inspection.Nodes[1].WindowCaption != "2 · テスト 节点  [ss/tcp/aead]" ||
+                inspection.Nodes.Any(n => n.ToString() != $"{n.Number} · ss/tcp/aead"))
                 throw new IOException();
             Console.WriteLine("Windows desktop check: profile inspection passed");
             using var engine = File.OpenRead(fixture);

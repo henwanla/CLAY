@@ -34,7 +34,9 @@ internal static class SubscriptionChecks
 
             using var selection = await manager.SelectAsync(entry.Id, default);
             Check(selection.Inspection.Path is null && selection.Inspection.Nodes.Count == 2 &&
-                selection.Inspection.Nodes.All(n => n.Kind == "ss/tcp/aead"), "in-memory-subscription-inspection");
+                selection.Inspection.Nodes.All(n => n.Kind == "ss/tcp/aead") &&
+                selection.Inspection.Nodes.Select(n => n.Label).SequenceEqual(new[] { "fixture", "other" }),
+                "in-memory-subscription-inspection");
             response = "This is not a proxy configuration.";
             await RejectAsync(() => manager.RefreshAsync(entry.Id, default), SubscriptionFailure.Content);
             Check(File.ReadAllBytes(file).AsSpan().SequenceEqual(original), "failed-refresh-keeps-old-record");

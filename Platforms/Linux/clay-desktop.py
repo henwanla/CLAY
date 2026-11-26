@@ -9,7 +9,7 @@ import threading
 import gi
 
 gi.require_version("Gtk", "3.0")
-from gi.repository import GLib, Gtk
+from gi.repository import GLib, Gtk, Pango
 
 from desktop_pac import ReleaseError
 from gnome_pac import GnomePac
@@ -87,6 +87,9 @@ class Window(Gtk.Window):
         grid.attach(self.rules, 1, 4, 1, 1)
 
         self.nodes = Gtk.ComboBoxText()
+        for cell in self.nodes.get_cells():
+            cell.set_property("ellipsize", Pango.EllipsizeMode.END)
+            cell.set_property("max-width-chars", 40)
         self.set_node = Gtk.Button(label="Apply node")
         self.set_node.connect("clicked", self.change_node)
         row(5, "Node", self.nodes, self.set_node)
@@ -307,7 +310,7 @@ class Window(Gtk.Window):
         self.preview = preview
         self.nodes.remove_all()
         for index, node in enumerate(preview.nodes, start=1):
-            self.nodes.append(str(index), f"{index} · {node}")
+            self.nodes.append(str(index), node.caption(index))
         self.nodes.set_active(0)
         message = f"Loaded {len(preview.nodes)} supported nodes."
         if preview.skipped:

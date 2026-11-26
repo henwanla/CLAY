@@ -148,6 +148,34 @@ DOMAIN,::ffff:192.0.2.1,PROXY
     print("PASS offline node inspection, PAC validation and generation")
 
 
+def desktop_bridge_checks(directory):
+    args = [BINARY, "desktop-node-list", "--profile-stdin"]
+    fixture = {"type": "ss", "port": 443, "server": NODE_HOST, "cipher": "aes-128-gcm", "password": NODE_PASSWORD.decode()}
+    names = ["东京  東京\u202e  😄", "https://private.example.invalid/token", "雪" * 100]
+    data = json.dumps({"proxies": [{**fixture, "name": name} for name in names]}).encode()
+    frame = len(data).to_bytes(4, "big") + data
+    reply = subprocess.run(args, input=frame, capture_output=True, timeout=15, check=True)
+    rows = reply.stdout.splitlines()
+    assert rows[0] == b"nodes=3" and len(rows) == 4 and not reply.stderr
+    labels = []
+    for index, row in enumerate(rows[1:], 1):
+        index_field, kind, label = row.split(b" ")
+        assert index_field == f"node={index}".encode() and kind == b"ss/tcp/aead"
+        labels.append("" if label == b"-" else base64.b64decode(label, validate=True).decode("utf-8"))
+    assert labels == ["东京 東京 😄", "", "雪" * 64]
+    assert all(NODE_HOST.encode() not in label.encode() and NODE_PASSWORD not in label.encode() for label in labels)
+
+    path = directory / "redirected-node-list.txt"
+    with path.open("wb") as disk:
+        result = subprocess.run(args, input=frame, stdout=disk, stderr=subprocess.PIPE, timeout=15)
+    assert result.returncode == 65 and not path.read_bytes() and NODE_PASSWORD not in result.stderr
+    path.write_bytes(frame)
+    with path.open("rb") as disk:
+        result = subprocess.run(args, stdin=disk, capture_output=True, timeout=15)
+    assert result.returncode == 65 and not result.stdout and NODE_PASSWORD not in result.stderr
+    print("PASS named desktop nodes through pipes and refusal of disk redirects")
+
+
 class Fixture(http.server.BaseHTTPRequestHandler):
     requests = []
     redirect = False
@@ -197,5 +225,6 @@ def controller_checks():
 
 with tempfile.TemporaryDirectory(prefix="clay-portable-") as temp:
     offline_checks(pathlib.Path(temp))
+    desktop_bridge_checks(pathlib.Path(temp))
 if "--offline-only" not in sys.argv[2:]:
     controller_checks()

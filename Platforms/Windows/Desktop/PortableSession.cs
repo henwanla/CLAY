@@ -1,14 +1,16 @@
 using System.Buffers.Binary;
 using System.Diagnostics;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 
 namespace Clay.Windows;
 
-internal sealed record Node(int Number, string Kind)
+internal sealed record Node(int Number, string Kind, string Label)
 {
     public override string ToString() => $"{Number} · {Kind}";
+    public string WindowCaption => Label.Length == 0 ? ToString() : $"{Number} · {Label}  [{Kind}]";
 }
 
 internal sealed record Inspection(string? Path, byte[] Digest, IReadOnlyList<Node> Nodes);
@@ -23,7 +25,10 @@ internal sealed class BridgeException(string step, int? exitCode = null) : IOExc
 
 internal sealed class PortableSession : IAsyncDisposable
 {
-    private static readonly Regex NodeLine = new(@"\Anode=([1-9][0-9]{0,2}) ([a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+)\z");
+    private static readonly Regex CountLine = new(@"\Anodes=([1-9][0-9]{0,2})\z");
+    private static readonly Regex NodeLine = new(@"\Anode=([1-9][0-9]{0,2}) ([a-z0-9-]{1,24}/[a-z0-9-]{1,16}/[a-z0-9-]{1,16}) ([A-Za-z0-9+/=]{1,344}|-)\z");
+    private static readonly Regex IssueLine = new(@"\Askipped\.[a-zA-Z]{1,32}=[0-9]{1,10}\z");
+    private static readonly Encoding StrictUtf8 = new UTF8Encoding(false, true);
     private static readonly Regex Ready = new(@"\Amihomo=ready proxy=127\.0\.0\.1:([0-9]{1,5}) controller=127\.0\.0\.1:[0-9]{1,5}\z");
     private static readonly Regex Status = new(@"\Amode=(rule|global|direct) node=([1-9][0-9]{0,2})\z");
     private static readonly Regex Sha256 = new(@"\A[0-9a-fA-F]{64}\z");
@@ -76,41 +81,59 @@ internal sealed class PortableSession : IAsyncDisposable
     {
         path = Path.GetFullPath(path);
         using var snapshot = OpenProfile(path);
-        var digest = await SHA256.HashDataAsync(snapshot);
-        return new Inspection(path, digest, await InspectAsync(executable, path, default));
+        var source = new byte[(int)snapshot.Length];
+        try
+        {
+            await snapshot.ReadExactlyAsync(source);
+            var inspected = await InspectAsync(executable, source);
+            return inspected with { Path = path };
+        }
+        finally { CryptographicOperations.ZeroMemory(source); }
     }
 
     internal static async Task<Inspection> InspectAsync(string executable, ReadOnlyMemory<byte> source)
     {
-        var nodes = await InspectAsync(executable, null, source);
+        var nodes = await ReadNodesAsync(executable, source);
         return new Inspection(null, SHA256.HashData(source.Span), nodes);
     }
 
-    private static async Task<List<Node>> InspectAsync(string executable, string? path, ReadOnlyMemory<byte> source)
+    private static async Task<List<Node>> ReadNodesAsync(string executable, ReadOnlyMemory<byte> source)
     {
-        using var process = StartProcess(executable, ["inspect", path ?? "--profile-stdin", "--numbered"]);
+        using var process = StartProcess(executable, ["desktop-node-list", "--profile-stdin"]);
         var discard = process.StandardError.BaseStream.CopyToAsync(Stream.Null);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var nodes = new List<Node>();
+        // The shared bridge emits at most 100 bounded ASCII rows and a few counters.
+        var buffer = new char[43_000];
         try
         {
-            if (path is null) await SendFrameAsync(process, source, timeout.Token);
+            await SendFrameAsync(process, source, timeout.Token);
             process.StandardInput.Close();
-            while (await process.StandardOutput.ReadLineAsync(timeout.Token) is { } line)
-            {
-                if (line.Length > 160) throw new IOException();
-                var match = NodeLine.Match(line);
-                if (!match.Success) continue;
-                var node = int.Parse(match.Groups[1].Value);
-                if (nodes.Count >= 100 || node != nodes.Count + 1) throw new IOException();
-                nodes.Add(new Node(node, match.Groups[2].Value));
-            }
+            int length = await process.StandardOutput.ReadBlockAsync(buffer.AsMemory(), timeout.Token);
+            if (length == buffer.Length) throw new IOException();
             await process.WaitForExitAsync(timeout.Token);
-            if (process.ExitCode != 0 || nodes.Count == 0) throw new BridgeException("inspect-result", process.ExitCode);
+            if (process.ExitCode != 0) throw new BridgeException("inspect-result", process.ExitCode);
+            using var rows = new StringReader(new string(buffer, 0, length));
+            var header = CountLine.Match(rows.ReadLine() ?? "");
+            if (!header.Success || !int.TryParse(header.Groups[1].Value, out var count) || count > 100) throw new IOException();
+            var nodes = new List<Node>(count);
+            for (var index = 1; index <= count; index++)
+            {
+                var match = NodeLine.Match(rows.ReadLine() ?? "");
+                if (!match.Success || int.Parse(match.Groups[1].Value) != index) throw new IOException();
+                var payload = match.Groups[3].Value;
+                var label = payload == "-" ? "" : StrictUtf8.GetString(Convert.FromBase64String(payload));
+                if (label.Contains("://", StringComparison.Ordinal) || label.EnumerateRunes().Count() > 64 ||
+                    label.EnumerateRunes().Any(r => Rune.GetUnicodeCategory(r) is UnicodeCategory.Control or UnicodeCategory.Format or
+                        UnicodeCategory.LineSeparator or UnicodeCategory.ParagraphSeparator)) throw new IOException();
+                nodes.Add(new Node(index, match.Groups[2].Value, label));
+            }
+            while (rows.ReadLine() is { } issue)
+                if (!IssueLine.IsMatch(issue)) throw new IOException();
             return nodes;
         }
         finally
         {
+            Array.Clear(buffer);
             if (!process.HasExited) process.Kill();
             await discard;
         }

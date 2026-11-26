@@ -16,6 +16,10 @@ Load a local profile, choose the extracted Mihomo executable, enter its verified
 
 加载本地节点文件，选择已解压的 Mihomo，填写核验过的 SHA-256，再选择节点、模式，按需导入规则文件。启动后在需要代理的应用里手动填写回环地址。关闭窗口后会话留在 Windows 托盘；托盘菜单可切节点、切模式、停止代理或退出 CLAY。界面随系统语言显示简体中文、英文或日文。
 
+The main window lists each node by name, number and protocol. The tray uses only numbers and protocol tags, including for cached subscriptions. Switching still uses the imported number and confirms the result with the running core.
+
+主窗口显示节点名称、编号和协议；托盘仅显示编号和协议标签。本地文件和订阅缓存均按同样方式显示，切换仍按导入编号执行，并由运行中的内核读回确认。
+
 Choose **Connect Windows** to start the session and temporarily apply CLAY's PAC to the current user's default Windows connection. If already running in manual mode, choose **Use Windows proxy** in the window or tray. Apps that follow Windows proxy settings will send non-local requests to Mihomo; locally addressed requests bypass the proxy. Rule, Global and Direct still belong to the running session and can be switched without changing the PAC URL. Apps with their own proxy configuration may need the manual address.
 
 选择 **连接 Windows** 会启动会话，并为当前用户的默认网络临时应用 CLAY 的 PAC。已启动手动代理时，可从窗口或托盘选择 **应用到 Windows**。遵循系统代理的应用会把非本地请求交给 Mihomo；回环、本地域名和私有字面 IP 仍直连。规则／全局／直连可以在线切换，无须写入新的 PAC 地址。使用独立代理配置的应用仍可手动接入。

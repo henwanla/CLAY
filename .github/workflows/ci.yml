@@ -25,6 +25,8 @@ jobs:
           persist-credentials: false
       - name: Check source for local credentials
         run: python3 scripts/check-source-privacy.py
+      - name: Check README PNGs for extra metadata
+        run: python3 scripts/strip-screenshot-metadata.py --check docs/screenshots/*.png
       - name: Build the app and checks
         run: bash scripts/swift-local.sh build -c release
       - name: Check profiles, PAC rules and synthetic recovery

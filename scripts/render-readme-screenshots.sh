@@ -8,3 +8,4 @@ bash scripts/swift-local.sh build -c release --scratch-path "$scratch" --product
   -Xswiftc -enable-testing -Xswiftc -DCLAY_DOCUMENTATION
 bindir="$(bash scripts/swift-local.sh build -c release --scratch-path "$scratch" --show-bin-path)"
 TZ=UTC "$bindir/CLAY" "$PWD/docs/screenshots"
+python3 scripts/strip-screenshot-metadata.py docs/screenshots/macos-{overview,connections}.png

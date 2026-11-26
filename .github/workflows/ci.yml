@@ -70,3 +70,13 @@ jobs:
           for notice in CLAY Yams libyaml; do
             test -s "$app/Contents/Resources/LICENSE-$notice.txt"
           done
+          python3 scripts/strip-screenshot-metadata.py --check "$scratch"/docs/screenshots/*.png
+      - name: Upload the verified macOS preview
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: CLAY-macOS-arm64-preview
+          path: dist/release/CLAY-*-macos-arm64.zip*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0

@@ -1,6 +1,6 @@
 # CLAY 打包与发布 / Release process
 
-在 Apple Silicon Mac 上从已通过验证的源码构建。公开版与本机预览版是两种包：公开版不分发 Mihomo。两者都应保留 CLAY 的 MIT 许可和 Yams/libyaml 的上游许可；本机预览包含独立的 Mihomo、GPL 许可证和固定版本源码入口。发布 GitHub Release 本身不会完成 Developer ID 签名、公证或桌面验收。
+桌面公开包面向 Apple Silicon、Windows x64 和 Ubuntu 24.04 x86-64，不分发 Mihomo。各包保留 CLAY 的 MIT 许可和 Yams/libyaml 的上游许可。本机 macOS 试用包可内置独立的 Mihomo，须保留 GPL 许可证和固定版本的源码入口。GitHub Release 不替代操作系统签名、公证或真实桌面验收。
 
 ## 版本验证
 
@@ -14,7 +14,14 @@
 
 3. 按 [验收记录](验收记录.md) 跟踪程序和桌面验证。未操作过系统 PAC 授权弹窗、网络服务切换、菜单栏和图表时，把这些列为待人工验收。报告中只写实际验证结果。
 
-## GitHub 安装包（无内核）
+## 桌面预发布 / Desktop prerelease
+
+1. 确认 `main` 的三个桌面工作流已对同一个待发布提交通过。下载这三个具体运行的 Actions 产物：**CLAY-macOS-arm64-preview**、**CLAY-Windows-x64-preview**、**CLAY-Linux-x64-preview**。每个只取包和同名 SHA-256 文件；核对版本和架构，Windows 与 Linux 另核对包内 `START-HERE.txt` 的提交。保留运行编号作为来源记录。
+2. 核对三个压缩包的 SHA-256、文件清单、许可和根目录结构。不得含 Mihomo、真实配置、日志、本机路径或凭据；macOS 增查解包后的签名及 Info.plist。发布 CI 实际验证的同一批文件。
+3. 新建 `v<VERSION>` 标签，核对远端标签指向已验证的 `main` 提交。创建 GitHub 预发布草稿，上传三个包及各自的校验文件。回读草稿的资产清单与摘要，通过才公开；同时检查最终发布为不可变及旧发布仍在。变更已发资产时创建新版本。
+4. 写明系统和依赖：macOS 需 Apple Silicon，App 只有临时签名；Windows 需 .NET 10 Desktop Runtime 和 Swift 运行时，Linux 则无需安装 Swift；三个包均需单独准备已校验的 Mihomo。Windows 和 Linux 是未签名预览；Android 和 iOS 仅在其发行验收完成后单独发布。
+
+## 本机构建 macOS 公开包（无内核）
 
 ```sh
 bash scripts/package-macos.sh --public
@@ -26,7 +33,7 @@ unzip -l "CLAY-$version-macos-arm64.zip"
 
 检查 ZIP 内有 CLAY.app 和许可材料，没有 Mihomo 可执行文件、Xray、真实配置、日志或本机凭据。解压到临时目录验证 App 的 `CFBundleShortVersionString`、arm64 架构和 `codesign --verify --strict`。归档 App 与相邻的 `.zip.sha256` 一同发布。
 
-维护者确认远端标签指向通过验证的 `main` 提交后，在 [henwanla/CLAY](https://github.com/henwanla/CLAY) 将其发布为 GitHub 预发布。发布说明写清 Apple Silicon、macOS 13+ 构建目标、未公证、Mihomo 需要独立安装并校验，以及当前兼容范围。CI 只做验证，不创建标签或发布。
+此命令供本机复验。发布时使用对应 `main` 运行上传且已验证的压缩包；CI 不创建标签或发布。
 
 ## Linux GitHub Actions 试用包 / Linux CI preview
 
@@ -40,7 +47,7 @@ strip --strip-debug .build/release/clay-portable .build/kde/clay-kde-settings
 python3 scripts/package-linux.py .build/release/clay-portable .build/kde/clay-kde-settings dist/linux
 ~~~
 
-The Ubuntu 24.04 x86-64 workflow verifies the official Swift 6.4.3 archive against the pinned Swift 6.x release signing key before extraction. It checks the compiler version and target, then packages the GTK app, the statically linked Swift CLI and the built KDE helper. It tests the extracted preview with system libraries and isolated desktop settings before uploading a 30-day Actions artifact. The preview is unsigned and does not publish to GitHub Releases. See the [Linux download guide](../Platforms/Linux/README.md#download-for-ubuntu-2404-x86-64--下载试用包).
+The Ubuntu 24.04 x86-64 workflow verifies the official Swift 6.4.3 archive against the pinned Swift 6.x release signing key before extraction. It checks the compiler version and target, then packages the GTK app, the statically linked Swift CLI and the built KDE helper. It tests the extracted preview with system libraries and isolated desktop settings before uploading a 30-day Actions artifact. The preview is unsigned. Maintainers can publish the exact verified artifact's inner files with a tagged release. See the [Linux download guide](../Platforms/Linux/README.md#download-for-ubuntu-2404-x86-64--下载试用包).
 
 ## 本机预览（有独立内核）
 
@@ -54,4 +61,4 @@ bash scripts/package-macos.sh /绝对路径/mihomo /绝对路径/Mihomo-LICENSE
 
 ## English
 
-Build and verify on Apple Silicon. CI uses synthetic fixtures and checks the public package’s checksum, ad hoc signature, Apple Silicon executable, version, and license notices. It does not publish builds. Release the verified ZIP and SHA-256 file as a prerelease from the reviewed commit on the stable branch. The public ZIP requires a separately installed Mihomo; the local preview may contain the pinned, verified core and its upstream license. Do not mark authorization prompts, browser PAC behavior, or other desktop interaction as verified unless they were tested separately.
+Use the three successful desktop Actions runs from the same `main` commit. Keep the run IDs, verify each inner archive against its companion hash, check the contents, and publish those exact files. Point a new version tag at the verified commit. Upload all six assets to an unpublished prerelease draft, check the recorded digests, publish, and verify immutability. Use the local Apple Silicon build for reproduction; it is not the artifact produced by CI. Public packages require a separately installed Mihomo. Do not claim authorization prompts, browser PAC behavior, or native tray interaction as verified unless they were tested separately.

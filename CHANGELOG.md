@@ -1,9 +1,16 @@
 # 更新记录 / Changelog
 
-## 开发中 / Unreleased
+## 0.3.3 · 桌面预览 / Desktop preview
 
-- macOS、Windows 和 Linux 实际切换节点或流量模式后，等待内核关闭已有跟踪连接；重复选择当前项不会中断。状态未确认时不会显示切换成功。
-- On macOS, Windows, and Linux, CLAY waits for the core to close tracked connections after a node or routing mode change. Reselecting the active option keeps connections open. CLAY reports an unconfirmed state if it cannot verify the switch.
+- macOS、Windows 和 Linux 实际切换节点或流量模式后，等待内核关闭其跟踪的已有连接；重复选择当前项不会中断。状态未确认时不会显示切换成功。
+- Windows x64 与 Ubuntu 24.04 x86-64 提供桌面下载包，含手动代理、托盘、系统 PAC 和加密订阅缓存。三个公开包均需要单独准备已校验的 Mihomo。
+- 增加 TUIC v5 兼容；Windows 和 Linux 的主窗口显示节点名，托盘只显示编号。
+- Android VPN 技术预览修复部分端口的 HTTP 和 TLS 域名规则；iOS 隧道实验支持加密订阅缓存和会话中换节点。移动端仍是源码预览，待签名真机验收。
+
+- CLAY waits for the core to close tracked connections after changing the node or routing mode on macOS, Windows, and Linux. Reselecting the active option keeps connections open. Failed confirmation appears as an unconfirmed state.
+- Download desktop previews for Windows x64 and Ubuntu 24.04 x86-64 with a manual proxy, tray controls, system PAC, and encrypted subscription caches. All three desktop downloads require a separately verified Mihomo executable.
+- Add TUIC v5 support. Windows and Linux show node names in the window and only node numbers in the tray.
+- The Android VPN preview fixes HTTP and TLS domain rules on selected ports. The iOS Tunnel Lab adds encrypted subscription caching and in-session node switching. Mobile builds remain source previews pending signed device tests.
 
 ## 0.3.2 · 预览版 / Preview
 

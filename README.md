@@ -2,7 +2,7 @@
 
 [English](README.en.md) · [更新记录](CHANGELOG.md) · [GitHub Releases](https://github.com/henwanla/CLAY/releases)
 
-CLAY 是原生 macOS 代理客户端，把节点、订阅、菜单栏、PAC 分流和实时连接仪表放在同一个应用里。0.3.2 公开预览面向 Apple Silicon（macOS 13 起）。其他平台的预览和验证范围见文末。
+CLAY 是原生 macOS 代理客户端，把节点、订阅、菜单栏、PAC 分流和实时连接仪表放在同一个应用里。[0.3.3 桌面预览](https://github.com/henwanla/CLAY/releases/tag/v0.3.3)提供 Apple Silicon（macOS 13 起）、Windows x64 和 Ubuntu 24.04 x86-64 下载。移动端的预览和验证范围见文末。
 
 ## 界面截图
 
@@ -20,7 +20,7 @@ macOS「概览」中的流量走势、当前节点和模式切换。截图使用
 ## 安装与开始使用
 
 1. **本机预览包（构建号 4 起）**：打开 `CLAY.app`，未选择其他内核时，CLAY 会使用 App 内附带且已固定指纹的 Mihomo。可在「设置 → 选择 Mihomo…」选其他可信版本；升级或替换外部内核后请校验来源并重新选择。
-2. **GitHub 安装包**：下载 `CLAY-0.3.2-macos-arm64.zip` 和同名的 `.zip.sha256`。在下载目录执行 `shasum -a 256 -c CLAY-0.3.2-macos-arm64.zip.sha256`，校验通过后解压。公开包没有附带 Mihomo，请按下文安装并在「设置 → 选择 Mihomo…」中选中它。App 使用临时签名，未经过 Developer ID 签名和公证；如果系统禁止打开，可从源码构建，并遵守本机安全策略。
+2. **GitHub 安装包**：下载 `CLAY-0.3.3-macos-arm64.zip` 和同名的 `.zip.sha256`。在下载目录执行 `shasum -a 256 -c CLAY-0.3.3-macos-arm64.zip.sha256`，校验通过后解压。公开包没有附带 Mihomo，请按下文安装并在「设置 → 选择 Mihomo…」中选中它。App 使用临时签名，未经过 Developer ID 签名和公证；如果系统禁止打开，可从源码构建，并遵守本机安全策略。
 3. 在「订阅」点「添加订阅…」，粘贴服务商提供的 HTTPS 地址；也可以从「节点」粘贴分享链接，或导入 UTF-8 的 JSON、YAML 和文本文件。
 4. 选择节点，在主窗口或菜单栏点「连接 macOS」。CLAY 会启动本机代理，再给当前主要网络服务（或你在「PAC 规则」中选定的服务）配置系统 PAC。只需要手动接入时，点「仅启动本机代理」并在应用里填写「概览」的 HTTP／SOCKS5 地址。仍在使用 0.3.0 时，需先点「启动」，再到「PAC 规则」点「应用到 macOS」。
 5. 关闭窗口后代理继续运行。新版的 macOS 菜单栏可直接切换节点和流量模式，也能复制地址、重新打开窗口或启停代理。「退出 CLAY」或 `⌘Q` 会结束会话；应用不会在登录 macOS 后自动启动。
@@ -47,7 +47,7 @@ macOS「概览」中的流量走势、当前节点和模式切换。截图使用
 
 ## 流量模式和应用接入
 
-在「概览」或菜单栏切换流量模式：**规则**使用「PAC 规则」中已载入的策略，**全局**通过当前节点转发，**直连**直接访问目标。默认的「连接 macOS」会把非本地请求交给内核；切换模式不需要再次修改系统代理。开发版在实际切换节点或模式后关闭内核跟踪的已有连接，让应用重新连接；直接绕过代理的请求不受影响。公开 v0.3.2 仍可能让已有连接沿用原路径。回环、本地域名和私有地址默认直连。编辑规则后，重启代理即可载入。
+在「概览」或菜单栏切换流量模式：**规则**使用「PAC 规则」中已载入的策略，**全局**通过当前节点转发，**直连**直接访问目标。默认的「连接 macOS」会把非本地请求交给内核；切换模式不需要再次修改系统代理。0.3.3 起，实际切换节点或模式后会关闭内核跟踪的已有连接，让应用重新连接；重复选择当前项不会断流。绕过代理的请求不受影响。回环、本地域名和私有地址默认直连。编辑规则后，重启代理即可载入。
 
 | 模式 | 怎么用 | 影响范围 |
 | --- | --- | --- |
@@ -92,7 +92,7 @@ python3 scripts/smoke-subscriptions.py .build/release/CLAYCoreChecks
 
 Linux 有可下载的 [Ubuntu 24.04 x86-64 GTK 桌面预览](Platforms/Linux/README.md#download-for-ubuntu-2404-x86-64--下载试用包)，无需安装 Swift。它支持手动代理、GNOME 和 Plasma 6 的系统 PAC，可手动刷新 HTTPS 订阅并加密缓存。可从窗口或托盘切换节点与模式；托盘可用时，运行中关闭窗口会保留会话。
 
-[Windows 桌面预览](Platforms/Windows/README.md)支持手动接入和 Windows PAC，也可手动刷新 HTTPS 订阅并加密保存节点。关闭窗口后保留托盘入口，支持切换节点和规则／全局／直连。
+[Windows x64 桌面预览](Platforms/Windows/README.md#download-for-windows-x64--下载试用包)支持手动接入和 Windows PAC，也可手动刷新 HTTPS 订阅并加密保存节点。关闭窗口后保留托盘入口，支持切换节点和规则／全局／直连。
 
 [Android ARM64 离线预览](Platforms/Android/README.md)可检查节点和 PAC 规则，支持简体中文、英文和日文。它没有联网权限，也不提供 VPN；调试 APK 已在 Android API 24 ARM64 模拟器验收。
 

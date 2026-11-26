@@ -2,7 +2,7 @@
 
 [简体中文](README.md) · [Changelog](CHANGELOG.md) · [GitHub Releases](https://github.com/henwanla/CLAY/releases)
 
-CLAY is a native macOS proxy app with subscriptions, menu bar controls, PAC routing, live traffic, and a connection inspector. The 0.3.2 public preview targets Apple Silicon and macOS 13 or later. See the platform notes below for other previews and their test coverage.
+CLAY is a native macOS proxy app with subscriptions, menu bar controls, PAC routing, live traffic, and a connection inspector. The [0.3.3 desktop preview](https://github.com/henwanla/CLAY/releases/tag/v0.3.3) has downloads for Apple Silicon with macOS 13 or later, Windows x64, and Ubuntu 24.04 x86-64. See the platform notes below for mobile previews and their test coverage.
 
 ## Screenshots
 
@@ -20,7 +20,7 @@ The macOS Overview shows traffic, the selected node, and the routing mode. The s
 ## Getting started
 
 1. **Local preview (build 4 and later):** Open `CLAY.app`. If you have not selected another core, CLAY uses the bundled Mihomo with a pinned fingerprint. To use a different trusted core, choose it in Settings (**设置**). Verify the source and select it again after replacing or upgrading an external core.
-2. **GitHub release:** Download `CLAY-0.3.2-macos-arm64.zip` and the matching `.zip.sha256`. In the download directory, run `shasum -a 256 -c CLAY-0.3.2-macos-arm64.zip.sha256` before extracting the ZIP. The public package requires you to install Mihomo separately, as shown below. The app has an ad hoc signature and has no Developer ID signature or notarization. If macOS blocks the package, you can build it from source under your usual security policy.
+2. **GitHub release:** Download `CLAY-0.3.3-macos-arm64.zip` and the matching `.zip.sha256`. In the download directory, run `shasum -a 256 -c CLAY-0.3.3-macos-arm64.zip.sha256` before extracting the ZIP. The public package requires you to install Mihomo separately, as shown below. The app has an ad hoc signature and has no Developer ID signature or notarization. If macOS blocks the package, you can build it from source under your usual security policy.
 3. Under Subscriptions (**订阅**), select Add subscription (**添加订阅…**) and enter your provider’s HTTPS link. Under Nodes (**节点**), you can also paste share links or import UTF-8 JSON, YAML, or text files.
 4. Choose a node and select Connect macOS (**连接 macOS**) from the main window or menu bar. CLAY starts the local proxy and sets up system PAC for the current primary network service or the service you choose in PAC Rules. For manual setup, use Start local proxy only (**仅启动本机代理**) and enter the HTTP/SOCKS5 address from Overview (**概览**) in the app. If you are still using 0.3.0, use Start (**启动**) and then Apply to macOS (**应用到 macOS**) under PAC Rules.
 5. Closing the window keeps CLAY and its proxy running. In new builds, the menu bar also lets you switch nodes and routing modes. Quit CLAY or press `⌘Q` to end the session. CLAY does not launch automatically at login.
@@ -47,7 +47,7 @@ Stop if either hash differs. In Settings (**设置**) → Choose Mihomo (**选�
 
 ## Routing and app setup
 
-Choose a routing mode from Overview or the menu bar. **Rule** uses the loaded policy from PAC Rules; **Global** uses the selected node; **Direct** connects to the destination without a node. Connect macOS sends non-local requests to the core, so switching modes takes effect without changing macOS proxy settings again. On the development branch, switching nodes or modes closes existing connections tracked by the core so apps can reconnect. Traffic that bypasses the proxy is unaffected. Existing connections may keep their previous routes in public v0.3.2. Loopback, local names, and private addresses bypass this system connection. Restart the proxy to load edited rules.
+Choose a routing mode from Overview or the menu bar. **Rule** uses the loaded policy from PAC Rules; **Global** uses the selected node; **Direct** connects to the destination without a node. Connect macOS sends non-local requests to the core, so switching modes takes effect without changing macOS proxy settings again. Starting with 0.3.3, changing nodes or modes closes existing connections tracked by the core so apps can reconnect. Reselecting the active option keeps connections open. Traffic that bypasses the proxy is unaffected. Loopback, local names, and private addresses bypass this system connection. Restart the proxy to load edited rules.
 
 | Mode | How to use it | Scope |
 | --- | --- | --- |
@@ -92,7 +92,7 @@ python3 scripts/smoke-subscriptions.py .build/release/CLAYCoreChecks
 
 The [downloadable GTK desktop preview](Platforms/Linux/README.md#download-for-ubuntu-2404-x86-64--下载试用包) for Ubuntu 24.04 x86-64 runs without a Swift installation. It offers a manual proxy, desktop PAC with restoration for GNOME and Plasma 6, and manually refreshed HTTPS subscriptions with encrypted caching. Switch nodes and routing modes in the window or tray. With a working tray, closing the window keeps a running session active.
 
-The [Windows desktop preview](Platforms/Windows/README.md) offers a manual loopback proxy, optional Windows PAC with restoration, and manual HTTPS subscription refresh with encrypted caching. Its tray icon keeps the session accessible after the window is closed and offers node and mode switching.
+The [Windows x64 desktop preview](Platforms/Windows/README.md#download-for-windows-x64--下载试用包) offers a manual loopback proxy, optional Windows PAC with restoration, and manual HTTPS subscription refresh with encrypted caching. Its tray icon keeps the session accessible after the window is closed and offers node and mode switching.
 
 The [Android ARM64 offline preview](Platforms/Android/README.md) checks profiles and PAC rules in Simplified Chinese, English, and Japanese. The debug APK passed tests on an Android API 24 ARM64 emulator. It has no network permission or VPN support.
 

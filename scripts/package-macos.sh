@@ -17,7 +17,7 @@ else
 fi
 version="$(cat VERSION)"
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$(uname -m)" == arm64 ]] || { echo 'A numeric VERSION and Apple silicon build host are required.' >&2; exit 1; }
-build_number=7
+build_number=8
 scripts/swift-local.sh build -c release
 builddir="$(scripts/swift-local.sh build -c release --show-bin-path)"
 stage="$(mktemp -d "$root/.build/package.XXXXXX")"
@@ -73,6 +73,8 @@ if $public; then
   mkdir -p "$target" "$stage/content"
   mv "$app" "$stage/content/"
   install -m 644 README.md README.en.md LICENSE CHANGELOG.md "$stage/content/"
+  mkdir -p "$stage/content/docs/screenshots"
+  install -m 644 docs/screenshots/macos-{overview,connections}.png "$stage/content/docs/screenshots/"
   (cd "$stage/content" && /usr/bin/zip -q -X -r "$stage/$archive" .)
   mv -f "$stage/$archive" "$target/$archive"
   (cd "$target" && shasum -a 256 "$archive" > "$archive.sha256")

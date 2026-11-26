@@ -32,9 +32,11 @@ CI tests the native Windows PAC and restoration in the runner’s disposable use
 
 CI 在临时 Windows 用户配置中验收系统 PAC、原生 PAC 决策、加密恢复与合成会话桥接。Explorer 托盘外观、真实浏览器流量和组织管理的代理策略需另行验收。此预览不提供 TUN 或开机启动。
 
-The [Windows GitHub Actions workflow](https://github.com/henwanla/CLAY/actions/workflows/portable-windows.yml) packages successful branch builds as the **CLAY-Windows-x64-preview** artifact for 14 days. Extract the ZIP, compare its SHA-256 against the accompanying file, and follow `START-HERE.txt`. The package is unsigned and requires the .NET 10 Desktop Runtime, Swift runtime and a separately verified Mihomo. It is a preview artifact, separate from the public macOS Release.
+## Download for Windows x64 / 下载试用包
 
-[Windows 构建记录](https://github.com/henwanla/CLAY/actions/workflows/portable-windows.yml)会为通过验证的分支提供 **CLAY-Windows-x64-preview**，保留 14 天。核对 ZIP 的 SHA-256 后按 `START-HERE.txt` 解压试用。预览包未签名，需准备 .NET 10 Desktop Runtime、Swift 运行时和已核验的 Mihomo。正式 Release 仍是 macOS 版。
+Download the Windows x64 ZIP and its matching SHA-256 file from the [0.3.3 preview](https://github.com/henwanla/CLAY/releases/tag/v0.3.3). Compare the companion hash with `(Get-FileHash -Algorithm SHA256 .\FILE.zip).Hash` using the downloaded filename. Extract only after the hashes match and follow `START-HERE.txt`. The preview is unsigned and requires the .NET 10 Desktop Runtime, Swift runtime, and a separately verified Mihomo executable. For newer branch builds, see the 14-day **CLAY-Windows-x64-preview** artifact in [Windows Actions](https://github.com/henwanla/CLAY/actions/workflows/portable-windows.yml?query=branch%3Amain).
+
+从 [0.3.3 预览版](https://github.com/henwanla/CLAY/releases/tag/v0.3.3) 下载 Windows x64 的 ZIP 和校验文件。用上述 PowerShell 命令核对 ZIP 的 SHA-256 后再解压，按 `START-HERE.txt` 试用。预览包未签名，需准备 .NET 10 Desktop Runtime、Swift 运行时和已核验的 Mihomo。
 
 ## Subscriptions / 订阅管理
 

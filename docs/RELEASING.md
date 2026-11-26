@@ -4,7 +4,7 @@
 
 ## 版本验证
 
-1. 在 `develop` 验证变更；从用于发布的 `main` 提交再次确认构建与 CI，核对版本、`CHANGELOG.md` 和 README 的边界说明。版本标签为 `v0.3.0`；标记为预发布。
+1. 在 `develop` 验证变更；从用于发布的 `main` 提交再次确认构建与 CI，核对版本、`CHANGELOG.md` 和 README 的边界说明。版本标签由 `VERSION` 加上 `v` 得到；标记为预发布。更新现有版本时创建新标签并保留旧资产。
 2. 按 [参与开发](https://github.com/henwanla/CLAY/blob/main/CONTRIBUTING.md) 运行核心和订阅检查。运行下列扩展检查时，使用已核验的官方 Mihomo / Xray 可执行文件和合成配置：
 
    ```sh
@@ -19,8 +19,9 @@
 ```sh
 bash scripts/package-macos.sh --public
 cd dist/release
-shasum -a 256 -c CLAY-0.3.0-macos-arm64.zip.sha256
-unzip -l CLAY-0.3.0-macos-arm64.zip
+version="$(cat ../../VERSION)"
+shasum -a 256 -c "CLAY-$version-macos-arm64.zip.sha256"
+unzip -l "CLAY-$version-macos-arm64.zip"
 ```
 
 检查 ZIP 内有 CLAY.app 和许可材料，没有 Mihomo 可执行文件、Xray、真实配置、日志或本机凭据。解压到临时目录验证 App 的 `CFBundleShortVersionString`、arm64 架构和 `codesign --verify --strict`。归档 App 与相邻的 `.zip.sha256` 一同发布。

@@ -1,0 +1,9 @@
+#include "../TunnelLab/Lab.xcconfig"
+PRODUCT_NAME = CLAYPacketTunnel
+PRODUCT_BUNDLE_IDENTIFIER = $(CLAY_LAB_ID).provider
+INFOPLIST_FILE = Tunnel/Info.plist
+APPLICATION_EXTENSION_API_ONLY = YES
+SKIP_INSTALL = YES
+SWIFT_OBJC_BRIDGING_HEADER = Tunnel/CLAYPacketEngine.h
+OTHER_LDFLAGS = $(inherited) "$(CLAY_PACKET_ENGINE_DIR)/libCLAYPacketEngine.a" -framework CoreFoundation -framework Security -lresolv
+LD_RUNPATH_SEARCH_PATHS = $(inherited) @executable_path/Frameworks @executable_path/../../Frameworks

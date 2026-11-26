@@ -1,0 +1,8 @@
+#include "Lab.xcconfig"
+PRODUCT_NAME = CLAYTunnelLab
+PRODUCT_BUNDLE_IDENTIFIER = $(CLAY_LAB_ID)
+GENERATE_INFOPLIST_FILE = YES
+INFOPLIST_KEY_CFBundleDisplayName = CLAY Tunnel Lab
+INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES
+INFOPLIST_KEY_UILaunchScreen_Generation = YES
+INFOPLIST_KEY_NSLocalNetworkUsageDescription = Connect to the test node you explicitly choose on your local network.

@@ -98,6 +98,8 @@ Linux 有 [GTK 桌面预览](Platforms/Linux/README.md)，支持手动和 GNOME 
 
 [Android VPN 技术预览](Platforms/Android/README.md#vpn-技术预览--vpn-technical-preview)是独立的调试 APK，支持 IPv4 系统接管、前台服务、节点和模式切换。仍需验证真机、域名与 DNS 分流，暂未提供公开安装包或订阅下载。
 
+[iOS / iPadOS](Platforms/iOS/README.md)提供离线节点检查和单独的 CLAY 隧道实验。实验只接管一个保留的测试地址，用于验证节点转发和 VPN 生命周期，尚待签名真机验证。
+
 [参与开发](CONTRIBUTING.md) · [架构调研](docs/架构调研.md) · [验收记录](docs/验收记录.md) · [打包及发布](docs/RELEASING.md) · [安全维护](docs/安全维护.md)
 
 CLAY 原创代码以 [MIT](https://github.com/henwanla/CLAY/blob/main/LICENSE) 许可发布。Yams 和 libyaml 各有 [上游许可证](https://github.com/henwanla/CLAY/blob/main/Vendor/Yams/UPSTREAM.md)。Mihomo 是按其 GPL 许可发布的独立依赖；本机预览包附有其许可证和固定版本的源码入口，公开 ZIP 不含该内核。

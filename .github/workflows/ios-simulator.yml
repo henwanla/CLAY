@@ -48,6 +48,7 @@ jobs:
             -derivedDataPath "$derived_data" CODE_SIGNING_ALLOWED=NO build
           app="$derived_data/Build/Products/Debug-iphonesimulator/CLAY.app"
           test -x "$app/CLAY"
+          test ! -d "$app/PlugIns"
           [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Info.plist")" == app.clay.offline ]]
           [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleSupportedPlatforms:0' "$app/Info.plist")" == iPhoneSimulator ]]
           for locale in en zh-Hans ja; do
@@ -82,10 +83,32 @@ jobs:
           bash "$engine/link-check.sh" macos "$root/host"
           bash scripts/swift-local.sh build -c release --product CLAYCoreChecks
           .build/release/CLAYCoreChecks --packet-fixture | "$root/host/abi-smoke"
+          swiftc -parse-as-library -o "$root/scope-check" Platforms/iOS/Tunnel/LabContract.swift \
+            Platforms/iOS/TunnelLab/LabContractChecks.swift
+          "$root/scope-check"
           for sdk in iphoneos iphonesimulator; do
             bash "$engine/build.sh" "$root/mihomo.tgz" "$sdk" "$root/$sdk"
             bash "$engine/link-check.sh" "$sdk" "$root/$sdk"
             [[ "$(xcrun lipo -archs "$root/$sdk/abi-smoke")" == arm64 ]]
+            destination='generic/platform=iOS'
+            if [[ "$sdk" == iphonesimulator ]]; then destination+=' Simulator'; fi
+            xcodebuild -project Platforms/iOS/CLAY.xcodeproj -scheme CLAYTunnelLab \
+              -configuration Debug -destination "$destination" -derivedDataPath "$root/build-$sdk" \
+              ARCHS=arm64 ONLY_ACTIVE_ARCH=NO CODE_SIGNING_ALLOWED=NO \
+              CLAY_PACKET_ENGINE_DIR="$root/$sdk" build
+            app="$root/build-$sdk/Build/Products/Debug-$sdk/CLAYTunnelLab.app"
+            provider="$app/PlugIns/CLAYPacketTunnel.appex"
+            test -x "$app/CLAYTunnelLab"
+            test -x "$provider/CLAYPacketTunnel"
+            plist=/usr/libexec/PlistBuddy
+            [[ "$($plist -c 'Print :CFBundleIdentifier' "$app/Info.plist")" == app.clay.tunnellab ]]
+            [[ "$($plist -c 'Print :CFBundleIdentifier' "$provider/Info.plist")" == app.clay.tunnellab.provider ]]
+            [[ "$($plist -c 'Print :NSExtension:NSExtensionPointIdentifier' "$provider/Info.plist")" == com.apple.networkextension.packet-tunnel ]]
+            [[ "$($plist -c 'Print :NSExtension:NSExtensionPrincipalClass' "$provider/Info.plist")" == CLAYPacketTunnel.PacketTunnelProvider ]]
+            [[ "$(xcrun lipo -archs "$provider/CLAYPacketTunnel")" == arm64 ]]
+            for locale in en zh-Hans ja; do
+              test -s "$app/$locale.lproj/Localizable.strings"
+            done
           done
           xcrun vtool -show-build "$root/iphoneos/abi-smoke" | grep -Eq 'platform[[:space:]]+IOS$'
           xcrun vtool -show-build "$root/iphonesimulator/abi-smoke" | grep -Eq 'platform[[:space:]]+IOSSIMULATOR$'

@@ -98,6 +98,8 @@ The [Android local relay preview](Platforms/Android/README.md#本机代理预览
 
 The separate [Android VPN technical preview](Platforms/Android/README.md#vpn-技术预览--vpn-technical-preview) is a development APK with IPv4 system routing, a foreground service, and node and mode switching. Physical devices, domain rules, and DNS routing need more testing. There is no VPN release APK or subscription downloader yet.
 
+[iOS and iPadOS](Platforms/iOS/README.md) have an offline profile checker and a separate CLAY Tunnel Lab. The lab routes a single reserved test address to verify forwarding and the VPN lifecycle; it still needs testing on a signed physical device.
+
 [Contributing](CONTRIBUTING.md) · [Verification record](docs/验收记录.md) · [Release process](docs/RELEASING.md) · [Security maintenance](docs/安全维护.md)
 
 Original CLAY code uses the [MIT License](LICENSE). Yams and libyaml have [separate upstream license notices](https://github.com/henwanla/CLAY/blob/main/Vendor/Yams/UPSTREAM.md). Mihomo is a standalone GPL dependency. The local preview keeps its license and pinned upstream source reference; the public ZIP does not redistribute it.

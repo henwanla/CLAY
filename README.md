@@ -102,7 +102,7 @@ Linux 有可下载的 [Ubuntu 24.04 x86-64 GTK 桌面预览](Platforms/Linux/REA
 
 [Android 本机代理预览](Platforms/Android/README.md#本机代理预览--local-relay-preview)使用独立应用 ID。它可为支持认证 HTTP/SOCKS5 代理的应用提供手动回环接入、节点切换及规则／全局／直连。它只代理手动配置过的应用。
 
-[Android VPN 技术预览](Platforms/Android/README.md#vpn-技术预览--vpn-technical-preview)是独立的调试 APK，支持 IPv4 系统接管、前台服务、节点和模式切换，也可从快捷设置磁贴打开 CLAY 或停止 VPN。通知显示连接阶段，且不公开节点、订阅或地址；旧通知不能停止重启后的会话。本机代理和 VPN 都支持[手动刷新 HTTPS 订阅并加密缓存节点](Platforms/Android/README.md#订阅--subscriptions)。在 Android 15 模拟器上已验证 IP 规则、部分 TCP 端口的 HTTP/TLS 域名规则和普通 UDP DNS；仍需验证真机、切网和加密 DNS。暂未提供公开 VPN 安装包。
+[Android VPN 技术预览](Platforms/Android/README.md#vpn-技术预览--vpn-technical-preview)是独立的调试 APK，支持 IPv4／IPv6 系统接管、前台服务、节点和模式切换，也可从快捷设置磁贴打开 CLAY 或停止 VPN。通知显示连接阶段，且不公开节点、订阅或地址；旧通知不能停止重启后的会话。本机代理和 VPN 都支持[手动刷新 HTTPS 订阅并加密缓存节点](Platforms/Android/README.md#订阅--subscriptions)。在 Android 15 模拟器上已验证双栈 TCP 与普通 UDP DNS、节点切换、IP 规则和部分 TCP 端口的 HTTP/TLS 域名规则；仍需验证真机、切网和加密 DNS。暂未提供公开 VPN 安装包。
 
 [iOS / iPadOS](Platforms/iOS/README.md)提供离线节点检查和单独的 CLAY 隧道实验。实验支持加密订阅缓存、指定一个 IPv4/TCP 测试端点及连接中切换节点和模式。它只接管一个 IPv4 地址，尚待签名真机验证。
 

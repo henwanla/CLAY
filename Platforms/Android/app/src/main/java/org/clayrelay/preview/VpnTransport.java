@@ -14,6 +14,10 @@ import java.io.OutputStream;
 
 /** Owns the platform TUN and the private descriptor channel for one engine. */
 final class VpnTransport implements AutoCloseable {
+    // Match the external TUN configured in CLAYAndroidBridge.
+    private static final String IPV6_ADDRESS = "fdfe:dcba:9876::1";
+    private static final int IPV6_PREFIX = 126;
+    static final String IPV6_TUN_CIDR = IPV6_ADDRESS + "/" + IPV6_PREFIX;
     private final ClayVpnService service;
     private final String dns;
     private ParcelFileDescriptor tun;
@@ -24,9 +28,10 @@ final class VpnTransport implements AutoCloseable {
 
     synchronized void establish() throws IOException {
         if (closed || tun != null) throw new IOException();
-        // Leave IPv6 unavailable rather than permitting an unprotected bypass.
+        // Claim both families; allowing a family without its route would bypass the VPN.
         tun = service.new Builder().setSession(service.getString(R.string.vpn_title)).setMtu(1500)
-                .addAddress("198.18.0.1", 30).addRoute("0.0.0.0", 0).addDnsServer(dns).establish();
+                .addAddress("198.18.0.1", 30).addRoute("0.0.0.0", 0)
+                .addAddress(IPV6_ADDRESS, IPV6_PREFIX).addRoute("::", 0).addDnsServer(dns).establish();
         if (tun == null) throw new IOException();
     }
 

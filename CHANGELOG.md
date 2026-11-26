@@ -1,5 +1,10 @@
 # 更新记录 / Changelog
 
+## 开发中 / Unreleased
+
+- Android VPN 预览接管 IPv6，连同 IPv4 走当前节点及规则、全局或直连模式；失效的代理路径不会回落到 IPv6 直连。
+- The Android VPN preview routes IPv6 alongside IPv4 with node switching and Rule, Global, or Direct mode. A failed proxy path does not fall back to direct IPv6.
+
 ## 0.3.4 · 桌面预览 / Desktop preview
 
 - macOS 试用包可直接切回随附 Mihomo。外部内核移走或校验失败时，显示恢复方式并保持停止。菜单栏显示节点编号及协议，主窗口保留节点名。公开包仍需单独准备已校验的 Mihomo。

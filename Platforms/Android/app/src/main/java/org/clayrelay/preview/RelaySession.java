@@ -119,6 +119,8 @@ final class RelaySession implements AutoCloseable {
             }
             Map<String, String> env = process.environment();
             env.clear();
+            // The already-established Android TUN carries IPv6 even on an IPv4-only uplink.
+            if (vpn) env.put("SKIP_SYSTEM_IPV6_CHECK", "true");
             env.put("HOME", directory.getPath()); env.put("TMPDIR", directory.getPath()); env.put("PATH", "/system/bin");
             child = process.directory(directory).redirectErrorStream(true).redirectOutput(new File("/dev/null")).start();
             child.getOutputStream().close();
@@ -165,12 +167,19 @@ final class RelaySession implements AutoCloseable {
         JSONObject config = request("GET", "/configs", null);
         String mode = config.getString("mode");
         if (config.getInt("mixed-port") != proxy || config.getBoolean("allow-lan")
-                || (vpn && !config.getJSONObject("tun").getBoolean("enable"))
+                || (vpn && !confirmsDualStack(config))
                 || !Arrays.asList("rule", "global", "direct").contains(mode)) throw new IOException();
         String selected = request("GET", "/proxies/CLAY", null).getString("now");
         int index = Arrays.asList(ids).indexOf(selected);
         if (index < 0 || !running()) throw new IOException();
         return new State(proxy, index + 1, password, mode, labels);
+    }
+
+    private static boolean confirmsDualStack(JSONObject config) throws JSONException {
+        JSONObject tun = config.getJSONObject("tun");
+        JSONArray ipv6 = tun.optJSONArray("inet6-address");
+        return tun.getBoolean("enable") && config.getBoolean("ipv6") && ipv6 != null
+                && ipv6.length() == 1 && VpnTransport.IPV6_TUN_CIDR.equals(ipv6.getString(0));
     }
 
     private JSONObject request(String method, String path, JSONObject object) throws Exception {

@@ -2,22 +2,22 @@
 <resources>
     <string name="vpn_title">CLAY VPN 预览</string>
     <string name="vpn_eyebrow">Android VPN 预览</string>
-    <string name="vpn_intro_top">粘贴节点、测试规则，再按需启动 IPv4 隧道。</string>
-    <string name="vpn_intro">连接期间，此预览版接管 IPv4 并阻止 IPv6。请填写你信任的 IPv4 DNS。全局模式下，DNS 需要节点支持 UDP。连接域名节点可能需要系统 DNS。停止或失去 VPN 连接后，系统会恢复普通网络。添加域名规则后，规则模式会使用支持端口上的可见 HTTP 或 TLS 域名。</string>
+    <string name="vpn_intro_top">粘贴节点、测试规则，再按需启动 IPv4 和 IPv6 隧道。</string>
+    <string name="vpn_intro">连接期间，此预览版接管 IPv4 和 IPv6。请填写你信任的 IPv4 DNS。全局模式下，DNS 需要节点支持 UDP。连接域名节点可能需要系统 DNS。停止或失去 VPN 连接后，系统会恢复普通网络。添加域名规则后，规则模式会使用支持端口上的可见 HTTP 或 TLS 域名。</string>
     <string name="vpn_dns">可信的 IPv4 DNS 服务器</string>
     <string name="vpn_start">启动 VPN</string>
     <string name="vpn_stop">停止 VPN</string>
     <string name="vpn_stopped">VPN 已停止。</string>
-    <string name="vpn_starting">正在启动 IPv4 隧道…</string>
+    <string name="vpn_starting">正在启动隧道…</string>
     <string name="vpn_updating">正在应用节点和模式…</string>
     <string name="vpn_stopping">正在停止 VPN…</string>
-    <string name="vpn_ready">IPv4 隧道已接管 · 节点 %1$d · %2$s</string>
+    <string name="vpn_ready">IPv4 和 IPv6 隧道已接管 · 节点 %1$d · %2$s</string>
     <string name="vpn_denied">未授予 VPN 权限。</string>
     <string name="vpn_failed">未能确认 VPN 状态。请检查节点、DNS、规则和系统 VPN 设置。</string>
     <string name="vpn_ended">VPN 进程已结束，系统恢复普通网络。</string>
     <string name="vpn_revoked">Android 已撤销 VPN 权限。</string>
     <string name="vpn_invalid">请粘贴节点配置、选择节点并填写有效的 IPv4 DNS。</string>
-    <string name="vpn_notification_active">IPv4 隧道已接管 · 打开 CLAY 查看详情</string>
+    <string name="vpn_notification_active">IPv4 和 IPv6 隧道已接管 · 打开 CLAY 查看详情</string>
     <string name="vpn_cleanup_failed">未能确认 VPN 已完全退出。请先检查系统 VPN 设置再重试。</string>
     <string name="vpn_tile_title">CLAY VPN</string>
     <string name="vpn_tile_open">打开 CLAY</string>

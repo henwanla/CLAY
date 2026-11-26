@@ -33,9 +33,11 @@ public func relayConfig(
     if options["vpn"] as? Bool == true {
         // Android owns all routes. The supplied IPv4 DNS address is a regular
         // tunnel destination and follows the selected engine mode/rules.
+        config["ipv6"] = true
         config["tun"] = ["enable": true, "stack": "gvisor", "auto-route": false,
                          "auto-detect-interface": false, "file-descriptor": 100, "mtu": 1500,
-                         "inet4-address": ["198.18.0.1/30"], "dns-hijack": [String]()]
+                         "inet4-address": ["198.18.0.1/30"], "inet6-address": ["fdfe:dcba:9876::1/126"],
+                         "dns-hijack": [String]()]
         if policyRules.contains(where: \.requiresHostname) {
             // Use the name for matching only; keep the original IP and port.
             config["sniffer"] = ["enable": true, "parse-pure-ip": true, "force-dns-mapping": false,

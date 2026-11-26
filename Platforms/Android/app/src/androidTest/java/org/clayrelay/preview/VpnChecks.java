@@ -47,6 +47,7 @@ final class VpnChecks {
     static String run(Instrumentation test, Activity activity, Bundle fixture) throws Exception {
         int first = port(fixture, "firstPort"), second = port(fixture, "secondPort"), direct = port(fixture, "directPort");
         int ipv6 = port(fixture, "ipv6Port"), tls = port(fixture, "tlsPort");
+        int ipv6Origin = port(fixture, "ipv6OriginPort");
         String proof = fixture.getString("proof", "");
         require(proof.matches("[a-f0-9]{24}"), "synthetic proof");
         String fault = fixture.getString("vpnFault", "");
@@ -63,29 +64,37 @@ final class VpnChecks {
                     "idle tile opens app"));
         }
         try {
-            if (fault.isEmpty()) require(fetch(IPV6_FIXTURE, ipv6).endsWith(proof + "-V6"),
-                    "ordinary IPv6 reachable before starting tunnel");
+            if (fault.isEmpty()) {
+                require(fetch(IPV6_FIXTURE, ipv6).endsWith(proof + "-V6"), "ordinary IPv6 reachable before starting tunnel");
+                require(fetch(IPV6_FIXTURE, ipv6Origin).endsWith(proof + "-V6-ORIGIN"), "origin-only IPv6 is reachable without the VPN");
+            }
             start(test, activity, first, second, proof);
             await(test, R.string.vpn_ready, 1, "global", "foreground start");
             require(fetch("198.51.100.42", 18080).endsWith(proof + "-A"), "system TCP uses first node");
-            if (!fault.isEmpty()) return verifyFailure(test, activity, fault, direct, proof);
+            require(fetch(IPV6_FIXTURE, ipv6).endsWith(proof + "-A"), "global IPv6 TCP uses the first node instead of the reachable origin");
+            if (!fault.isEmpty()) return verifyFailure(test, activity, fault, direct, ipv6, proof);
             PendingIntent stop = currentNotificationStop(activity);
             ClayVpnService.Snapshot[] oldTile = new ClayVpnService.Snapshot[1];
             test.runOnMainSync(() -> {
                 oldTile[0] = ClayVpnService.state();
                 require(ClayVpnTile.action(oldTile[0]) == ClayVpnTile.Action.STOP, "connected tile offers stop");
             });
-            checkIPv6Blocked(ipv6);
-            checkDns(proof, 73);
+            assertNoIPv6Fallback(ipv6Origin);
+            checkDns("198.51.100.53", proof, 73);
+            checkDns("2001:db8::53", proof, 73);
             test.runOnMainSync(() -> edit(activity, MainActivity.ID_NODE_INPUT).setText("changed draft"));
             select(test, activity, 2, 1);
             await(test, R.string.vpn_ready, 2, "global", "confirmed node change");
             require(fetch("198.51.100.42", 18080).endsWith(proof + "-B"), "system TCP uses second node");
-            checkDns(proof, 74);
+            require(fetch(IPV6_FIXTURE, ipv6).endsWith(proof + "-B"), "global IPv6 TCP switches to the IPv6-addressed node");
+            checkDns("198.51.100.53", proof, 74);
+            checkDns("2001:db8::53", proof, 74);
             select(test, activity, 2, 0);
             await(test, R.string.vpn_ready, 2, "rule", "confirmed rule mode");
             require(fetch("10.0.2.2", direct).endsWith(proof + "-D"), "rule mode honors IP bypass");
             require(fetch("198.51.100.42", 18080).endsWith(proof + "-B"), "rule fallback uses node");
+            require(fetch(IPV6_FIXTURE, ipv6).endsWith(proof + "-V6"), "rule mode sends the explicit IPv6 literal direct");
+            require(fetch("2001:db8::42", ipv6).endsWith(proof + "-B"), "unmatched IPv6 in rule mode uses the selected node");
             String proxyName = "proxy-" + proof + ".test", directName = "direct-" + proof + ".test";
             require(fetchNamed(proxyName, direct).endsWith(proof + "-B"), "HTTP domain rule selects the proxy for a shared IPv4 address");
             require(fetchNamed(directName, direct).endsWith(proof + "-D"), "HTTP domain rule can keep the same IPv4 address direct");
@@ -95,13 +104,15 @@ final class VpnChecks {
             select(test, activity, 2, 2);
             await(test, R.string.vpn_ready, 2, "direct", "confirmed direct mode");
             require(fetch("10.0.2.2", direct).endsWith(proof + "-D"), "direct mode routes to origin");
-            checkIPv6Blocked(ipv6);
+            require(fetch(IPV6_FIXTURE, ipv6Origin).endsWith(proof + "-V6-ORIGIN"),
+                    "direct mode can reach the IPv6 origin that Global did not fall back to");
             select(test, activity, 2, 1);
             await(test, R.string.vpn_ready, 2, "global", "confirmed global mode before leaving");
             test.runOnMainSync(activity::finish);
             for (int i = 0; i < 40 && !activity.isDestroyed(); i++) SystemClock.sleep(50);
             require(activity.isDestroyed(), "foreground Activity destroyed");
             require(fetch("198.51.100.42", 18080).endsWith(proof + "-B"), "VPN stays up after Activity closes");
+            require(fetch(IPV6_FIXTURE, ipv6).endsWith(proof + "-B"), "background VPN continues to route IPv6 through the node");
             require(stop.equals(currentNotificationStop(activity)), "the same session retains its stop action after node and mode changes");
             stop.send();
             await(test, R.string.vpn_stopped, 0, null, "notification stop cleaned session");
@@ -112,6 +123,7 @@ final class VpnChecks {
                 start(test, returned, first, second, proof);
                 await(test, R.string.vpn_ready, 1, "global", "restart within same process");
                 require(fetch("198.51.100.42", 18080).endsWith(proof + "-A"), "restarted tunnel forwards traffic");
+                require(fetch(IPV6_FIXTURE, ipv6).endsWith(proof + "-A"), "restarted tunnel forwards IPv6");
                 test.runOnMainSync(() -> require(!ClayVpnService.stopFromTile(oldTile[0]),
                         "outdated tile action cannot stop a new session"));
                 PendingIntent fresh = currentNotificationStop(returned);
@@ -178,7 +190,7 @@ final class VpnChecks {
         throw new AssertionError("system consent cancellation was not shown");
     }
 
-    private static String verifyFailure(Instrumentation test, Activity activity, String fault, int direct, String proof) throws Exception {
+    private static String verifyFailure(Instrumentation test, Activity activity, String fault, int direct, int ipv6, String proof) throws Exception {
         Process engine = ownedEngine(test);
         require(engine != null && engine.isAlive(), "locate owned engine before fault");
         if (fault.equals("engine")) {
@@ -192,6 +204,7 @@ final class VpnChecks {
         } else throw new AssertionError("unknown fault scenario");
         require(!engine.isAlive() && ownedEngine(test) == null, "owned engine exited and service released it");
         require(fetch("10.0.2.2", direct).endsWith(proof + "-D"), "ordinary networking resumed after fault");
+        require(fetch(IPV6_FIXTURE, ipv6).endsWith(proof + "-V6"), "ordinary IPv6 resumed after fault");
         assertClean(activity);
         return fault.equals("engine") ? "CLAY_ANDROID_VPN_ENGINE_EXIT_PASS" : "CLAY_ANDROID_VPN_REVOKE_PASS";
     }
@@ -220,12 +233,13 @@ final class VpnChecks {
 
     private static void start(Instrumentation test, Activity activity, int first, int second, String proof) {
         test.runOnMainSync(() -> {
-            String prefix = "vless://56dc6c3e-8793-4d37-a363-f9f19db29c6d@10.0.2.2:";
+            String prefix = "vless://56dc6c3e-8793-4d37-a363-f9f19db29c6d@";
             String options = "?encryption=none&security=none&type=tcp#Fixture-";
-            edit(activity, MainActivity.ID_NODE_INPUT).setText(prefix + first + options + "A\n" + prefix + second + options + "B");
+            edit(activity, MainActivity.ID_NODE_INPUT).setText(prefix + "10.0.2.2:" + first + options + "A\n" +
+                    prefix + "[" + IPV6_FIXTURE + "]:" + second + options + "B");
             edit(activity, MainActivity.ID_PAC_RULES).setText((proof.isEmpty() ? "" :
                     "DOMAIN,proxy-" + proof + ".test,PROXY\nDOMAIN-SUFFIX,direct-" + proof + ".test,DIRECT\n") +
-                    "IP-CIDR,10.0.2.2/32,DIRECT");
+                    "IP-CIDR,10.0.2.2/32,DIRECT\nDOMAIN," + IPV6_FIXTURE + ",DIRECT");
             edit(activity, VpnPanel.ID_DNS).setText("198.51.100.53");
             ((CompoundButton) activity.findViewById(MainActivity.ID_PAC_BYPASS)).setChecked(false);
             ((CompoundButton) activity.findViewById(MainActivity.ID_PAC_DIRECT)).setChecked(false);
@@ -240,15 +254,14 @@ final class VpnChecks {
         return port;
     }
 
-    private static void checkIPv6Blocked(int port) throws Exception {
-        try (Socket socket = new Socket(Proxy.NO_PROXY)) {
-            try { socket.connect(new InetSocketAddress(IPV6_FIXTURE, port), 1000); }
-            catch (java.io.IOException expected) { return; }
-            throw new AssertionError("IPv6 TCP connected outside the IPv4 VPN");
-        }
+    private static void assertNoIPv6Fallback(int port) throws Exception {
+        String response;
+        try { response = fetch(IPV6_FIXTURE, port); }
+        catch (java.io.IOException expected) { return; }
+        require(response.isEmpty(), "global IPv6 must not fall back to a reachable origin when the node rejects it");
     }
 
-    private static void checkDns(String proof, int lastOctet) throws Exception {
+    private static void checkDns(String target, String proof, int lastOctet) throws Exception {
         byte[] label = ("clay-" + proof).getBytes(StandardCharsets.US_ASCII);
         byte[] query = ByteBuffer.allocate(12 + 1 + label.length + 6 + 4)
                 .putShort((short) 0x5116).putShort((short) 0x0100).putShort((short) 1).put(new byte[6])
@@ -259,7 +272,7 @@ final class VpnChecks {
         answer[2] = (byte) 0x81; answer[3] = (byte) 0x80; answer[7] = 1;
         DatagramPacket received = new DatagramPacket(new byte[512], 512);
         try (DatagramSocket socket = new DatagramSocket()) {
-            socket.connect(InetAddress.getByAddress(new byte[] {(byte) 198, 51, 100, 53}), 53);
+            socket.connect(InetAddress.getByName(target), 53);
             socket.setSoTimeout(3000);
             socket.send(new DatagramPacket(query, query.length));
             socket.receive(received);

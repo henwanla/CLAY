@@ -38,7 +38,7 @@ for _ in {1..100}; do
   sleep 0.1
 done
 [[ -s "$work/fixture-result" ]] || { printf 'The loopback test fixtures did not start.\n' >&2; exit 1; }
-read -r first second direct ipv6 tls proof cert < "$work/fixture-result"
+read -r first second direct ipv6 tls ipv6_origin proof cert < "$work/fixture-result"
 "${adb[@]}" install -g "$2"
 installed=true
 "${adb[@]}" install -t "$3"
@@ -49,7 +49,7 @@ revoker_installed=true
 instrument() {
   # Every payload is synthetic; the tool never accepts arbitrary profiles or destinations.
   "${adb[@]}" shell am instrument -w -r -e firstPort "$first" -e secondPort "$second" \
-    -e directPort "$direct" -e ipv6Port "$ipv6" -e tlsPort "$tls" -e proof "$proof" -e tlsCert "$cert" \
+    -e directPort "$direct" -e ipv6Port "$ipv6" -e ipv6OriginPort "$ipv6_origin" -e tlsPort "$tls" -e proof "$proof" -e tlsCert "$cert" \
     "$@" "$app.tests/org.clayrelay.preview.PreviewInstrumentation"
 }
 check_result() {
@@ -84,7 +84,8 @@ for _ in {1..100}; do
   if ! kill -0 "$watch_pid" 2>/dev/null; then break; fi
   sleep 0.15
 done
-if ! grep -q CLAY_ANDROID_AWAIT_REVOKE "$work/revoke" || ! has_tun "$(route)"; then
+if ! grep -q CLAY_ANDROID_AWAIT_REVOKE "$work/revoke" ||
+    ! "${adb[@]}" shell 'ip -6 route show table all' | grep -Eq '^default dev tun[0-9]+([[:space:]]|$)'; then
   cat "$work/revoke" >&2
   printf 'CLAY tunnel never reached the revocation checkpoint.\n' >&2
   exit 1

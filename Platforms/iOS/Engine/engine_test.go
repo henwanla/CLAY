@@ -252,9 +252,24 @@ func TestModesAndRestart(t *testing.T) {
 }
 
 func TestStopClosesActiveTCP(t *testing.T) {
+	checkFlowRetirement(t, false)
+}
+
+func TestLabSwitchClosesActiveTCP(t *testing.T) {
+	checkFlowRetirement(t, true)
+}
+
+func checkFlowRetirement(t *testing.T, switchRoute bool) {
+	t.Helper()
 	disconnected := make(chan error, 1)
 	port := proxyFixture(t, "open", disconnected)
-	id, err := start(syntheticNodes(port, port), 1, 1)
+	var id uint64
+	var err error
+	if switchRoute {
+		id, err = startLab(labFixture(t, port), 0)
+	} else {
+		id, err = start(syntheticNodes(port, port), 1, 1)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,18 +292,45 @@ func TestStopClosesActiveTCP(t *testing.T) {
 	if _, err := io.ReadFull(conn, reply); err != nil || string(reply) != "open" {
 		t.Fatal("fixture did not open the routed connection")
 	}
-	stop(id)
+	if switchRoute {
+		replacement := labFixture(t, proxyFixture(t, "via-next"))
+		if replaceLab(id+1, replacement, 1) || replaceLab(id, replacement, 2) ||
+			replaceLab(id, syntheticNodes(port, port), 0) || replaceLab(id, []byte("invalid"), 1) {
+			t.Fatal("invalid update was accepted")
+		}
+		select {
+		case <-disconnected:
+			t.Fatal("a rejected update closed the active connection")
+		default:
+		}
+		if !replaceLab(id, replacement, 1) {
+			t.Fatal("lab refused a valid replacement")
+		}
+	} else {
+		stop(id)
+	}
 	select {
 	case err := <-disconnected:
 		if err == nil {
 			t.Fatal("unexpected payload after stopping")
 		}
 		if timeout, ok := err.(net.Error); ok && timeout.Timeout() {
-			t.Fatal("fixture timed out before the tunnel closed")
+			t.Fatal("fixture timed out before the old connection closed")
 		}
 	case <-time.After(time.Second):
-		t.Fatal("stopping did not close the fixture connection")
+		t.Fatal("old fixture connection did not close")
 	}
+	if switchRoute {
+		// Keep the same peer, stack, and session. The new flow must receive the
+		// new upstream's marker, even while the old TCP socket is still open here.
+		fetch(t, peer, ctx, tcpTarget, labPort, "via-next")
+	}
+}
+
+func labFixture(t *testing.T, port int) []byte {
+	t.Helper()
+	return normalizedFixtures(t, map[string]any{"name": "lab", "type": "vless", "server": "127.0.0.1", "port": port,
+		"uuid": "56dc6c3e-8793-4d37-a363-f9f19db29c6d"})
 }
 
 func TestClosedAndRejectsUnsupportedInput(t *testing.T) {

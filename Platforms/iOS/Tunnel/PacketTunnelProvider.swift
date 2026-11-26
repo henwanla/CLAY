@@ -15,6 +15,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
     private let packetReader = DispatchQueue(label: "app.clay.lab.output", qos: .userInitiated)
     private var state: State = .idle // commands only
     private var systemReadPending = false
+    private var revision = LabContract.RevisionGate() // commands only
 
     override func startTunnel(options: [String: NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         commands.async {
@@ -31,7 +32,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             }
             let source = profile.bytes.assumingMemoryBound(to: UInt8.self)
             // Go copies input before returning. Only the chosen node crosses IPC.
-            let id = clay_engine_start(UnsafeMutablePointer(mutating: source), Int32(profile.length), 1, mode.int32Value)
+            let id = clay_engine_start_lab(UnsafeMutablePointer(mutating: source), Int32(profile.length), mode.int32Value)
             guard id != 0 else {
                 completionHandler(LabContract.Failure.setup)
                 return
@@ -45,6 +46,30 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             // No default route, DNS override, proxy settings, or IPv6 routes.
             self.setTunnelNetworkSettings(settings) { [weak self] error in
                 self?.commands.async { [weak self] in self?.finishApplying(id, success: error == nil) }
+            }
+        }
+    }
+
+    override func handleAppMessage(_ messageData: Data, completionHandler: ((Data?) -> Void)?) {
+        // Ignore updates for which the caller cannot receive an acknowledgment.
+        guard let completionHandler else { return }
+        commands.async {
+            guard case .running(let id) = self.state,
+                  let command = LabContract.command(messageData) else {
+                completionHandler(LabContract.rejected)
+                return
+            }
+            switch command {
+            case .readRevision:
+                completionHandler(LabContract.revisionReply(self.revision.current))
+            case .replace(let expected, let mode, let profile):
+                let applied = self.revision.apply(expected: expected) {
+                    profile.withUnsafeBytes { bytes in
+                        guard let ptr = bytes.bindMemory(to: UInt8.self).baseAddress else { return false }
+                        return clay_engine_replace_lab(id, UnsafeMutablePointer(mutating: ptr), Int32(bytes.count), mode) == 0
+                    }
+                }
+                completionHandler(applied ? LabContract.accepted : LabContract.rejected)
             }
         }
     }
@@ -78,6 +103,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             completion(LabContract.Failure.setup)
             return
         }
+        revision.reset()
         state = .running(id)
         readFromSystem(id)
         readFromEngine(id)

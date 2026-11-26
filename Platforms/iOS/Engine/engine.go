@@ -62,21 +62,66 @@ type profile struct {
 
 // An upper layer converts user profiles into this private representation with CLAYCore.
 // No raw provider YAML, controller, listener, paths or remote lists reach the engine.
-func loadProfile(data []byte, chosen, mode int) (*config.Config, error) {
+func decodeProfile(data []byte) (profile, []string, error) {
 	if len(data) == 0 || len(data) > maxProfileBytes {
-		return nil, errProfile
+		return profile{}, nil, errProfile
 	}
 	var p profile
 	d := json.NewDecoder(bytes.NewReader(data))
 	d.DisallowUnknownFields()
-	if d.Decode(&p) != nil || d.Decode(new(any)) != io.EOF || chosen < 1 || chosen > len(p.Proxies) ||
+	if d.Decode(&p) != nil || d.Decode(new(any)) != io.EOF || len(p.Proxies) == 0 ||
 		len(p.Proxies) > maxNodes || len(p.Rules) == 0 || len(p.Rules) > 1024 {
-		return nil, errProfile
+		return profile{}, nil, errProfile
 	}
 	for i, line := range p.Rules {
 		if !validRule(line, i == len(p.Rules)-1) {
-			return nil, errProfile
+			return profile{}, nil, errProfile
 		}
+	}
+	ids := make([]string, len(p.Proxies))
+	seen := make(map[string]bool, len(ids))
+	for index, proxy := range p.Proxies {
+		for key, value := range proxy {
+			if !nodeKeys[key] {
+				return profile{}, nil, errProfile
+			}
+			if allowed, nested := nestedKeys[key]; nested {
+				fields, ok := value.(map[string]any)
+				if !ok {
+					return profile{}, nil, errProfile
+				}
+				for field, value := range fields {
+					if !allowed[field] {
+						return profile{}, nil, errProfile
+					}
+					if field == "headers" {
+						headers, ok := value.(map[string]any)
+						if _, host := headers["Host"].(string); !ok || len(headers) != 1 || !host {
+							return profile{}, nil, errProfile
+						}
+					}
+				}
+			}
+		}
+		id, _ := proxy["name"].(string)
+		if !nodeName.MatchString(id) || seen[id] {
+			return profile{}, nil, errProfile
+		}
+		seen[id] = true
+		switch proxy["type"] {
+		case "vmess", "vless", "ss", "trojan", "hysteria2":
+		default:
+			return profile{}, nil, errProfile
+		}
+		ids[index] = id
+	}
+	return p, ids, nil
+}
+
+func loadProfile(data []byte, chosen, mode int) (*config.Config, error) {
+	p, ids, err := decodeProfile(data)
+	if err != nil || chosen < 1 || chosen > len(ids) {
+		return nil, errProfile
 	}
 	var useMode tunnel.TunnelMode
 	switch mode {
@@ -88,43 +133,6 @@ func loadProfile(data []byte, chosen, mode int) (*config.Config, error) {
 		useMode = tunnel.Direct
 	default:
 		return nil, errProfile
-	}
-	ids := make([]string, len(p.Proxies))
-	seen := make(map[string]bool, len(ids))
-	for index, proxy := range p.Proxies {
-		for key, value := range proxy {
-			if !nodeKeys[key] {
-				return nil, errProfile
-			}
-			if allowed, nested := nestedKeys[key]; nested {
-				fields, ok := value.(map[string]any)
-				if !ok {
-					return nil, errProfile
-				}
-				for field, value := range fields {
-					if !allowed[field] {
-						return nil, errProfile
-					}
-					if field == "headers" {
-						headers, ok := value.(map[string]any)
-						if _, host := headers["Host"].(string); !ok || len(headers) != 1 || !host {
-							return nil, errProfile
-						}
-					}
-				}
-			}
-		}
-		id, _ := proxy["name"].(string)
-		if !nodeName.MatchString(id) || seen[id] {
-			return nil, errProfile
-		}
-		seen[id] = true
-		switch proxy["type"] {
-		case "vmess", "vless", "ss", "trojan", "hysteria2":
-		default:
-			return nil, errProfile
-		}
-		ids[index] = id
 	}
 	ordered := append([]string{ids[chosen-1]}, ids[:chosen-1]...)
 	ordered = append(ordered, ids[chosen:]...)
@@ -193,6 +201,7 @@ type session struct {
 	cancel context.CancelFunc
 	link   *packetLink
 	stack  tun.Stack
+	lab    *labTunnel
 }
 
 var engine struct {
@@ -207,39 +216,59 @@ func start(data []byte, chosen, mode int) (uint64, error) {
 	if engine.live != nil {
 		return 0, errActive
 	}
-	log.SetLevel(log.SILENT)
-	glog.SetTarget(&glog.Writer{Next: io.Discard})
+	silence()
 	cfg, err := loadProfile(data, chosen, mode)
 	if err != nil {
-		return 0, errProfile
-	} // The underlying error may contain credentials.
-	ctx, cancel := context.WithCancel(context.Background())
-	link := &packetLink{channel.New(128, mtu, "")}
+		return 0, errProfile // The underlying error may contain credentials.
+	}
 	handler, err := sing.NewListenerHandler(sing.ListenerConfig{Tunnel: tunnel.Tunnel, Type: C.TUN})
 	if err != nil {
-		cancel()
-		link.Close()
 		return 0, err
 	}
+	live, err := makeSession(transportHandler{handler})
+	if err != nil {
+		return 0, err
+	}
+	executor.ApplyConfig(cfg, true)
+	return publishSession(live), nil
+}
+
+var silenceLogs sync.Once
+
+func silence() {
+	silenceLogs.Do(func() {
+		glog.SetTarget(&glog.Writer{Next: io.Discard})
+	})
+	log.SetLevel(log.SILENT)
+}
+
+func makeSession(handler tun.Handler) (*session, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	link := &packetLink{channel.New(128, mtu, "")}
 	g, err := tun.NewStack("gvisor", tun.StackOptions{
 		Context: ctx, Tun: link, TunOptions: tun.Options{MTU: mtu, Inet4Address: []netip.Prefix{netip.MustParsePrefix("198.18.0.1/30")}},
-		UDPTimeout: 30 * time.Second, ICMPTimeout: time.Second, Handler: transportHandler{handler}, Logger: log.SingLogger,
+		UDPTimeout: 30 * time.Second, ICMPTimeout: time.Second, Handler: handler, Logger: log.SingLogger,
 	})
 	if err != nil {
 		cancel()
 		link.Close()
-		return 0, err
+		return nil, err
 	}
 	if err := g.Start(); err != nil {
 		cancel()
 		g.Close()
 		link.Close()
-		return 0, err
+		return nil, err
 	}
-	executor.ApplyConfig(cfg, true)
+	return &session{ctx: ctx, cancel: cancel, link: link, stack: g}, nil
+}
+
+// The engine mutex is held by callers inserting or removing sessions.
+func publishSession(live *session) uint64 {
 	engine.lastID++
-	engine.live = &session{engine.lastID, ctx, cancel, link, g}
-	return engine.live.id, nil
+	live.id = engine.lastID
+	engine.live = live
+	return live.id
 }
 
 func stop(id uint64) {
@@ -250,6 +279,13 @@ func stop(id uint64) {
 		return
 	}
 	engine.live = nil
+	if live.lab != nil {
+		live.lab.install(nil)
+		live.cancel()
+		live.stack.Close()
+		live.link.Close()
+		return
+	}
 	tunnel.OnSuspend()
 	live.cancel()
 	live.stack.Close()

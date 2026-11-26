@@ -10,10 +10,18 @@ import NetworkExtension
         var engineValue: Int32 { self == .rule ? 0 : 1 }
     }
 
+    enum UpdateOutcome: String {
+        case applied, rejected, unavailable, unknown
+    }
+
     @Published private(set) var status: NEVPNStatus = .invalid
     @Published private(set) var busy = false
     @Published private(set) var failure = false
+    @Published private(set) var updating = false
+    @Published private(set) var updateOutcome: UpdateOutcome?
     private var manager: NETunnelProviderManager?
+    private var updateID: UUID?
+    private var pendingReply: Reply?
 
     var active: Bool {
         switch status {
@@ -24,10 +32,11 @@ import NetworkExtension
 
     func readStatus() {
         status = manager?.connection.status ?? .invalid
+        if status != .connected { invalidateUpdate() }
     }
 
     func refresh() async {
-        guard !busy else { return }
+        guard !busy, !updating else { return }
         busy = true
         defer { busy = false }
         do {
@@ -44,12 +53,7 @@ import NetworkExtension
         failure = false
         defer { busy = false }
         do {
-            let route = try PACRule(kind: .ipCIDR, value: LabContract.destination + "/32", decision: .proxy)
-            let policy = PACPolicy(rules: [route], defaultDecision: .direct, bypassLocal: false)
-            let profile = try CoreConfig.makePacketProfile(nodes: [node], policy: policy)
-            guard (1...LabContract.maximumProfile).contains(profile.count) else {
-                throw LabContract.Failure.invalidRequest
-            }
+            let profile = try Self.profile(for: node)
             let manager = try await ownConfiguration() ?? NETunnelProviderManager()
             self.manager = manager
             readStatus()
@@ -80,8 +84,90 @@ import NetworkExtension
 
     func stop() {
         failure = false
+        invalidateUpdate()
         manager?.connection.stopVPNTunnel()
         readStatus()
+    }
+
+    func apply(node: NodeProfile, mode: Mode) async {
+        readStatus()
+        guard status == .connected, !busy, !updating,
+              let session = manager?.connection as? NETunnelProviderSession else { return }
+        let previousUnknown = updateOutcome == .unknown
+        guard let profile = try? Self.profile(for: node) else {
+            updateOutcome = previousUnknown ? .unknown : .rejected
+            return
+        }
+        let id = UUID()
+        updateID = id
+        updating = true
+        updateOutcome = nil
+        defer {
+            if updateID == id {
+                updateID = nil
+                updating = false
+                pendingReply = nil
+            }
+        }
+        let current = await send(LabContract.revisionRequest, to: session)
+        guard updateID == id else { return }
+        guard let revision = LabContract.readRevision(current),
+              let message = LabContract.replace(revision: revision, mode: mode.engineValue, profile: profile) else {
+            updateOutcome = previousUnknown ? .unknown : .unavailable
+            return
+        }
+        let acknowledgment = await send(message, to: session)
+        guard updateID == id else { return }
+        if acknowledgment == LabContract.accepted { updateOutcome = .applied }
+        else if acknowledgment == LabContract.rejected && !previousUnknown { updateOutcome = .rejected }
+        else { updateOutcome = .unknown }
+    }
+
+    func draftChanged() {
+        if updateOutcome != .unknown { updateOutcome = nil }
+    }
+
+    private static func profile(for node: NodeProfile) throws -> Data {
+        // The provider and packet engine enforce the only routable target.
+        let profile = try CoreConfig.makePacketProfile(nodes: [node])
+        guard (1...LabContract.maximumProfile).contains(profile.count) else { throw LabContract.Failure.invalidRequest }
+        return profile
+    }
+
+    private func invalidateUpdate() {
+        updateID = nil
+        updating = false
+        updateOutcome = nil
+        let reply = pendingReply
+        pendingReply = nil
+        reply?.finish(nil)
+    }
+
+    private func send(_ message: Data, to session: NETunnelProviderSession) async -> Data? {
+        await withCheckedContinuation { continuation in
+            let reply = Reply(continuation)
+            pendingReply = reply
+            do {
+                try session.sendProviderMessage(message) { [weak reply] data in
+                    Task { @MainActor in reply?.finish(data) }
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(5)) { [weak reply] in reply?.finish(nil) }
+            } catch {
+                reply.finish(nil)
+            }
+        }
+    }
+
+    @MainActor private final class Reply {
+        private var continuation: CheckedContinuation<Data?, Never>?
+
+        init(_ continuation: CheckedContinuation<Data?, Never>) { self.continuation = continuation }
+
+        func finish(_ value: Data?) {
+            let waiting = continuation
+            continuation = nil
+            waiting?.resume(returning: value)
+        }
     }
 
     private static func providerID() throws -> String {

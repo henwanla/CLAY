@@ -26,6 +26,19 @@ int main(void) {
         CHECK(clay_engine_read(id, packet, sizeof(packet), 10) < 0);
         previous = id;
     }
+    uint8_t lab[] = "{\"proxies\":[{\"name\":\"node-11111111-1111-4111-8111-111111111111\","
+        "\"type\":\"vless\",\"server\":\"127.0.0.1\",\"port\":18080,"
+        "\"uuid\":\"56dc6c3e-8793-4d37-a363-f9f19db29c6d\"}],\"rules\":[\"MATCH,CLAY\"]}";
+    const int32_t labSize = (int32_t)(sizeof(lab) - 1);
+    CHECK(clay_engine_start_lab(lab, labSize, 2) == 0);
+    const uint64_t id = clay_engine_start_lab(lab, labSize, 0);
+    CHECK(id > previous);
+    CHECK(clay_engine_replace_lab(previous, lab, labSize, 1) < 0);
+    CHECK(clay_engine_replace_lab(id, lab, labSize, 2) < 0);
+    CHECK(clay_engine_replace_lab(id, lab, labSize, 1) == 0);
+    CHECK(clay_engine_read(id, packet, sizeof(packet), 10) == 0);
+    clay_engine_stop(id);
+    CHECK(clay_engine_replace_lab(id, lab, labSize, 0) < 0);
     puts("CLAY packet engine C ABI check passed");
     return 0;
 }

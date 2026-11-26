@@ -163,6 +163,23 @@ func TestImportedProtocols(t *testing.T) {
 			}
 		})
 	}
+	t.Run("lab-live-switch-across-protocols", func(t *testing.T) {
+		id, err := startLab(normalizedFixtures(t, nodes[0]), 0)
+		if err != nil {
+			t.Fatal("lab rejected first imported profile")
+		}
+		defer stop(id)
+		peer, ctx, closePeer := newPeer(t, id)
+		defer closePeer()
+		for index, check := range variants {
+			t.Run(check.label, func(t *testing.T) {
+				if index > 0 && !replaceLab(id, normalizedFixtures(t, nodes[index]), index%2) {
+					t.Fatal("lab rejected imported replacement")
+				}
+				fetch(t, peer, ctx, tcpTarget, labPort, check.label)
+			})
+		}
+	})
 	const trojanIndex = 3
 	for _, check := range []struct{ label, key, value string }{
 		{"trojan-untrusted-cert", "fingerprint", ""},

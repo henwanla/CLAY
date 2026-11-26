@@ -17,13 +17,46 @@ func clay_engine_start(data *C.uint8_t, size C.int32_t, chosen C.int32_t, mode C
 		return 0
 	}
 	profile := C.GoBytes(unsafe.Pointer(data), C.int(size))
-	defer func() {
-		for i := range profile {
-			profile[i] = 0
-		}
-	}()
+	defer zeroProfile(profile)
 	id, _ := start(profile, int(chosen), int(mode))
 	return C.uint64_t(id)
+}
+
+//export clay_engine_start_lab
+func clay_engine_start_lab(data *C.uint8_t, size C.int32_t, mode C.int32_t) C.uint64_t {
+	profile := copyLabProfile(data, size)
+	if profile == nil {
+		return 0
+	}
+	defer zeroProfile(profile)
+	id, _ := startLab(profile, int(mode))
+	return C.uint64_t(id)
+}
+
+//export clay_engine_replace_lab
+func clay_engine_replace_lab(id C.uint64_t, data *C.uint8_t, size C.int32_t, mode C.int32_t) C.int32_t {
+	profile := copyLabProfile(data, size)
+	if profile == nil {
+		return -1
+	}
+	defer zeroProfile(profile)
+	if !replaceLab(uint64(id), profile, int(mode)) {
+		return -1
+	}
+	return 0
+}
+
+func copyLabProfile(data *C.uint8_t, size C.int32_t) []byte {
+	if data == nil || size <= 0 || size > labProfileLimit {
+		return nil
+	}
+	return C.GoBytes(unsafe.Pointer(data), C.int(size))
+}
+
+func zeroProfile(profile []byte) {
+	for i := range profile {
+		profile[i] = 0
+	}
 }
 
 //export clay_engine_offer

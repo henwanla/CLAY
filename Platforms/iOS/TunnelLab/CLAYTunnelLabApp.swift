@@ -16,7 +16,7 @@ private struct TunnelLabView: View {
     @State private var selected: UUID?
     @State private var mode: LabConnection.Mode = .rule
     @State private var attemptedImport = false
-    @State private var probing = false
+    @State private var probeID: UUID?
     @State private var response: Bool?
     @FocusState private var editing: Bool
 
@@ -69,25 +69,43 @@ private struct TunnelLabView: View {
                         Text("lab.global").tag(LabConnection.Mode.global)
                     }
                 }
-                .disabled(connection.active || connection.busy)
+                .disabled(connection.busy || connection.updating || (connection.active && connection.status != .connected))
                 Section("lab.status") {
                     Text(statusLabel)
                         .accessibilityAddTraits(.updatesFrequently)
                     if connection.failure { Label("lab.failed", systemImage: "exclamationmark.circle") }
                     if connection.active {
-                        Button("lab.stop", role: .destructive) { connection.stop() }
+                        Button("lab.stop", role: .destructive) {
+                            resetProbe()
+                            connection.stop()
+                        }
                             .disabled(connection.status == .disconnecting)
                         if connection.status == .connected {
+                            Text("lab.update.hint").foregroundStyle(.secondary)
+                            Button("lab.update.apply") {
+                                guard let chosen else { return }
+                                editing = false
+                                resetProbe()
+                                Task { await connection.apply(node: chosen, mode: mode) }
+                            }
+                            .disabled(chosen == nil || connection.busy || connection.updating)
+                            if connection.updating { ProgressView("lab.update.working") }
+                            if let outcome = connection.updateOutcome {
+                                Text(LocalizedStringKey("lab.update." + outcome.rawValue))
+                                    .accessibilityAddTraits(.updatesFrequently)
+                            }
                             Button("lab.probe") {
-                                probing = true
+                                let id = UUID()
+                                probeID = id
                                 response = nil
                                 Task {
                                     let passed = await LabProbe.run()
-                                    if connection.status == .connected { response = passed }
-                                    probing = false
+                                    guard probeID == id, connection.status == .connected else { return }
+                                    response = passed
+                                    probeID = nil
                                 }
                             }
-                            .disabled(probing)
+                            .disabled(probeID != nil || connection.updating || connection.updateOutcome == .unknown)
                             if let response { Text(response ? "lab.probePassed" : "lab.probeFailed") }
                         }
                     } else {
@@ -96,7 +114,7 @@ private struct TunnelLabView: View {
                             editing = false
                             Task { await connection.start(node: chosen, mode: mode) }
                         }
-                        .disabled(chosen == nil || connection.busy || probing)
+                        .disabled(chosen == nil || connection.busy)
                     }
                 }
             }
@@ -113,8 +131,10 @@ private struct TunnelLabView: View {
             connection.readStatus()
         }
         .onChange(of: connection.status) { status in
-            if status != .connected { response = nil }
+            if status != .connected { resetProbe() }
         }
+        .onChange(of: selected) { _ in connection.draftChanged() }
+        .onChange(of: mode) { _ in connection.draftChanged() }
     }
 
     private var statusLabel: LocalizedStringKey {
@@ -130,5 +150,10 @@ private struct TunnelLabView: View {
         nodes.removeAll()
         selected = nil
         attemptedImport = false
+    }
+
+    private func resetProbe() {
+        probeID = nil
+        response = nil
     }
 }

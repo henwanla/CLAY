@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.clayrelay.relay">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <application android:label="@string/relay_title" android:theme="@style/AppTheme"
+        android:allowBackup="false" android:supportsRtl="true" android:extractNativeLibs="true"
+        android:networkSecurityConfig="@xml/relay_network">
+        <activity android:name="org.clayrelay.preview.MainActivity" android:exported="true" android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|keyboardHidden"
+            android:windowSoftInputMode="adjustResize|stateAlwaysHidden">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

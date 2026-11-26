@@ -3,6 +3,8 @@ package org.clayrelay.preview;
 import java.nio.charset.StandardCharsets;
 
 final class NativePreview {
+    static byte[] config(byte[] source, byte[] request) { return Library.config(source, request); }
+
     static String run(int operation, String source, String target, int options) {
         try {
             return new String(Library.call(operation, source.getBytes(StandardCharsets.UTF_8),
@@ -15,5 +17,6 @@ final class NativePreview {
     private static class Library {
         static { System.loadLibrary("claypreview"); }
         private static native byte[] call(int operation, byte[] source, byte[] target, int options);
+        private static native byte[] config(byte[] source, byte[] request);
     }
 }

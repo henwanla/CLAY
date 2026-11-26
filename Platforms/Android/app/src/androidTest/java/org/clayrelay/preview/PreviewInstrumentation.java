@@ -27,7 +27,8 @@ public final class PreviewInstrumentation extends Instrumentation {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             activity = startActivitySync(intent);
             exercise(activity);
-            report.putString("stream", "\nCLAY_ANDROID_PREVIEW_PASS\n");
+            if (BuildFlavor.RELAY) RelayChecks.run(this, activity);
+            report.putString("stream", "\nCLAY_ANDROID_PREVIEW_PASS\n" + (BuildFlavor.RELAY ? "CLAY_ANDROID_RELAY_PASS\n" : ""));
             result = Activity.RESULT_OK;
         } catch (Exception | AssertionError e) {
             // The only data reported are test step labels, never runtime input.

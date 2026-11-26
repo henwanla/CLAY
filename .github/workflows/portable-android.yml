@@ -1,4 +1,4 @@
-name: Android arm64 portable CLI build
+name: Android arm64 CLI and APK builds
 
 on:
   workflow_dispatch:
@@ -6,6 +6,7 @@ on:
     branches: [main, develop]
     paths:
       - Package.swift
+      - VERSION
       - 'Sources/CLAYCore/**'
       - 'Sources/clay-portable/**'
       - 'Vendor/Yams/**'
@@ -15,6 +16,7 @@ on:
     branches: [main, develop]
     paths:
       - Package.swift
+      - VERSION
       - 'Sources/CLAYCore/**'
       - 'Sources/clay-portable/**'
       - 'Vendor/Yams/**'
@@ -74,3 +76,25 @@ jobs:
       - name: Compile and verify the Android arm64 ELF
         shell: bash
         run: bash Platforms/Android/build-portable.sh
+      - name: Build and verify both APK flavors
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/clay-android"
+          cd "$root"
+          curl=(curl --disable --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --retry 2 --connect-timeout 15 --max-time 300)
+          "${curl[@]}" -o platform.zip 'https://dl.google.com/android/repository/platform-35_r02.zip'
+          "${curl[@]}" -o tools.zip 'https://dl.google.com/android/repository/build-tools_r36_macosx.zip'
+          "${curl[@]}" -o mihomo.gz 'https://github.com/MetaCubeX/mihomo/releases/download/v1.19.34/mihomo-android-arm64-v8-v1.19.34.gz'
+          printf '%s  %s\n' \
+            0988cacad01b38a18a47bac14a0695f246bc76c1b06c0eeb8eb0dc825ab0c8e0 platform.zip \
+            04e7f3a72044de4926fa038fa0e251a37bba1e1c3fb8beab6f8401bfd9eb4bf3 tools.zip | shasum -a 256 -c
+          export JAVA_HOME="$(/usr/libexec/java_home -v 17)"
+          export ANDROID_HOME="$root/android-sdk" CLAY_ANDROID_APK_DIR="$root/apk-output"
+          mkdir -p "$ANDROID_HOME/platforms" "$ANDROID_HOME/build-tools" "$root/build-tools-unpacked"
+          unzip -q platform.zip -d "$ANDROID_HOME/platforms"
+          unzip -q tools.zip -d "$root/build-tools-unpacked"
+          mv "$root/build-tools-unpacked/android-16" "$ANDROID_HOME/build-tools/36.0.0"
+          cd "$GITHUB_WORKSPACE"
+          bash Platforms/Android/build-apk.sh --test
+          bash Platforms/Android/build-apk.sh --test --relay "$root/mihomo.gz"

@@ -1,6 +1,45 @@
 import CLAYCore
 import Foundation
 
+/// Private config for the local Android session. Unlike preview(), this output
+/// contains credentials and must go directly into a private runtime file.
+@_cdecl("clay_android_config")
+public func relayConfig(
+    _ source: UnsafePointer<UInt8>?, _ sourceCount: Int32,
+    _ request: UnsafePointer<UInt8>?, _ requestCount: Int32,
+    _ output: UnsafeMutablePointer<UInt8>?, _ capacity: Int32
+) -> Int32 {
+    guard let source = decode(source, sourceCount, max: ProfileImporter.maxBytes),
+          let request = decode(request, requestCount, max: 16_384), let output, capacity > 0,
+          let options = (try? JSONSerialization.jsonObject(with: Data(request.utf8))) as? [String: Any],
+          let index = options["node"] as? Int, let proxy = options["proxy"] as? Int,
+          let controller = options["controller"] as? Int, let secret = options["secret"] as? String,
+          let password = options["password"] as? String,
+          [secret, password].allSatisfy({ $0.utf8.count == 64 && $0.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) } }),
+          let name = options["mode"] as? String, let mode = CoreRoutingMode(rawValue: name),
+          let rules = options["rules"] as? String, let ruleOptions = options["ruleOptions"] as? Int,
+          (0...3).contains(ruleOptions) else { return -1 }
+    let profiles = ProfileImporter.read(source).profiles
+    guard profiles.indices.contains(index), let policyRules = try? PACPolicy.importRules(rules) else { return -1 }
+    let policy = PACPolicy(rules: policyRules, defaultDecision: ruleOptions & 1 == 0 ? .proxy : .direct,
+                           bypassLocal: ruleOptions & 2 != 0)
+    guard let base = try? CoreConfig.make(nodes: profiles, active: profiles[index], proxyPort: proxy,
+                                          controlPort: controller, secret: secret, mode: mode, policy: policy),
+          var config = (try? JSONSerialization.jsonObject(with: base)) as? [String: Any] else { return -1 }
+    // 127.0.0.1 is shared by apps on the device. Require session credentials
+    // even on loopback; the controller uses its own independent secret.
+    config["authentication"] = ["clay:\(password)"]
+    config["skip-auth-prefixes"] = [String]()
+    let ids = profiles.map(\.localName)
+    // Mihomo reads this as YAML. Preserve the Swift encoding rather than
+    // re-serializing the nested object with Android's slash-escaping JSON writer.
+    guard let engine = try? JSONSerialization.data(withJSONObject: config, options: [.withoutEscapingSlashes]),
+          let data = try? JSONSerialization.data(withJSONObject: ["engineConfig": String(decoding: engine, as: UTF8.self), "nodeIDs": ids]),
+          data.count <= capacity else { return -1 }
+    data.copyBytes(to: output, count: data.count)
+    return Int32(data.count)
+}
+
 // The JNI adapter owns the memory; only sanitized JSON may cross back into Java.
 @_cdecl("clay_android_preview")
 public func preview(

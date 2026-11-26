@@ -33,4 +33,24 @@
     <string name="running">正在检查…</string>
     <string name="failed">无法完成预览。</string>
     <string name="clear">清空</string>
+    <string name="relay_title">本机代理预览</string>
+    <string name="relay_intro">使用上面粘贴的节点和规则。请在需要代理的应用中手动填入地址和本次会话凭据。</string>
+    <string name="relay_index">节点编号（按导入顺序）</string>
+    <string name="relay_mode">流量模式</string>
+    <string name="relay_rule">规则</string>
+    <string name="relay_global">全局</string>
+    <string name="relay_direct">直连</string>
+    <string name="relay_start">启动本机代理</string>
+    <string name="relay_apply">应用节点和模式</string>
+    <string name="relay_stop">停止代理</string>
+    <string name="relay_stopped">本机代理已停止。</string>
+    <string name="relay_starting">正在启动或更新本机会话…</string>
+    <string name="relay_stopping">正在停止本机会话…</string>
+    <string name="relay_ended">本机进程已退出。</string>
+    <string name="relay_invalid">请检查节点编号和规则列表。</string>
+    <string name="relay_failed">未能启动或停止本机会话。请检查节点和规则。</string>
+    <string name="relay_unconfirmed">未能确认修改。请重试或停止代理。</string>
+    <string name="relay_ready">代理 127.0.0.1:%1$d · 节点 %2$d · %3$s</string>
+    <string name="relay_credentials">用户名：%1$s\n密码：%2$s</string>
+    <string name="relay_show">显示会话凭据</string>
 </resources>

@@ -34,6 +34,7 @@ public final class MainActivity extends Activity {
     static final int ID_PAC_BYPASS = 0x5107, ID_PAC_RUN = 0x5108, ID_PAC_RESULT = 0x5109;
     private static final int MAX_SOURCE = 2 * 1024 * 1024, MAX_TARGET = 16_384;
     private final ExecutorService workers = Executors.newSingleThreadExecutor();
+    private RelayPanel relay;
     private int ink, muted, accent;
 
     @Override public void onCreate(Bundle state) {
@@ -86,10 +87,17 @@ public final class MainActivity extends Activity {
         pacAction.run.setOnClickListener(v -> pacAction.start(1, rules, target,
                 (direct.isChecked() ? 1 : 0) | (bypass.isChecked() ? 2 : 0)));
         pacAction.clear.setOnClickListener(v -> { rules.setText(""); target.setText(""); pacAction.reset(); });
+        if (BuildFlavor.RELAY) relay = new RelayPanel(this, card(list, R.string.relay_title), nodeInput, rules, direct, bypass);
         list.requestFocus();
     }
 
+    @Override protected void onPause() {
+        if (relay != null) relay.hideCredentials();
+        super.onPause();
+    }
+
     @Override protected void onDestroy() {
+        if (relay != null) relay.destroy();
         workers.shutdownNow();
         super.onDestroy();
     }

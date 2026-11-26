@@ -33,4 +33,24 @@
     <string name="running">確認中…</string>
     <string name="failed">プレビューを完了できませんでした。</string>
     <string name="clear">消去</string>
+    <string name="relay_title">ローカルプロキシのプレビュー</string>
+    <string name="relay_intro">上のノードとルールを使用します。利用するアプリにアドレスとセッション認証情報を入力してください。</string>
+    <string name="relay_index">ノード番号（読み込み順）</string>
+    <string name="relay_mode">ルーティングモード</string>
+    <string name="relay_rule">ルール</string>
+    <string name="relay_global">グローバル</string>
+    <string name="relay_direct">直接接続</string>
+    <string name="relay_start">ローカルプロキシを起動</string>
+    <string name="relay_apply">ノードとモードを適用</string>
+    <string name="relay_stop">プロキシを停止</string>
+    <string name="relay_stopped">ローカルプロキシを停止しました。</string>
+    <string name="relay_starting">ローカルセッションを開始または更新しています…</string>
+    <string name="relay_stopping">ローカルセッションを停止しています…</string>
+    <string name="relay_ended">ローカルプロセスが終了しました。</string>
+    <string name="relay_invalid">ノード番号とルールを確認してください。</string>
+    <string name="relay_failed">セッションを開始または停止できませんでした。ノードとルールを確認してください。</string>
+    <string name="relay_unconfirmed">変更を確認できませんでした。再試行するか停止してください。</string>
+    <string name="relay_ready">プロキシ 127.0.0.1:%1$d · ノード %2$d · %3$s</string>
+    <string name="relay_credentials">ユーザー名：%1$s\nパスワード：%2$s</string>
+    <string name="relay_show">セッション認証情報を表示</string>
 </resources>

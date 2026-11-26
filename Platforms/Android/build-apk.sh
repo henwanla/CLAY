@@ -4,12 +4,14 @@ cd "$(dirname "$0")"
 android_dir="$PWD"
 repo=$(cd ../.. && pwd)
 with_tests=false
-if [[ ${1:-} == --test && $# == 1 ]]; then
-  with_tests=true
-elif [[ $# != 0 ]]; then
-  printf 'Usage: bash Platforms/Android/build-apk.sh [--test]\n' >&2
-  exit 64
-fi
+relay_archive=
+while [[ $# != 0 ]]; do
+  case $1 in
+    --test) with_tests=true; shift ;;
+    --relay) [[ $# -ge 2 ]]; relay_archive=$2; shift 2 ;;
+    *) printf 'Usage: bash Platforms/Android/build-apk.sh [--test] [--relay VERIFIED_ANDROID_MIHOMO_GZ]\n' >&2; exit 64 ;;
+  esac
+done
 
 : "${ANDROID_NDK_HOME:?Set ANDROID_NDK_HOME to Android NDK r30}"
 : "${SWIFT_SDKS_PATH:?Set SWIFT_SDKS_PATH to the directory containing the Android Swift SDK artifact}"
@@ -48,6 +50,17 @@ mkdir -p "$out"
 out=$(cd "$out" && pwd)
 stage=$(mktemp -d "$out/stage.XXXXXX")
 trap 'rm -rf "$stage"' EXIT
+flavor=preview
+app_id=org.clayrelay.preview
+manifest="$src/AndroidManifest.xml"
+engine_sha=
+if [[ -n "$relay_archive" ]]; then
+  flavor=relay
+  app_id=org.clayrelay.relay
+  manifest="$android_dir/app/src/relay/AndroidManifest.xml"
+  [[ $(shasum -a 256 < "$relay_archive" | cut -d ' ' -f1) == 48a71fc6a68e2909587176e0ab7185d8f2fac298fa96ccdacf30ea86ab2359b5 ]]
+  engine_sha=1369bebba2b7a6fe971fe6ece0cb5aa18c81e49c89dd8340f43e5e7583d3da36
+fi
 
 flags=(--package-path "$android_dir" --scratch-path "$out/swift-build"
        --swift-sdks-path "$SWIFT_SDKS_PATH" --swift-sdk swift-6.4.3-RELEASE_android
@@ -64,6 +77,12 @@ install -m 644 "$ndk/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so" "$l
 "$ndk/bin/aarch64-linux-android23-clang" -shared -fPIC -O2 -fvisibility=hidden -Wall -Wextra -Werror \
   -Wl,--no-undefined,-soname,libclaypreview.so -o "$lib/libclaypreview.so" \
   "$android_dir/app/src/main/c/preview.c" -L"$lib" -lCLAYAndroidBridge
+if [[ "$flavor" == relay ]]; then
+  gzip -dc "$relay_archive" > "$lib/libclay_mihomo.so"
+  [[ $(shasum -a 256 < "$lib/libclay_mihomo.so" | cut -d ' ' -f1) == "$engine_sha" ]]
+  "$ndk/bin/aarch64-linux-android23-clang" -fPIE -pie -O2 -Wall -Wextra -Werror \
+    -o "$lib/libclay_launcher.so" "$src/c/relay-launcher.c"
+fi
 for native in "$lib"/*.so; do
   report=$("$ndk/bin/llvm-readelf" -h "$native")
   grep -q 'Machine:.*AArch64' <<< "$report"
@@ -80,6 +99,10 @@ install -m 644 "$repo/Vendor/Yams/LICENSE" "$licenses/Yams.txt"
 install -m 644 "$repo/Vendor/Yams/LICENSE-libyaml" "$licenses/libyaml.txt"
 install -m 644 "$swift_license" "$licenses/Swift.txt"
 install -m 644 "$ANDROID_NDK_HOME/NOTICE.toolchain" "$licenses/Android-NDK.txt"
+if [[ "$flavor" == relay ]]; then
+  printf '%s\n' 'Mihomo v1.19.34: unmodified upstream Android arm64 executable.' \
+    'GPL-3.0; source and license: https://github.com/MetaCubeX/mihomo/tree/v1.19.34' > "$licenses/Mihomo.txt"
+fi
 
 key="$out/debug.p12"
 if [[ ! -f "$key" ]]; then
@@ -108,13 +131,22 @@ compile_java() {
 main="$stage/main"
 mkdir -p "$main/gen"
 "$bt/aapt2" compile --dir "$src/res" -o "$main/res.zip"
-"$bt/aapt2" link -I "$platform" --manifest "$src/AndroidManifest.xml" --min-sdk-version 23 \
-  --target-sdk-version 35 --version-code 1 --version-name "$version" --java "$main/gen" \
+"$bt/aapt2" link -I "$platform" --manifest "$manifest" --min-sdk-version 23 \
+  --target-sdk-version 35 --version-code 1 --version-name "$version" --java "$main/gen" --custom-package org.clayrelay.preview \
   -A "$main/assets" -o "$main/unsigned.apk" "$main/res.zip"
-compile_java "$main" "$platform" "$src/java/org/clayrelay/preview/"*.java "$main/gen/org/clayrelay/preview/R.java"
+cat > "$main/gen/org/clayrelay/preview/BuildFlavor.java" <<JAVA
+package org.clayrelay.preview;
+final class BuildFlavor {
+    static final boolean RELAY = $(if [[ "$flavor" == relay ]]; then printf true; else printf false; fi);
+    static final String ENGINE_SHA256 = "$engine_sha";
+}
+JAVA
+compile_java "$main" "$platform" "$src/java/org/clayrelay/preview/"*.java "$main/gen/org/clayrelay/preview/"*.java
 (cd "$main" && zip -q -r unsigned.apk lib)
 permissions=$("$bt/aapt2" dump permissions "$main/unsigned.apk")
-if grep -q 'uses-permission' <<< "$permissions"; then
+if [[ "$flavor" == relay ]]; then
+  [[ $(grep '^uses-permission' <<< "$permissions") == "uses-permission: name='android.permission.INTERNET'" ]]
+elif grep -q 'uses-permission' <<< "$permissions"; then
   printf 'The offline APK must not declare device permissions.\n' >&2
   exit 1
 fi
@@ -125,11 +157,14 @@ if $with_tests; then
   test_stage="$stage/test"
   mkdir -p "$test_stage"
   "$bt/aapt2" link -I "$platform" --manifest "$test_src/AndroidManifest.xml" --min-sdk-version 23 \
-    --target-sdk-version 35 -o "$test_stage/unsigned.apk"
-  compile_java "$test_stage" "$platform:$main/classes.jar" "$test_src/java/org/clayrelay/preview/PreviewInstrumentation.java"
+    --target-sdk-version 35 --rename-manifest-package "$app_id.tests" \
+    --rename-instrumentation-target-package "$app_id" -o "$test_stage/unsigned.apk"
+  compile_java "$test_stage" "$platform:$main/classes.jar" "$test_src/java/org/clayrelay/preview/"*.java
   finish_apk "$test_stage"
-  mv -f "$test_stage/final.apk" "$out/CLAY-Android-arm64-test.apk"
-  printf '%s\n' "$out/CLAY-Android-arm64-test.apk"
+  test_name=test
+  [[ "$flavor" != relay ]] || test_name=relay-test
+  mv -f "$test_stage/final.apk" "$out/CLAY-Android-arm64-$test_name.apk"
+  printf '%s\n' "$out/CLAY-Android-arm64-$test_name.apk"
 fi
-mv -f "$main/final.apk" "$out/CLAY-Android-arm64-preview.apk"
-printf '%s\n' "$out/CLAY-Android-arm64-preview.apk"
+mv -f "$main/final.apk" "$out/CLAY-Android-arm64-$flavor.apk"
+printf '%s\n' "$out/CLAY-Android-arm64-$flavor.apk"

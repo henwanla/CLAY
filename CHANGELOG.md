@@ -1,5 +1,10 @@
 # 更新记录 / Changelog
 
+## 开发中 / Unreleased
+
+- Android 增加独立的本机代理预览：手动接入认证 HTTP/SOCKS5，在同一监听地址切换节点及规则／全局／直连。离线检查版仍无联网权限。
+- Add a separate Android relay preview for authenticated loopback HTTP/SOCKS5, with in-place switching between nodes and Rule, Global, or Direct. The offline preview still has no network permission.
+
 ## 0.3.1 · 预览版 / Preview
 
 - 主窗口和菜单栏新增「连接 macOS」，区分本机代理、系统 PAC 已配置和系统默认 PAC 已生效。系统仍在使用 CLAY 的 PAC 时保留恢复记录和监听。本机预览包内带已校验的 Mihomo。

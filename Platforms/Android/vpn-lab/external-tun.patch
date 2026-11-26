@@ -1,0 +1,9 @@
+--- a/listener/sing_tun/server_android.go
++++ b/listener/sing_tun/server_android.go
+@@ -49 +49,6 @@
+ func (l *Listener) buildAndroidRules(tunOptions *tun.Options) error {
++	// With an externally configured TUN and no auto routing, VpnService
++	// already owns package selection; package metadata is unavailable to apps.
++	if tunOptions.FileDescriptor > 0 && !tunOptions.AutoRoute {
++		return nil
++	}

@@ -1,0 +1,9 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.clayrelay.vpnprobe">
+  <uses-permission android:name="android.permission.INTERNET" />
+  <application android:extractNativeLibs="true" android:debuggable="true" android:allowBackup="false">
+    <service android:name=".Probe" android:exported="true" android:permission="android.permission.BIND_VPN_SERVICE">
+      <intent-filter><action android:name="android.net.VpnService" /></intent-filter>
+    </service>
+  </application>
+  <instrumentation android:name=".Check" android:targetPackage="org.clayrelay.vpnprobe" />
+</manifest>

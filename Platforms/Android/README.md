@@ -47,6 +47,12 @@ ADB="$ANDROID_HOME/platform-tools/adb" bash Platforms/Android/smoke-apk.sh --rel
   .build/android-apk/CLAY-Android-arm64-relay-test.apk
 ```
 
+### 系统 VPN 实验 / System VPN experiment
+
+[VPN 实验](vpn-lab/README.md)在独立 Android API 24 模拟器上验证了有限范围的 IPv4 TCP 转发，并复现出站绕回。实验使用单独的测试 APK，离线版和本机 Relay 仍不接管系统流量。
+
+The [VPN lab](vpn-lab/README.md) verifies limited IPv4 TCP forwarding and reproduces an outbound routing loop on a disposable Android API 24 emulator. Its test APK is separate from the offline and manual relay previews.
+
 ### 固定工具链
 
 - 使用 [Swift 6.4.3](https://www.swift.org/install/) 主机工具链与 [同版本 Android SDK](https://www.swift.org/documentation/articles/swift-sdk-for-android-getting-started.html)。可使用 Swiftly 固定版本，或使用官网 macOS `.pkg`，先用 `pkgutil --check-signature` 核对 `Developer ID Installer: Swift Open Source (V9AUD2URP3)`。工作流采用解包方式，另外固定了实测 `.pkg` 的 SHA-256。

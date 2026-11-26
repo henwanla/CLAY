@@ -310,10 +310,10 @@ enum Probe {
     }
 
     /// A user can attach macOS to a running manual session without restarting it.
-    func connectSystem() {
+    func connectSystem(using routing: PACControl.SystemRouting = .followMode) {
         guard canConnectSystem else { return }
-        if running { publishPAC(toSystem: true) }
-        else { startSession(connectSystem: true) }
+        if running { publishPAC(to: .system(routing)) }
+        else { startSession(systemRouting: routing) }
     }
 
     func selectRoutingMode(_ mode: CoreRoutingMode) {
@@ -340,14 +340,14 @@ enum Probe {
         preferences.set(mode.rawValue, forKey: Self.routingPreference)
     }
 
-    func publishPAC(toSystem: Bool) {
+    func publishPAC(to endpoint: PACControl.Endpoint) {
         guard !shuttingDown, let core, core.isRunning else { return }
-        pac.publish(port: core.proxyPort, toSystem: toSystem)
+        pac.publish(port: core.proxyPort, to: endpoint)
     }
 
-    func start() { startSession(connectSystem: false) }
+    func start() { startSession() }
 
-    private func startSession(connectSystem: Bool) {
+    private func startSession(systemRouting: PACControl.SystemRouting? = nil) {
         guard canStartManual, let engine, let trustedEngine, let selected = chosen else { return }
         let policy = pac.policy
         busy = true; status = "正在启动 Mihomo…"
@@ -369,7 +369,7 @@ enum Probe {
                 core = session; proxyAddress = session.proxyAddress; status = "本机代理已就绪"
                 runningRules = policy
                 monitorTraffic(session)
-                if connectSystem { publishPAC(toSystem: true) }
+                if let systemRouting { publishPAC(to: .system(systemRouting)) }
             } catch let error as SessionError {
                 if error == .engineChanged {
                     self.engine = nil
@@ -426,7 +426,7 @@ enum Probe {
                 active = node.id; status = "节点已切换"
             } catch {
                 guard self.core === core, !Task.isCancelled else { return }
-                status = "切换失败，保留上一个节点"; checkHealth()
+                status = "未能确认节点切换；请重试或重新启动。"; checkHealth()
             }
         }
     }

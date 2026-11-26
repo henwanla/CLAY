@@ -19,7 +19,7 @@ public enum SystemPACRestoreResult: Equatable, Sendable {
 
 public enum SystemPACError: LocalizedError {
     case invalidURL, chooseService, serviceUnavailable, externallyChanged, authorizationDenied
-    case backupUnavailable, recoveryRequired, restorationPending, configuration(Int32)
+    case backupUnavailable, recoveryRequired, updatePending, restorationPending, configuration(Int32)
 
     public var errorDescription: String? {
         switch self {
@@ -30,6 +30,7 @@ public enum SystemPACError: LocalizedError {
         case .authorizationDenied: return "macOS 没有授予修改网络配置的权限，请在前台重试。"
         case .backupUnavailable: return "无法读取或保存 PAC 恢复记录。请检查 CLAY 应用支持目录。"
         case .recoveryRequired: return "上次修改可能仍在生效。请先使用「恢复系统代理」确认并恢复设置。"
+        case .updatePending: return "macOS 仍在使用上一个 PAC 地址。请稍等片刻，再试一次切换。"
         case .restorationPending: return "macOS 仍在使用 CLAY 的 PAC 地址。请稍等片刻，再试一次恢复。"
         case .configuration(let status): return "macOS 网络设置操作失败（\(status)）。请稍后重试。"
         }
@@ -150,6 +151,9 @@ public enum SystemPACError: LocalizedError {
                   values[Self.pacURL] as? String == journal.url, Self.equal(values[Self.pacEnable], 1)
             else { throw SystemPACError.externallyChanged }
             if address == journal.url { return service }
+            if let previous = journal.previousURL, session.activePACURLs(serviceID: service.id).contains(previous) {
+                throw SystemPACError.updatePending
+            }
             journal.phase = .updating
             journal.previousURL = journal.url
             journal.url = address
@@ -160,7 +164,9 @@ public enum SystemPACError: LocalizedError {
                 try session.commit(values, serviceID: service.id)
                 try session.apply()
                 journal.phase = .active
-                journal.previousURL = nil
+                if let previous = journal.previousURL, !session.activePACURLs(serviceID: service.id).contains(previous) {
+                    journal.previousURL = nil
+                }
                 try save(journal)
             } catch { throw SystemPACError.recoveryRequired }
             liveURLs = journal.ownedURLs

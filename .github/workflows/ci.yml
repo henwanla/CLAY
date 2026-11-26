@@ -33,8 +33,21 @@ jobs:
         run: .build/release/CLAYCoreChecks --pac-fixture
       - name: Check subscription downloads
         run: python3 scripts/smoke-subscriptions.py .build/release/CLAYCoreChecks
-      - name: Check encrypted subscription storage and migration
-        run: bash scripts/smoke-workspace.sh --storage-only
+      - name: Check live routing, PAC recovery and subscription storage
+        shell: bash
+        run: |
+          set -euo pipefail
+          scratch="$(mktemp -d)"
+          trap 'rm -r "$scratch"' EXIT
+          curl --proto '=https' --fail --silent --show-error --location --retry 3 --max-time 90 \
+            -o "$scratch/mihomo.gz" https://github.com/MetaCubeX/mihomo/releases/download/v1.19.34/mihomo-darwin-arm64-v1.19.34.gz
+          cd "$scratch"
+          printf '%s\n' '1a7a20eca63fbbaec90137717465bfde488d0db2a3a79b8fadebf9b2545b6e4c  mihomo.gz' | shasum -a 256 -c
+          gzip -dc mihomo.gz > mihomo
+          printf '%s\n' 'a55a9073f9b7b1fa596a82c034d2dae3407ec34732102b6e42c5513ce3033f34  mihomo' | shasum -a 256 -c
+          chmod 700 mihomo
+          cd "$GITHUB_WORKSPACE"
+          bash scripts/smoke-workspace.sh "$scratch/mihomo"
       - name: Build and verify the public Apple Silicon package
         shell: bash
         run: |

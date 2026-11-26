@@ -195,13 +195,21 @@ private final class ControllerRedirectPolicy: NSObject, URLSessionTaskDelegate, 
     }
 
     public func switchTo(_ node: NodeProfile) async throws {
-        do { _ = try await call("/proxies/CLAY", method: "PUT", body: JSONEncoder().encode(["name": node.localName])) }
-        catch { throw SessionError.selectionFailed }
+        struct Selection: Decodable { let now: String }
+        do {
+            _ = try await call("/proxies/CLAY", method: "PUT", body: JSONEncoder().encode(["name": node.localName]))
+            let actual = try await call("/proxies/CLAY")
+            guard try JSONDecoder().decode(Selection.self, from: actual).now == node.localName else { throw SessionError.selectionFailed }
+        } catch { throw SessionError.selectionFailed }
     }
 
     public func setRoutingMode(_ mode: CoreRoutingMode) async throws {
-        do { _ = try await call("/configs", method: "PATCH", body: JSONEncoder().encode(["mode": mode.rawValue])) }
-        catch { throw SessionError.routingFailed }
+        struct Configuration: Decodable { let mode: String }
+        do {
+            _ = try await call("/configs", method: "PATCH", body: JSONEncoder().encode(["mode": mode.rawValue]))
+            let actual = try await call("/configs")
+            guard try JSONDecoder().decode(Configuration.self, from: actual).mode.lowercased() == mode.rawValue else { throw SessionError.routingFailed }
+        } catch { throw SessionError.routingFailed }
     }
 
     public func delay(_ node: NodeProfile, target: URL) async throws -> Int {

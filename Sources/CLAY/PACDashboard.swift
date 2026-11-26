@@ -41,12 +41,19 @@ struct PACDashboard: View {
                 Text("已配置网络服务：\(service.name)。切换到其他网络服务时，先恢复原设置，再连接到新服务。")
                     .font(.callout).foregroundStyle(.secondary)
                 if !control.busy && !control.systemPACIsEffective {
-                    Label("macOS 当前的默认代理设置未使用 CLAY 的 PAC。刚连接时系统可能还在更新；若切换了网络，可先恢复原设置，再连接当前网络服务。", systemImage: "exclamationmark.circle")
+                    Label("macOS 尚未使用此次配置的 PAC 地址。刚连接时系统可能还在更新；若切换了网络，可先恢复原设置，再连接当前网络服务。", systemImage: "exclamationmark.circle")
                         .font(.callout).foregroundStyle(.orange)
                 }
                 HStack {
-                    Button("更新系统 PAC") { model.publishPAC(toSystem: true) }
-                        .disabled(!model.running || model.busy || control.busy || control.activePolicy == control.policy)
+                    if control.followsRoutingMode {
+                        Button("应用自定义 PAC") { model.publishPAC(to: .system(.customPolicy)) }
+                            .disabled(!model.running || model.busy || control.busy)
+                    } else {
+                        Button("跟随流量模式") { model.publishPAC(to: .system(.followMode)) }
+                            .disabled(!model.running || model.busy || control.busy)
+                        Button("更新自定义 PAC") { model.publishPAC(to: .system(.customPolicy)) }
+                            .disabled(!model.running || model.busy || control.busy || control.activePolicy == control.policy)
+                    }
                     Button("恢复原网络代理设置") { control.restoreSystem() }.disabled(control.busy || model.busy)
                 }
             } else {
@@ -58,11 +65,12 @@ struct PACDashboard: View {
                     Button { control.refreshServices() } label: { Image(systemName: "arrow.clockwise") }
                         .help("重新读取网络服务").accessibilityLabel("重新读取网络服务").disabled(control.busy || model.busy)
                     Button("连接 macOS") { model.connectSystem() }.disabled(!model.canConnectSystem)
+                    Button("应用自定义 PAC") { model.connectSystem(using: .customPolicy) }.disabled(!model.canConnectSystem)
                 }
                 Text(selectedServiceDescription).font(.callout).foregroundStyle(.secondary)
                 Divider()
                 HStack {
-                    Button(control.localURL == nil ? "启动本机 PAC" : "更新本机 PAC") { model.publishPAC(toSystem: false) }
+                    Button(control.localURL == nil ? "启动本机 PAC" : "更新本机 PAC") { model.publishPAC(to: .local) }
                         .disabled(!model.running || model.busy || control.busy || control.activePolicy == control.policy)
                     if control.localURL != nil {
                         Button("停止本机 PAC") { control.stopLocal() }.disabled(control.busy || model.busy)
@@ -82,7 +90,7 @@ struct PACDashboard: View {
             if !control.message.isEmpty {
                 Text(control.message).font(.callout).foregroundStyle(control.messageIsError ? Color.orange : Color.secondary)
             }
-            Text("系统 PAC 只影响遵循 macOS 代理设置的应用，应用设置时系统可能请求授权。本机 PAC 地址可手动填入支持 PAC 的应用。")
+            Text("连接 macOS 后，非本地请求跟随流量模式。应用自定义 PAC 时，命中直连的请求可在到达内核之前直连。系统设置只影响使用 macOS 代理的应用。本机 PAC 地址可手动填入支持 PAC 的应用。")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }

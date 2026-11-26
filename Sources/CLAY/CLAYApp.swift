@@ -246,7 +246,7 @@ private struct Dashboard: View {
             if pac.systemService == nil || pac.needsRecovery || !model.running {
                 Button("连接 macOS") { model.connectSystem() }
                     .buttonStyle(.borderedProminent)
-                    .help("启动代理并为所选网络服务启用系统 PAC。")
+                    .help("让使用 macOS 系统代理的应用跟随当前流量模式。")
                     .disabled(!model.canConnectSystem)
             }
         }
@@ -300,8 +300,12 @@ private struct Dashboard: View {
                 }.pickerStyle(.segmented).labelsHidden().disabled(model.busy)
                 Text(routingExplanation).font(.callout).foregroundStyle(.secondary)
                 if model.routingMode == .rule && model.runningRules.map({ $0 != pac.policy }) == true {
-                    Text("规则有未应用的改动。重启内核后用于手动接入的流量；PAC 仍按自己的发布状态更新。")
+                    Text("规则有未应用的改动。重启代理后会载入新规则；自定义 PAC 仍可从 PAC 页面单独更新。")
                         .font(.callout).foregroundStyle(.orange)
+                }
+                if pac.systemService != nil && !pac.followsRoutingMode {
+                    Label("自定义 PAC 可能先直连部分请求。需要系统流量跟随此处的模式时，请在 PAC 页面点「跟随流量模式」。", systemImage: "info.circle")
+                        .font(.callout).foregroundStyle(.secondary)
                 }
             }
             panel("当前节点", symbol: "arrow.triangle.branch") {
@@ -316,7 +320,7 @@ private struct Dashboard: View {
                     Text("HTTP 和 SOCKS5 共用这个端口，可填入需要手动配置的应用。")
                         .font(.callout).foregroundStyle(.secondary)
                     if pac.systemService == nil && !pac.needsRecovery {
-                        Text("macOS 尚未接入。点「连接 macOS」后，遵循系统代理设置的应用会按 PAC 规则分流。")
+                        Text("macOS 尚未接入。点「连接 macOS」后，使用系统代理的应用会跟随当前流量模式。")
                             .font(.callout).foregroundStyle(.secondary)
                     }
                 } else { Text("代理启动后，这里会显示本机代理地址。").foregroundStyle(.secondary) }

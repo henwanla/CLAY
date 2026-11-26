@@ -1,6 +1,11 @@
 # 更新记录 / Changelog
 
-## 开发中 / Unreleased
+## 0.3.2 · 预览版 / Preview
+
+- macOS 的「连接 macOS」现在将非本地请求交给当前的规则／全局／直连模式。可从 PAC 页面单独应用自定义 PAC；macOS 尚未切换到新地址时，CLAY 保留旧监听。模式和节点切换由内核读回确认。
+- Connect macOS now sends non-local requests through the current Rule, Global, or Direct mode. Custom PAC is still available separately. CLAY keeps the old PAC listener while macOS applies a replacement, and verifies mode and node changes by reading back the core state.
+
+同时保留跨平台源码预览 / Cross-platform previews in the source tree:
 
 - Windows 便携 CLI 支持在同一回环会话内切换节点和规则／全局／直连，切换状态由内核读回确认。
 - The Windows portable CLI can switch nodes and Rule, Global, or Direct mode in a running loopback session, with controller readback before confirmation.

@@ -21,6 +21,7 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
 
     var denyAuthorization = false
     var withholdEffectiveState = false
+    var delayApply = false
     private(set) var attempts = 0
     private(set) var persisted = baseline
     private(set) var activeURL: String?
@@ -45,9 +46,10 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
     func apply() throws {
         let next = persisted[Self.urlKey] as? String
         observeApply?(activeURL, next)
-        activeURL = next
+        if !delayApply { activeURL = next }
         applies += 1
     }
+    func propagate() { activeURL = persisted[Self.urlKey] as? String }
     func activePACURLs(serviceID: String) -> Set<String> { serviceID == Self.service.id ? Set([activeURL].compactMap { $0 }) : [] }
     func effectivePACURLs() -> Set<String> { withholdEffectiveState ? [] : Set([activeURL].compactMap { $0 }) }
 }
@@ -130,7 +132,7 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
         try await wait("global mode") { !model.busy }
         try require(model.routingMode == .global && model.proxyAddress == listener && !proxyFetch(origin, through: listener),
                     "returning to global mode did not preserve the listening address and selected node")
-        model.publishPAC(toSystem: false)
+        model.publishPAC(to: .local)
         try await wait("local PAC endpoint") { !model.pac.busy }
         guard let endpoint = model.pac.localURL, let endpointPort = endpoint.port.flatMap(UInt16.init(exactly:)) else {
             throw CheckFailed("local PAC could not start")
@@ -178,6 +180,7 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
         try model.trustEngine(engine, persist: false)
         try require(model.applyImport("vless://4624a73a-98ce-43e7-8868-4deba224779c@127.0.0.1:1234#fixture"), "could not import synthetic node")
         model.selectRoutingMode(.rule) // The synthetic origin has no upstream node; Rule sends loopback direct through the mixed proxy.
+        model.pac.policy.defaultDecision = .direct
         var installHadLivePAC = false, restoreHadLivePAC = false
         var restoreHadLiveProxy = false
         var observedProxyPort: UInt16?
@@ -190,7 +193,7 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
             }
         }
 
-        func checkAttachedAndStop(priorPID: pid_t? = nil) async throws {
+        func checkAttachedAndStop(priorPID: pid_t? = nil, checkCustom: Bool = false) async throws {
             try await wait("system connection") { !model.busy && !model.pac.busy && (model.pac.systemService != nil || model.pac.messageIsError) }
             guard model.pac.systemService == WorkspacePACFixture.service, !model.pac.messageIsError,
                   let listener = model.proxyAddress, let proxyPort = URL(string: listener)?.port,
@@ -213,10 +216,55 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
             try require(model.pac.systemPACIsEffective, "status did not recover when the system PAC became effective again")
             try require(fixture.persisted["ProxyAutoConfigEnable"] as? Int == 1 && fixture.persisted["HTTPEnable"] as? Int == 0,
                         "system PAC was not enabled in the mock settings")
-            try await checkPACScript(endpoint, policy: model.pac.policy, proxyPort: proxyPort)
+            try require(model.pac.followsRoutingMode && model.pac.activePolicy == nil, "Connect macOS did not delegate routing to Mihomo")
+            try await checkPACScript(endpoint, policy: .standard, proxyPort: proxyPort)
+            model.selectRoutingMode(.global)
+            try await wait("global mode with system proxy") { !model.busy }
+            try require(model.routingMode == .global && !proxyFetch(origin, through: listener)
+                        && model.pac.localURL == endpoint && fixture.attempts == attempts,
+                        "Global did not use the node promptly on the existing system session")
+            model.selectRoutingMode(.direct)
+            try await wait("direct mode with system proxy") { !model.busy }
+            try require(model.routingMode == .direct && proxyFetch(origin, through: listener)
+                        && model.pac.localURL == endpoint && fixture.attempts == attempts,
+                        "Direct did not take effect without another macOS authorization")
+            model.selectRoutingMode(.rule)
+            try await wait("restore rule mode") { !model.busy }
             try require(proxyFetch(origin, through: listener) && proxyFetch(origin, through: "socks5h://127.0.0.1:\(proxyPort)"),
                         "manual HTTP or SOCKS relay stopped after system PAC attached")
             try await wait("live traffic counters") { (model.telemetry?.downloadTotal ?? 0) > 0 }
+
+            var currentPACPort = pacPort
+            if checkCustom {
+                fixture.delayApply = true
+                model.publishPAC(to: .system(.customPolicy))
+                try await wait("custom system PAC") { !model.pac.busy }
+                guard let customURL = model.pac.localURL, customURL != endpoint,
+                      let customPort = customURL.port.flatMap(UInt16.init(exactly:)) else {
+                    throw CheckFailed("custom rules were not published to a new URL")
+                }
+                try require(!model.pac.followsRoutingMode && model.pac.activePolicy == model.pac.policy,
+                            "custom PAC was not selected")
+                try await checkPACScript(customURL, policy: model.pac.policy, proxyPort: proxyPort)
+                try require(fixture.activeURL == endpoint.absoluteString && canConnect(to: pacPort),
+                            "previous PAC stopped while macOS still used it")
+                model.publishPAC(to: .system(.followMode))
+                try await wait("wait for previous PAC propagation") { !model.pac.busy }
+                try require(model.pac.messageIsError && !model.pac.needsRecovery && model.pac.localURL == customURL
+                            && canConnect(to: pacPort), "propagation delay required recovery or stopped a PAC listener")
+                fixture.delayApply = false
+                fixture.propagate()
+                model.publishPAC(to: .system(.followMode))
+                try await wait("return to mode-controlled PAC") { !model.pac.busy }
+                guard let returned = model.pac.localURL, let returnedPort = returned.port.flatMap(UInt16.init(exactly:)) else {
+                    throw CheckFailed("no PAC address after returning to mode-controlled routing")
+                }
+                try require(model.pac.followsRoutingMode && model.pac.systemPACIsEffective && !model.pac.messageIsError
+                            && returned != customURL && model.proxyAddress == listener,
+                            "changing PAC behavior disturbed the core session")
+                try await wait("replaced PAC shutdown") { !canConnect(to: pacPort) && !canConnect(to: customPort) }
+                currentPACPort = returnedPort
+            }
 
             try require(model.stop(), "stopping the proxy did not restore its system settings")
             try require(fixture.matchesBaseline && fixture.activeURL == nil && restoreHadLivePAC && restoreHadLiveProxy,
@@ -224,7 +272,7 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
             let pending = try manager.pendingRecovery()
             try require(pending == nil && !model.running && model.pac.systemService == nil && !model.pac.systemPACIsEffective && !canConnect(to: localProxyPort),
                         "stop retained proxy state or a recovery journal after restoring settings")
-            try await wait("restored PAC listener shutdown") { model.pac.localURL == nil && !canConnect(to: pacPort) }
+            try await wait("restored PAC listener shutdown") { model.pac.localURL == nil && !canConnect(to: currentPACPort) }
         }
 
         do {
@@ -240,19 +288,21 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
 
             fixture.denyAuthorization = false
             model.connectSystem()
-            try await checkAttachedAndStop(priorPID: priorPID)
+            try await checkAttachedAndStop(priorPID: priorPID, checkCustom: true)
             installHadLivePAC = false; restoreHadLivePAC = false; restoreHadLiveProxy = false
 
             model.connectSystem()
             try await checkAttachedAndStop()
-            try require(fixture.applies == 4, "each enable and restore must apply exactly once")
+            try require(fixture.applies == 6, "enable, replace and restore must apply exactly once")
         } catch {
             fixture.denyAuthorization = false
+            fixture.delayApply = false
             await model.shutdown()
             throw error
         }
         await model.shutdown()
         print("PASS system connect launches or reuses Mihomo, authorization refusal preserves manual access, and stop restores mocked settings first")
+        print("PASS system PAC delegates non-local targets to the core, preserves custom PAC and handles delayed PAC propagation")
     }
 
     private static func checkPACScript(_ endpoint: URL, policy: PACPolicy, proxyPort: Int) async throws {

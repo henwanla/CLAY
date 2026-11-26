@@ -2,12 +2,12 @@
 
 [简体中文](README.md) · [Changelog](CHANGELOG.md) · [GitHub Releases](https://github.com/henwanla/CLAY/releases)
 
-CLAY is a native macOS proxy app with subscriptions, menu bar controls, PAC routing, live traffic, and a connection inspector. The 0.3.1 public preview targets Apple Silicon and macOS 13 or later. See the platform notes below for other previews and their test coverage.
+CLAY is a native macOS proxy app with subscriptions, menu bar controls, PAC routing, live traffic, and a connection inspector. The 0.3.2 public preview targets Apple Silicon and macOS 13 or later. See the platform notes below for other previews and their test coverage.
 
 ## Getting started
 
 1. **Local preview (build 4 and later):** Open `CLAY.app`. If you have not selected another core, CLAY uses the bundled Mihomo with a pinned fingerprint. To use a different trusted core, choose it in Settings (**设置**). Verify the source and select it again after replacing or upgrading an external core.
-2. **GitHub release:** Download `CLAY-0.3.1-macos-arm64.zip` and the matching `.zip.sha256`. In the download directory, run `shasum -a 256 -c CLAY-0.3.1-macos-arm64.zip.sha256` before extracting the ZIP. The public package requires you to install Mihomo separately, as shown below. The app has an ad hoc signature and has no Developer ID signature or notarization. If macOS blocks the package, you can build it from source under your usual security policy.
+2. **GitHub release:** Download `CLAY-0.3.2-macos-arm64.zip` and the matching `.zip.sha256`. In the download directory, run `shasum -a 256 -c CLAY-0.3.2-macos-arm64.zip.sha256` before extracting the ZIP. The public package requires you to install Mihomo separately, as shown below. The app has an ad hoc signature and has no Developer ID signature or notarization. If macOS blocks the package, you can build it from source under your usual security policy.
 3. Under Subscriptions (**订阅**), select Add subscription (**添加订阅…**) and enter your provider’s HTTPS link. Under Nodes (**节点**), you can also paste share links or import UTF-8 JSON, YAML, or text files.
 4. Choose a node and select Connect macOS (**连接 macOS**) from the main window or menu bar. CLAY starts the local proxy and sets up system PAC for the current primary network service or the service you choose in PAC Rules. For manual setup, use Start local proxy only (**仅启动本机代理**) and enter the HTTP/SOCKS5 address from Overview (**概览**) in the app. If you are still using 0.3.0, use Start (**启动**) and then Apply to macOS (**应用到 macOS**) under PAC Rules.
 5. Closing the window keeps CLAY and its proxy running. In new builds, the menu bar also lets you switch nodes and routing modes. Quit CLAY or press `⌘Q` to end the session. CLAY does not launch automatically at login.
@@ -34,13 +34,14 @@ Stop if either hash differs. In Settings (**设置**) → Choose Mihomo (**选�
 
 ## Routing and app setup
 
-Builds from the newer source let you choose a routing mode from Overview or the menu bar. **Rule** uses the policy loaded from PAC Rules; **Global** sends traffic that reaches the local proxy through the selected node; **Direct** connects that traffic to its destination without using a node. Switching modes leaves macOS network settings alone. Existing connections may keep their previous routes. Restart the core to apply edited rules to incoming proxy traffic; update PAC separately. Traffic that PAC sends directly never reaches the core.
+Choose a routing mode from Overview or the menu bar. **Rule** uses the loaded policy from PAC Rules; **Global** uses the selected node; **Direct** connects to the destination without a node. Connect macOS sends non-local requests to the core, so switching modes takes effect without changing macOS proxy settings again. Existing connections may keep their previous routes. Loopback, local names, and private addresses bypass this system connection. Restart the proxy to load edited rules.
 
 | Mode | How to use it | Scope |
 | --- | --- | --- |
 | Manual connection | Start CLAY and manually enter its HTTP/SOCKS5 address in an app. | Only apps configured with that address; macOS settings stay as they were. |
 | Local PAC | Under PAC Rules, select Start local PAC (**启动本机 PAC**), then copy its loopback URL to a PAC-capable app. | Only apps configured with that PAC URL; macOS settings stay as they were. |
-| System PAC | Select Connect macOS (**连接 macOS**). You can choose the network service in PAC Rules. | Changes the selected service. Temporarily disables that service’s manual HTTP, HTTPS, and SOCKS proxies and automatic proxy discovery. |
+| System proxy | Select Connect macOS (**连接 macOS**). You can choose the network service in PAC Rules. | Apps that use the macOS proxy follow the current routing mode. The service’s other proxy settings are temporarily disabled. |
+| Custom system PAC | In PAC Rules, select Apply custom PAC (**应用自定义 PAC**). | Direct PAC matches bypass the core. Select Follow routing mode (**跟随流量模式**) to switch back. |
 
 Rules run from top to bottom. The first match wins; unmatched traffic uses your chosen Direct or Proxy default. The initial default is Proxy. Loopback is always direct. Explicit rules can override the optional local and private address bypass. Rules match exact domains or IPs, domain suffixes, domain keywords, and IPv4 CIDR ranges. CIDR applies to literal IPv4 addresses without a DNS lookup. Enter a domain, IP, or URL to see which rule matches. Paste rules one per line to append them in bulk, for example:
 
@@ -50,9 +51,9 @@ DOMAIN-SUFFIX,example.com,PROXY
 IP-CIDR,10.0.0.0/8,DIRECT
 ```
 
-Rule edits are saved locally. Select Update to apply edits to a running PAC. The local PAC URL changes when you update it, so copy the new URL into manually configured apps. CLAY saves the previous proxy settings for the selected network service before applying system PAC. Use Restore original settings (**恢复原系统设置**) to turn it off; CLAY also tries to restore the previous settings when you stop or quit. macOS may request administrator authorization on apply or restore. After a forced exit, reopen CLAY and use Restore original network proxy settings (**恢复原网络代理设置**) if prompted. If another tool has taken over, CLAY leaves its settings in place.
+Rule edits are saved locally. Select Update to apply edits to a running custom system PAC or local PAC. The local PAC URL changes when you update it, so copy the new URL into manually configured apps. CLAY saves the previous proxy settings for the selected network service before applying system PAC. Use Restore original settings (**恢复原系统设置**) to turn it off; CLAY also tries to restore the previous settings when you stop or quit. macOS may request administrator authorization on apply or restore. After a forced exit, reopen CLAY and use Restore original network proxy settings (**恢复原网络代理设置**) if prompted. If another tool has taken over, CLAY leaves its settings in place.
 
-In newer builds, **系统默认 PAC 已启用** means the macOS default proxy settings point to CLAY. If **PAC 已配置，未成为系统默认** persists, restore the original settings before reconnecting on the current network. To confirm traffic, select Global routing, open a site that does not match a direct PAC rule in a browser that honors macOS proxy settings, and check Connections or the traffic counters. Direct PAC matches bypass the core even when PAC is active.
+When CLAY shows **系统代理已启用**, the default macOS proxy points to CLAY. If **未成为系统默认** persists, restore the original settings and reconnect on the current network. To verify traffic, choose Connect macOS and Global, open a public site in a browser that honors macOS proxy settings, and check Connections or the traffic counters.
 
 ## Dashboards, subscriptions, and diagnostics
 

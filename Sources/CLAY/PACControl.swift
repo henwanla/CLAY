@@ -3,6 +3,16 @@ import Foundation
 import SwiftUI
 
 @MainActor final class PACControl: ObservableObject {
+    enum SystemRouting { case followMode, customPolicy }
+    enum Endpoint {
+        case local, system(SystemRouting)
+
+        var systemRouting: SystemRouting? {
+            if case .system(let routing) = self { return routing }
+            return nil
+        }
+    }
+
     @Published var policy: PACPolicy {
         didSet {
             guard let data = try? JSONEncoder().encode(policy) else { return }
@@ -16,6 +26,7 @@ import SwiftUI
     @Published private(set) var systemPACIsEffective = false
     @Published private(set) var recoveryService: SystemPACService?
     @Published private(set) var activePolicy: PACPolicy?
+    @Published private(set) var followsRoutingMode = false
     @Published private(set) var busy = false
     @Published private(set) var message = ""
     @Published private(set) var messageIsError = false
@@ -43,9 +54,11 @@ import SwiftUI
     var modeLabel: String {
         if needsRecovery { return "PAC 待恢复" }
         if let systemService {
-            return systemPACIsEffective ? "系统默认 PAC 已启用 · \(systemService.name)" : "PAC 已配置，未成为系统默认 · \(systemService.name)"
+            let kind = followsRoutingMode ? "系统代理" : "自定义 PAC"
+            return systemPACIsEffective ? "\(kind)已启用 · \(systemService.name)" : "\(kind)已配置，未成为系统默认 · \(systemService.name)"
         }
-        return localURL == nil ? "手动接入" : "本机 PAC"
+        if localURL == nil { return "手动接入" }
+        return followsRoutingMode ? "本机 PAC · 跟随流量模式" : "本机 PAC"
     }
 
     func refreshServices() {
@@ -70,11 +83,15 @@ import SwiftUI
     /// Starting a local PAC endpoint never changes macOS settings. Applying to macOS
     /// creates the new endpoint first, so the live system setting never points at an
     /// unstarted server. Explicitly updating uses a new URL to invalidate client caches.
-    func publish(port: Int, toSystem: Bool) {
+    func publish(port: Int, to endpoint: Endpoint) {
+        let toSystem = endpoint.systemRouting != nil
+        let followsMode = endpoint.systemRouting == .followMode
         guard !busy, !needsRecovery, toSystem || systemService == nil else { return }
-        let draft = policy
+        // For the default system connection, leave non-local routing to Mihomo.
+        // Custom PAC can still decide on a route before the request reaches it.
+        let draft: PACPolicy? = followsMode ? nil : policy
         let script: String
-        do { script = try draft.makeScript(proxyPort: port) }
+        do { script = try (draft ?? .standard).makeScript(proxyPort: port) }
         catch { display(error.localizedDescription, error: true); return }
         let id = UUID()
         generation = id; busy = true
@@ -91,7 +108,7 @@ import SwiftUI
             defer { candidate?.stop() }
             do {
                 let next: PACServer
-                if let server, activePolicy == draft { next = server }
+                if let server, activePolicy == draft, followsRoutingMode == followsMode { next = server }
                 else { next = try await PACServer.start(script: script); candidate = next }
                 try Task.checkCancellation()
                 guard generation == id else { return }
@@ -112,7 +129,7 @@ import SwiftUI
                             alternateServers.append(new); candidate = nil
                         }
                         systemService = manager.managedService
-                        if let pending = try? manager.pendingRecovery() { recoveryService = pending }
+                        if uncertainOwnership || systemService == nil { recoveryService = try? manager.pendingRecovery() }
                         throw error
                     }
                     recoveryService = nil
@@ -121,8 +138,18 @@ import SwiftUI
                 if next !== server {
                     let previous = server
                     server = next; candidate = nil
-                    localURL = next.url; activePolicy = draft
-                    previous?.stop()
+                    localURL = next.url; activePolicy = draft; followsRoutingMode = followsMode
+                    // configd can still refer to the previous endpoint after Apply.
+                    if toSystem {
+                        alternateServers.removeAll { old in
+                            guard !self.manager.needsListener(at: old.url) else { return false }
+                            old.stop(); return true
+                        }
+                    }
+                    if let previous {
+                        if toSystem && manager.needsListener(at: previous.url) { alternateServers.append(previous) }
+                        else { previous.stop() }
+                    }
                 }
                 display(toSystem ? "PAC 已应用到 \(systemService?.name ?? "所选网络服务")。" : "本机 PAC 地址已就绪。")
             } catch is CancellationError {
@@ -173,7 +200,7 @@ import SwiftUI
     private func closeServers() {
         server?.stop(); server = nil
         alternateServers.forEach { $0.stop() }; alternateServers.removeAll()
-        localURL = nil; activePolicy = nil
+        localURL = nil; activePolicy = nil; followsRoutingMode = false
         refreshEffectiveState()
     }
 

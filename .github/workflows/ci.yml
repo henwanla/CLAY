@@ -23,6 +23,8 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
+      - name: Check source for local credentials
+        run: python3 scripts/check-source-privacy.py
       - name: Build the app and checks
         run: bash scripts/swift-local.sh build -c release
       - name: Check profiles, PAC rules and synthetic recovery

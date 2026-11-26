@@ -40,10 +40,11 @@ fi
 
 umask 077
 work=$(mktemp -d "${TMPDIR:-/tmp}/clay-vpn-lab.XXXXXX")
-fixture_pid= test_pid= installed=false
+fixture_pid= test_pid= installed=false guest_client=
 cleanup() {
   if [[ -n "$test_pid" ]]; then kill "$test_pid" 2>/dev/null || true; fi
   if $installed; then "${adb[@]}" uninstall "$package" >/dev/null || true; fi
+  if [[ -n "$guest_client" ]]; then "${adb[@]}" shell rm -f "$guest_client" >/dev/null || true; fi
   if [[ -n "$fixture_pid" ]]; then kill "$fixture_pid" 2>/dev/null || true; fi
   rm -rf "$work"
 }
@@ -53,6 +54,7 @@ trap 'exit 143' TERM
 mkdir -p "$work/src" "$work/lib/arm64-v8a" "$work/classes"
 tar -xzf "$archive" --strip-components=1 -C "$work/src"
 (cd "$work/src" && git apply --unidiff-zero "$lab/external-tun.patch")
+cp "$lab/protect_android.go" "$work/src/clay_protect_android.go"
 (
   cd "$work/src"
   export GOOS=android GOARCH=arm64 CGO_ENABLED=1 GOTOOLCHAIN=local GOWORK=off
@@ -63,6 +65,7 @@ tar -xzf "$archive" --strip-components=1 -C "$work/src"
 "$ndk/bin/aarch64-linux-android23-clang" -fPIE -pie -O2 -Wall -Wextra -Werror \
   -o "$work/lib/arm64-v8a/liblauncher.so" "$lab/launcher.c"
 cd "$work"
+"$ndk/bin/aarch64-linux-android23-clang" -fPIE -pie -O2 -Wall -Wextra -Werror -o dns-client "$lab/dns_client.c"
 "$JAVA_HOME/bin/javac" --release 8 -cp "$platform" -d classes "$lab/Probe.java" "$lab/Check.java"
 "$JAVA_HOME/bin/jar" cf classes.jar -C classes .
 "$bt/d8" --min-api 23 --lib "$platform" --output . classes.jar
@@ -80,16 +83,20 @@ python3 "$lab/fixture.py" &
 fixture_pid=$!
 for _ in {1..30}; do [[ ! -s test-port ]] || break; sleep 0.1; done
 port=$(cat test-port)
+dns_port=$(cat dns-port)
 proof=$(cat fixture-proof)
 [[ "$proof" =~ ^CLAY_TUN_[0-9a-f]{24}$ ]]
 "${adb[@]}" install probe.apk
 installed=true
+guest_client=/data/local/tmp/clay-vpn-dns-$(python3 -c 'import secrets; print(secrets.token_hex(8))')
+"${adb[@]}" push dns-client "$guest_client" >/dev/null
+"${adb[@]}" shell chmod 700 "$guest_client"
 "${adb[@]}" shell appops set "$package" ACTIVATE_VPN allow
 
-for capture in true false; do
+for protection in off deny on; do
   tag="ClayVpn$(python3 -c 'import secrets; print(secrets.token_hex(6))')"
-  "${adb[@]}" shell am instrument -w -r -e captureUpstream "$capture" -e port "$port" -e tag "$tag" \
-    "$package/.Check" > "result-$capture.log" &
+  "${adb[@]}" shell am instrument -w -r -e protection "$protection" -e port "$port" -e dnsPort "$dns_port" -e tag "$tag" \
+    "$package/.Check" > "result-$protection.log" &
   test_pid=$!
   report=
   for _ in {1..25}; do
@@ -100,33 +107,50 @@ for capture in true false; do
   if [[ "$report" != *'Tun adapter listening'* ]]; then printf '%s\n' "$report" >&2; exit 1; fi
   current=$(routes)
   grep -F '198.51.100.42 dev tun' <<< "$current"
-  if [[ "$capture" == true ]]; then
-    grep -F '10.0.2.2 dev tun' <<< "$current"
-  elif grep -Fq '10.0.2.2 dev tun' <<< "$current"; then
-    exit 1
-  fi
+  grep -F '10.0.2.2 dev tun' <<< "$current"
   response=$("${adb[@]}" shell 'printf "GET /clay-proof HTTP/1.0\r\n\r\n" | toybox nc -w 3 -q 2 198.51.100.42 18080' 2>/dev/null || true)
-  if [[ "$capture" == false ]]; then
-    if [[ "$response" != *"$proof" ]]; then
-      printf '%s' 'VPN did not return the fixture response when the upstream was outside the TUN route.' >&2
-      "${adb[@]}" logcat -d -v brief -s "$tag:I" >&2
+  trace=$("${adb[@]}" logcat -d -v brief -s "$tag:I")
+  case "$protection" in
+    off)
+      [[ "$response" != *"$proof" && "$trace" == *'match IPCIDR(10.0.2.2/32) using REJECT'* ]]
+      ;;
+    deny)
+      [[ "$response" != *"$proof" && "$trace" == *'CLAY_PROBE_PROTECT_REJECTED'* &&
+         "$trace" == *'CLAY_PROBE_PROTECT_DENIED'* && "$trace" != *'using REJECT'* ]]
+      ;;
+    on)
+      [[ "$response" == *"$proof" && "$trace" == *'CLAY_PROBE_PROTECT_OK'* && "$trace" != *'using REJECT'* ]]
+      ;;
+  esac || {
+      printf 'Unexpected result for socket protection=%s.\n%s\n' "$protection" "$trace" >&2
       exit 1
-    fi
-  else
-    [[ "$response" != *"$proof" ]]
-    rejected=$("${adb[@]}" logcat -d -v brief -s "$tag:I")
-    [[ "$rejected" == *'match IPCIDR(10.0.2.2/32) using REJECT'* ]]
+  }
+  if [[ "$protection" == on ]]; then
+    "${adb[@]}" shell -T "$guest_client" < dns-query > dns-reply
+    python3 - <<'PY'
+from pathlib import Path
+from struct import unpack
+
+query = Path('dns-query').read_bytes()
+reply = Path('dns-reply').read_bytes()
+assert len(reply) >= len(query) + 16, 'No complete DNS response from the TUN'
+identifier, flags, qd, an, _, _ = unpack('!HHHHHH', reply[:12])
+assert identifier == 0x5116 and flags & 0x800f == 0x8000 and (qd, an) == (1, 1)
+assert reply[12:len(query)] == query[12:]
+assert reply[len(query):len(query) + 16] == bytes.fromhex('c00c00010001000000000004cb007149')
+print('CLAY_PROBE_DNS_UDP_PASS')
+PY
   fi
   wait "$test_pid"
   test_pid=
-  tr -d '\r' < "result-$capture.log" | grep -Fx 'INSTRUMENTATION_CODE: -1'
+  tr -d '\r' < "result-$protection.log" | grep -Fx 'INSTRUMENTATION_CODE: -1'
   for _ in {1..30}; do
     current=$(routes)
     if ! vpn_routes "$current"; then break; fi
     sleep 0.15
   done
   if vpn_routes "$current"; then printf 'TUN route still present after test exit.\n' >&2; exit 1; fi
-  printf 'CLAY_PROBE_CAPTURE_UPSTREAM_%s_PASS\n' "$capture"
+  printf 'CLAY_PROBE_PROTECT_%s_PASS\n' "$protection"
 done
 "${adb[@]}" uninstall "$package"
 installed=false

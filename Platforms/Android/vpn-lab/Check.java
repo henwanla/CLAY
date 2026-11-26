@@ -14,9 +14,10 @@ public final class Check extends Instrumentation {
     Intent intent = new Intent(getTargetContext(), Probe.class).setAction("org.clayrelay.vpnprobe.RUN");
     intent.putExtra("tag", options.getString("tag"));
     intent.putExtra("port", Integer.parseInt(options.getString("port")));
-    intent.putExtra("captureUpstream", Boolean.parseBoolean(options.getString("captureUpstream")));
+    intent.putExtra("dnsPort", Integer.parseInt(options.getString("dnsPort")));
+    intent.putExtra("protection", options.getString("protection"));
     getTargetContext().startService(intent);
-    SystemClock.sleep(8500);
+    SystemClock.sleep(11000);
     getTargetContext().stopService(intent);
     SystemClock.sleep(1200);
     finish(-1,new Bundle());

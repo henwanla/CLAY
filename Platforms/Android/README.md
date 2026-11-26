@@ -49,9 +49,9 @@ ADB="$ANDROID_HOME/platform-tools/adb" bash Platforms/Android/smoke-apk.sh --rel
 
 ### 系统 VPN 实验 / System VPN experiment
 
-[VPN 实验](vpn-lab/README.md)在独立 Android API 24 模拟器上验证了有限范围的 IPv4 TCP 转发，并复现出站绕回。实验使用单独的测试 APK，离线版和本机 Relay 仍不接管系统流量。
+[VPN 实验](vpn-lab/README.md)在独立 Android API 24 模拟器上验证了逐套接字避环、IPv4 TCP 转发和 UDP DNS。实验使用单独的测试 APK，离线版和本机 Relay 仍不接管系统流量。
 
-The [VPN lab](vpn-lab/README.md) verifies limited IPv4 TCP forwarding and reproduces an outbound routing loop on a disposable Android API 24 emulator. Its test APK is separate from the offline and manual relay previews.
+The [VPN lab](vpn-lab/README.md) verifies per-socket loop prevention, IPv4 TCP forwarding, and UDP DNS on a disposable Android API 24 emulator. Its test APK is separate from the offline and manual relay previews.
 
 ### 固定工具链
 

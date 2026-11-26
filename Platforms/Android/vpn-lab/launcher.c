@@ -12,8 +12,19 @@
 #include <sys/prctl.h>
 #include <unistd.h>
 #include <signal.h>
+
+enum { TUN_FD = 100, PROTECT_FD = 101 };
+
+static int inherit_fd(int source, int target) {
+    if (source == target) return fcntl(source, F_SETFD, 0);
+    if (dup2(source, target) != target) return -1;
+    close(source);
+    return 0;
+}
+
 int main(int argc, char **argv) {
-    if (argc != 5) return 64;
+    if (argc != 6 || (strcmp(argv[5], "off") && strcmp(argv[5], "protect"))) return 64;
+    const int protect = !strcmp(argv[5], "protect");
     char *end = NULL;
     errno = 0;
     long expected = strtol(argv[1], &end, 10);
@@ -42,9 +53,19 @@ int main(int argc, char **argv) {
         h->cmsg_type != SCM_RIGHTS || CMSG_NXTHDR(&msg, h)) return 70;
     int tun;
     memcpy(&tun, CMSG_DATA(h), sizeof tun);
-    if (tun == 100) { if (fcntl(tun, F_SETFD, 0) < 0) return 71; }
-    else { if (dup2(tun,100) != 100) return 71; close(tun); }
-    close(peer);
+    if (peer == TUN_FD) {
+        int moved = fcntl(peer, F_DUPFD_CLOEXEC, PROTECT_FD + 1);
+        if (moved < 0) return 71;
+        close(peer);
+        peer = moved;
+    }
+    if (inherit_fd(tun, TUN_FD) < 0) return 71;
+    if (protect) {
+        if (inherit_fd(peer, PROTECT_FD) < 0 || setenv("CLAY_VPN_LAB_PROTECT", "1", 1)) return 71;
+    } else {
+        close(peer);
+        if (unsetenv("CLAY_VPN_LAB_PROTECT")) return 71;
+    }
     fprintf(stderr,"CLAY_PROBE_FD_RECEIVED\n");
     execl(argv[2], argv[2], "-d", argv[3], "-f", argv[4], NULL);
     perror("exec"); return 72;

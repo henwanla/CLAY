@@ -342,7 +342,7 @@ private struct Dashboard: View {
                 Spacer(); Text("\(model.nodes.count) 个节点").foregroundStyle(.secondary) }
             if model.sourceChangePending { stagedNotice }
             if model.nodes.isEmpty {
-                Text("支持 VMess、VLESS、Shadowsocks 和 Trojan 分享链接，也可以导入兼容的 V2Ray/Xray 或 Clash 配置及订阅。").foregroundStyle(.secondary)
+                Text("支持 VMess、VLESS、Shadowsocks、Trojan 和 Hysteria2 分享链接，也可以导入兼容的 V2Ray/Xray 或 Clash 配置及订阅。").foregroundStyle(.secondary)
                 Button("管理订阅") { page = .subscriptions }
             } else {
                 HStack {

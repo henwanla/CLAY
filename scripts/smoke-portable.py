@@ -18,6 +18,7 @@ NODE_LABEL = "SYNTHETIC_NODE_PRIVATE_TITLE"
 NODE_HOST = "synthetic-node.example.test"
 SECRET = b"portable-fixture-token"
 NODE_PASSWORD = b"portable-fixture-password"
+OBFS_PASSWORD = b"portable-fixture-obfs-password"
 RESPONSE_PRIVATE = "DO_NOT_PRINT_CONTROLLER_CONNECTION"
 
 
@@ -30,6 +31,7 @@ def run(*args, data=None, code=0):
         assert value.encode() not in combined, "sensitive value in CLI output"
     assert SECRET not in combined, "secret in CLI output"
     assert NODE_PASSWORD not in combined, "node password in CLI output"
+    assert OBFS_PASSWORD not in combined, "obfuscation password in CLI output"
     assert not (code == 0 and result.stderr), "standard error on successful invocation"
     return result.stdout.replace(b"\r\n", b"\n")
 
@@ -38,10 +40,11 @@ def offline_checks(directory):
     node = f"vless://{NODE_ID}@{NODE_HOST}:443?security=tls#{NODE_LABEL}\n"
     vmess = {"ps": NODE_LABEL, "add": NODE_HOST, "id": NODE_ID, "port": "443", "tls": "tls"}
     vmess_url = b"vmess://" + base64.b64encode(json.dumps(vmess).encode())
+    hy2_url = f"hy2://{NODE_PASSWORD.decode()}@{NODE_HOST}?obfs=salamander&obfs-password={OBFS_PASSWORD.decode()}#{NODE_LABEL}"
     links = directory / "节点 profiles.txt"
-    links.write_text("\ufeff" + node + vmess_url.decode() + "\nhttps://never-fetch.example.test/private\n", encoding="utf-8")
-    assert run("inspect", links) == b"nodes=2\nvless/tcp/tls=1\nvmess/tcp/tls=1\nskipped.unsupportedProtocol=1\n"
-    assert run("inspect", links, "--numbered") == (b"nodes=2\nnode=1 vless/tcp/tls\nnode=2 vmess/tcp/tls\n"
+    links.write_text("\ufeff" + node + vmess_url.decode() + "\n" + hy2_url + "\nhttps://never-fetch.example.test/private\n", encoding="utf-8")
+    assert run("inspect", links) == b"nodes=3\nhysteria2/quic/tls=1\nvless/tcp/tls=1\nvmess/tcp/tls=1\nskipped.unsupportedProtocol=1\n"
+    assert run("inspect", links, "--numbered") == (b"nodes=3\nnode=1 vless/tcp/tls\nnode=2 vmess/tcp/tls\nnode=3 hysteria2/quic/tls\n"
                                                    b"skipped.unsupportedProtocol=1\n")
     run("inspect", links, "--unknown", code=64)
     yaml = directory / "profile.yaml"
@@ -67,12 +70,19 @@ proxies:
     server: {NODE_HOST}
     port: 443
     password: {NODE_PASSWORD.decode()}
+  - type: hysteria2
+    name: {NODE_LABEL}
+    server: {NODE_HOST}
+    port: 443
+    password: {NODE_PASSWORD.decode()}
+    obfs: gecko
+    obfs-password: {OBFS_PASSWORD.decode()}
   - type: unsupported-fixture
     name: Ignored
 """, encoding="utf-8")
-    assert run("inspect", yaml) == b"nodes=3\nss/tcp/aead=1\ntrojan/tcp/tls=1\nvless/tcp/tls=1\nskipped.unsupportedProtocol=1\n"
-    assert run("inspect", yaml, "--numbered") == (b"nodes=3\nnode=1 vless/tcp/tls\nnode=2 ss/tcp/aead\n"
-                                                  b"node=3 trojan/tcp/tls\nskipped.unsupportedProtocol=1\n")
+    assert run("inspect", yaml) == b"nodes=4\nhysteria2/quic/tls=1\nss/tcp/aead=1\ntrojan/tcp/tls=1\nvless/tcp/tls=1\nskipped.unsupportedProtocol=1\n"
+    assert run("inspect", yaml, "--numbered") == (b"nodes=4\nnode=1 vless/tcp/tls\nnode=2 ss/tcp/aead\n"
+                                                  b"node=3 trojan/tcp/tls\nnode=4 hysteria2/quic/tls\nskipped.unsupportedProtocol=1\n")
 
     # JSON numbers 0/1 do not stand in for true/false, or vice versa.
     json_file = directory / "typed-fields.json"

@@ -3,6 +3,7 @@
 import argparse
 import base64
 from contextlib import ExitStack
+import hashlib
 import http.server
 import json
 import os
@@ -115,6 +116,50 @@ with tempfile.TemporaryDirectory(prefix='clay-fixtures-') as tmp, ExitStack() as
             failed = subprocess.run([tool,'smoke',profiles,engine,target,token], text=True, capture_output=True, env=env, timeout=20)
             assert failed.returncode == 1 and 'FAIL probeFailed' in failed.stdout, failed.stdout
             print('PASS invalid VLESS credentials did not fall back to a direct connection')
+        finally:
+            server.terminate()
+            try: server.wait(timeout=3)
+            except subprocess.TimeoutExpired: server.kill(); server.wait()
+
+    # Native Hysteria2 uses UDP/QUIC. A generated cert and its native Mihomo
+    # fingerprint keep the fixture off the system trust store.
+    fingerprint = hashlib.sha256(subprocess.check_output(
+        ['/usr/bin/openssl', 'x509', '-outform', 'DER', '-in', cert], env=env)).hexdigest()
+    hy2_config = {'log-level': 'info', 'mode': 'rule', 'ipv6': False, 'listeners': [], 'rules': [
+        f'AND,((IP-CIDR,127.0.0.1/32),(DST-PORT,{origin.server_port})),DIRECT', 'MATCH,REJECT',
+    ]}
+    nodes = []
+    with ExitStack() as pending:
+        for obfs in (None, 'salamander', 'gecko'):
+            udp = pending.enter_context(socket.socket(type=socket.SOCK_DGRAM)); udp.bind(('127.0.0.1', 0))
+            port = udp.getsockname()[1]
+            password = secrets.token_hex(24)
+            node = {'name': obfs or 'plain', 'type': 'hysteria2', 'server': '127.0.0.1', 'port': port,
+                    'password': password, 'sni': 'clay.test', 'fingerprint': fingerprint}
+            listener = {'name': node['name'], 'type': 'hysteria2', 'listen': '127.0.0.1', 'port': str(port),
+                        'users': {'fixture': password}, 'certificate': str(cert), 'private-key': str(key)}
+            if obfs:
+                fields = {'obfs': obfs, 'obfs-password': secrets.token_hex(24)}
+                node.update(fields); listener.update(fields)
+            nodes.append(node); hy2_config['listeners'].append(listener)
+
+    hy2_profiles = tmp / 'hy2-profiles.json'; hy2_profiles.write_text(json.dumps({'proxies': nodes})); hy2_profiles.chmod(0o600)
+    hy2_server = tmp / 'hy2-server.json'; hy2_server.write_text(json.dumps(hy2_config)); hy2_server.chmod(0o600)
+    subprocess.run([tool, 'verify-config', hy2_profiles, engine], env=env, timeout=15, check=True)
+    hy2_log = tmp / 'hy2-server.log'
+    with hy2_log.open('w') as log, subprocess.Popen([engine, '-d', tmp, '-f', hy2_server], cwd=tmp, env=env, stdout=log, stderr=subprocess.STDOUT) as server:
+        try:
+            for _ in range(100):
+                if server.poll() is not None: raise RuntimeError('Synthetic Hysteria2 server failed')
+                output = hy2_log.read_text()
+                if all(f'Hysteria2[{node["name"]}] proxy listening' in output for node in nodes): break
+                time.sleep(.05)
+            else: raise RuntimeError('Synthetic Hysteria2 server did not bind all listeners')
+            subprocess.run([tool, 'smoke', hy2_profiles, engine, target, token], env=env, timeout=40, check=True)
+            hy2_profiles.write_text(json.dumps({'proxies': [{**nodes[0], 'fingerprint': secrets.token_hex(32)}]}))
+            failed = subprocess.run([tool, 'smoke', hy2_profiles, engine, target, token], text=True, capture_output=True, env=env, timeout=20)
+            assert failed.returncode == 1 and 'FAIL probeFailed' in failed.stdout, 'Invalid Hysteria2 certificate was not rejected'
+            print('PASS Hysteria2 plain, Salamander and Gecko forwarding; invalid certificate refused')
         finally:
             server.terminate()
             try: server.wait(timeout=3)

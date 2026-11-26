@@ -26,6 +26,7 @@ struct OfflineSummary {
             case "vless": name = "VLESS"
             case "ss": name = "Shadowsocks"
             case "trojan": name = "Trojan"
+            case "hysteria2": name = "Hysteria2"
             default: continue
             }
             byProtocol[name, default: 0] += 1

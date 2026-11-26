@@ -23,6 +23,8 @@ import Darwin
         try tests.testPasswordShareLinks()
         try tests.testClashPasswordNodes()
         tests.testPasswordNodesRejectUnsupportedOrAmbiguousInput()
+        try tests.testHysteria2Nodes()
+        tests.testHysteria2RejectsUnsupportedOrAmbiguousInput()
         try tests.testFullConfigurationImportsOutboundButNotSystemInputs()
         tests.testOfflineSubscriptionTextNeverFetchesURLs()
         try tests.testDistinctEngineNodeNames()
@@ -165,6 +167,84 @@ import Darwin
         XCTAssertEqual(parsed.issues, [.unsupportedTransport: 1, .unsupportedOption: 4, .malformed: 1])
     }
 
+    func testHysteria2Nodes() throws {
+        let link = "hysteria2://fixture%3Apass%40word+%252F@[::1]/?sni=origin.test&insecure=0&obfs=salamander&obfs-password=0%2B1+2#My%20node"
+        let alias = "hy2://fixture%3Apass%40word+%252F@[::1]:443?sni=origin.test&obfs=salamander&obfs-password=0%2B1%202"
+        let yaml = """
+        proxies:
+          - {name: YAML, type: hysteria2, server: '::1', port: 443, password: 'fixture:pass@word+%2F', sni: origin.test, obfs: salamander, obfs-password: '0+1 2', udp: true}
+        """
+        let json = """
+        {"proxies":[{"name":"JSON","type":"hysteria2","server":"::1","port":443,"password":"fixture:pass@word+%2F","sni":"origin.test","obfs":"salamander","obfs-password":"0+1 2","skip-cert-verify":false}]}
+        """
+        let result = SubscriptionImporter.parse(Data([link, alias].joined(separator: "\n").utf8).base64EncodedString())
+        XCTAssertTrue(result.issues.isEmpty)
+        XCTAssertEqual(result.profiles.map(\.name), ["My node", "Hysteria2"])
+        let node = try XCTUnwrap(result.profiles.first)
+        XCTAssertEqual(node.protocolName, "hysteria2")
+        XCTAssertEqual(node.transport, "quic")
+        XCTAssertEqual(node.security, "tls")
+        XCTAssertTrue(node.hasSameConnection(as: result.profiles[1]))
+        for input in [yaml, json] {
+            let parsed = SubscriptionImporter.parse(input)
+            XCTAssertTrue(parsed.issues.isEmpty)
+            XCTAssertTrue(node.hasSameConnection(as: try XCTUnwrap(parsed.profiles.first)))
+        }
+        let options = try fields(node)
+        XCTAssertEqual(options["type"] as? String, "hysteria2")
+        XCTAssertEqual(options["server"] as? String, "::1")
+        XCTAssertEqual(options["port"] as? Int, 443)
+        XCTAssertEqual(options["password"] as? String, "fixture:pass@word+%2F")
+        XCTAssertEqual(options["obfs"] as? String, "salamander")
+        XCTAssertEqual(options["obfs-password"] as? String, "0+1 2")
+        XCTAssertEqual(options["sni"] as? String, "origin.test")
+        XCTAssertEqual(options["skip-cert-verify"] as? Bool, false)
+        XCTAssertTrue(options["udp"] == nil && options["network"] == nil)
+
+        let defaultPort = try XCTUnwrap(ProfileImporter.read("hy2://fixture@origin.test").profiles.first)
+        XCTAssertEqual(try fields(defaultPort)["port"] as? Int, 443)
+        let gecko = try XCTUnwrap(ProfileImporter.read("hy2://fixture@origin.test:8443?obfs=gecko&obfs-password=fixture").profiles.first)
+        XCTAssertEqual(try fields(gecko)["port"] as? Int, 8443)
+        XCTAssertEqual(try fields(gecko)["obfs"] as? String, "gecko")
+
+        let fingerprint = Array(repeating: "AB", count: 32).joined(separator: ":")
+        let pinned = "{proxies: [{type: hysteria2, server: origin.test, port: 443, password: fixture, skip-cert-verify: true, fingerprint: '\(fingerprint)'}]}"
+        let pinFields = try fields(XCTUnwrap(ProfileImporter.read(pinned).profiles.first))
+        XCTAssertEqual(pinFields["fingerprint"] as? String, String(repeating: "ab", count: 32))
+        XCTAssertEqual(pinFields["skip-cert-verify"] as? Bool, false)
+    }
+
+    func testHysteria2RejectsUnsupportedOrAmbiguousInput() {
+        let base = "hy2://fixture@origin.test:443?"
+        let invalid: [(String, ImportError)] = [
+            (base + "insecure=1", .unsupportedOption),
+            (base + "pinSHA256=" + String(repeating: "ab", count: 32), .unsupportedOption),
+            (base + "ech=fixture", .unsupportedOption),
+            (base + "sni=bad/name", .unsupportedOption),
+            (base + "sni=a.test&s%6Ei=b.test", .malformed),
+            (base + "obfs=salamander", .unsupportedOption),
+            (base + "obfs-password=fixture", .unsupportedOption),
+            (base + "obfs=gecko&obfs-password=%00", .unsupportedOption),
+            (base + "obfs=other&obfs-password=fixture", .unsupportedOption),
+            ("hy2://fixture@origin.test:443,5000-5100", .unsupportedOption),
+            ("hy2://fixture@origin.test:65536", .invalidAccount),
+            ("hy2://fixture@origin.test:", .invalidAccount),
+            ("hy2://fixture@::1", .malformed),
+            ("hy2://fixture@[:::]", .invalidAccount),
+            ("hy2://fixture%ZZ@origin.test", .malformed),
+        ]
+        for (input, error) in invalid {
+            let result = ProfileImporter.read(input)
+            XCTAssertTrue(result.profiles.isEmpty)
+            XCTAssertEqual(result.issues, [error: 1])
+        }
+        for unsupported in ["skip-cert-verify: true", "fingerprint: 'ab:abcd'", "certificate: '/tmp/unknown'", "udp: false", "ports: '443-444'", "realm-opts: {}"] {
+            let result = ProfileImporter.read("{proxies: [{type: hysteria2, server: origin.test, port: 443, password: fixture, \(unsupported)}]}")
+            XCTAssertTrue(result.profiles.isEmpty)
+            XCTAssertEqual(result.issues, [.unsupportedOption: 1])
+        }
+    }
+
     func testFullConfigurationImportsOutboundButNotSystemInputs() throws {
         let raw = """
         {"tun":{"enable":true},"inbounds":[{"listen":"0.0.0.0","port":1080}],"outbounds":[{"protocol":"freedom"},{"tag":"User-set name","protocol":"vless","settings":{"vnext":[{"address":"127.0.0.1","port":8080,"users":[{"id":"\(uuid)","encryption":"none"}]}]}}]}
@@ -221,7 +301,7 @@ import Darwin
         let body = """
         {"allow-lan":true,"mixed-port":7000,"external-controller":"0.0.0.0:7001","proxy-providers":{"outside":{"type":"http","url":"https://example.test/ignored"}},"rules":["MATCH,DIRECT"],"proxies":[
           {"name":"Clash Node","type":"vless","server":"127.0.0.1","port":443,"uuid":"\(uuid)","network":"ws","tls":true,"udp":false,"servername":"example.test","ws-opts":{"path":"/clay","headers":{"Host":"example.test"}}},
-          {"name":"Other type","type":"hysteria2","server":"127.0.0.1","port":443},
+          {"name":"Other type","type":"socks5","server":"127.0.0.1","port":443},
           {"name":"Chained node","type":"vless","server":"127.0.0.1","port":443,"uuid":"\(uuid)","dialer-proxy":"outside"}
         ]}
         """
@@ -268,7 +348,7 @@ import Darwin
           - { <<: *sample, name: merged }
           - {name: !custom Tag, type: vless, server: 127.0.0.1, port: 443, uuid: \(uuid)}
           - {name: duplicate, type: vless, server: 127.0.0.1, port: 443, port: 1234, uuid: \(uuid)}
-          - {name: other protocol, type: hysteria2, server: 127.0.0.1, port: 443}
+          - {name: other protocol, type: socks5, server: 127.0.0.1, port: 443}
           - {name: Reality, type: vless, server: 127.0.0.1, port: 443, uuid: \(uuid), tls: true, servername: example.test, client-fingerprint: chrome, reality-opts: { public-key: \(key), short-id: 001230 }}
         rules:
           - MATCH,DIRECT

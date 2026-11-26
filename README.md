@@ -60,7 +60,9 @@ IP-CIDR,10.0.0.0/8,DIRECT
 - **订阅**可以保存多份，手动刷新、切换使用或移除。刷新失败保留上次成功的缓存；运行中变更订阅后，当前会话使用原列表，重新启动代理时应用新列表。新版会将旧 JSON 迁移成加密缓存，并将密钥单独保存到本机私有目录。请勿分享整个 CLAY 数据目录或备份；可以读取密钥的本机账户进程仍能解密。迁移后不要在旧版中编辑同一份订阅。订阅只跟随同源重定向；跨站跳转请直接填写可信的最终地址。手动导入只保留到本次应用退出。
 - **诊断**可探测当前或全部节点，比较两次批量测试，复制不含节点名、服务商地址、UUID、订阅链接和原始配置的诊断报告。探测会通过节点请求 gstatic.com 的 204 地址。
 
-**兼容范围**：VMess/VLESS 分享链接、Base64 链接列表、V2Ray/Xray JSON 出站及 Clash/Mihomo YAML 或 JSON 的内联 `proxies`。新版还支持 Shadowsocks 的 SIP002 链接和常见 AEAD 密码套件，以及 TCP/TLS Trojan 链接；同样可从 Clash 的内联节点导入，不启用插件或跳过 Trojan 证书验证。每次下载上限 2 MiB，每份最多导入 100 个兼容节点；本机回环测试允许 HTTP。导入只读取兼容节点，不执行配置里的远程提供器、策略组、规则、DNS、TUN 或入站。
+**兼容范围**：VMess/VLESS 分享链接、Base64 链接列表、V2Ray/Xray JSON 出站、Shadowsocks SIP002（常见 AEAD 密码套件）、TCP/TLS Trojan、Hysteria2（`hysteria2://` 或 `hy2://`），以及 Clash/Mihomo YAML 或 JSON 的内联 `proxies`。每次下载上限 2 MiB，每份最多导入 100 个兼容节点；本机回环测试允许 HTTP。CLAY 只导入兼容的节点，不执行配置里的提供器、策略组、规则、DNS、TUN 或入站。
+
+开发版的 Hysteria2 支持固定端口、SNI、Salamander 和 Gecko。分享链接省略端口时使用 443，并要求通过 TLS 证书验证；带 `insecure=1`、`pinSHA256`、端口跳跃或 Realms 的链接不导入。Clash/Mihomo 内联节点可以显式提供 SHA-256 `fingerprint`，此时使用 Mihomo 自身的证书固定机制。Shadowsocks 插件和跳过 Trojan 证书验证的设置不导入。
 
 ## 源码与验证
 

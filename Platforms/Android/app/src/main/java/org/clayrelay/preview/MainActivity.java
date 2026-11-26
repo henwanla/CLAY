@@ -205,6 +205,7 @@ public final class MainActivity extends Activity {
             case "vmess": return "VMess";
             case "ss": return "Shadowsocks";
             case "trojan": return "Trojan";
+            case "hysteria2": return "Hysteria2";
             default: return "—";
         }
     }
@@ -214,6 +215,7 @@ public final class MainActivity extends Activity {
             case "tcp": return "TCP";
             case "ws": return "WebSocket";
             case "grpc": return "gRPC";
+            case "quic": return "QUIC";
             default: return "—";
         }
     }

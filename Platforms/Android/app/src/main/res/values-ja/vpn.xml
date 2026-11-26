@@ -3,7 +3,7 @@
     <string name="vpn_title">CLAY VPN プレビュー</string>
     <string name="vpn_eyebrow">Android VPN プレビュー</string>
     <string name="vpn_intro_top">ノードを貼り付けてルールを確認し、必要に応じて IPv4 トンネルを開始します。</string>
-    <string name="vpn_intro">接続中は IPv4 をトンネルに通し、IPv6 を遮断します。信頼できる IPv4 DNS を指定してください。グローバルモードの DNS には UDP 対応ノードが必要です。ノードの名前解決にシステム DNS を使う場合があります。VPN の停止または切断後は通常の通信に戻ります。</string>
+    <string name="vpn_intro">接続中は IPv4 をトンネルに通し、IPv6 を遮断します。信頼できる IPv4 DNS を指定してください。グローバルモードの DNS には UDP 対応ノードが必要です。ノードの名前解決にシステム DNS を使う場合があります。VPN の停止または切断後は通常の通信に戻ります。 ドメインルールがある場合、ルールモードは対応ポートで確認できる HTTP または TLS のドメイン名を使います。</string>
     <string name="vpn_dns">信頼できる IPv4 DNS サーバー</string>
     <string name="vpn_start">VPN を開始</string>
     <string name="vpn_stop">VPN を停止</string>

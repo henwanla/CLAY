@@ -3,7 +3,7 @@
     <string name="vpn_title">CLAY VPN 预览</string>
     <string name="vpn_eyebrow">Android VPN 预览</string>
     <string name="vpn_intro_top">粘贴节点、测试规则，再按需启动 IPv4 隧道。</string>
-    <string name="vpn_intro">连接期间，此预览版接管 IPv4 并阻止 IPv6。请填写你信任的 IPv4 DNS。全局模式下，DNS 需要节点支持 UDP。连接域名节点可能需要系统 DNS。停止或失去 VPN 连接后，系统会恢复普通网络。</string>
+    <string name="vpn_intro">连接期间，此预览版接管 IPv4 并阻止 IPv6。请填写你信任的 IPv4 DNS。全局模式下，DNS 需要节点支持 UDP。连接域名节点可能需要系统 DNS。停止或失去 VPN 连接后，系统会恢复普通网络。添加域名规则后，规则模式会使用支持端口上的可见 HTTP 或 TLS 域名。</string>
     <string name="vpn_dns">可信的 IPv4 DNS 服务器</string>
     <string name="vpn_start">启动 VPN</string>
     <string name="vpn_stop">停止 VPN</string>

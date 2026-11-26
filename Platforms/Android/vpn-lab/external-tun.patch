@@ -7,3 +7,9 @@
 +	if tunOptions.FileDescriptor > 0 && !tunOptions.AutoRoute {
 +		return nil
 +	}
+--- a/tunnel/tunnel.go
++++ b/tunnel/tunnel.go
+@@ -527 +527,2 @@
+-	if sniffingEnable && snifferDispatcher.Enable() {
++	// CLAY only needs HTTP/TLS names when routing device traffic by rules.
++	if mode == Rule && metadata.Type == C.TUN && sniffingEnable && snifferDispatcher.Enable() {

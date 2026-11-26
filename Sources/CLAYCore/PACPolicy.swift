@@ -73,6 +73,14 @@ public struct PACRule: Identifiable, Equatable, Codable, Sendable {
 
     public var exportLine: String { "\(kind.rawValue),\(value),\(decision.rawValue)" }
 
+    public var requiresHostname: Bool {
+        switch kind {
+        case .domain: return PACTarget(value)?.isDomain == true
+        case .domainSuffix, .domainKeyword: return true
+        case .ipCIDR: return false
+        }
+    }
+
     fileprivate func matches(_ target: PACTarget) -> Bool {
         switch kind {
         case .domain: return target.host == value

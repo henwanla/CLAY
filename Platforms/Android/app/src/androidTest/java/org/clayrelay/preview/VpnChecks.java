@@ -12,10 +12,12 @@ import android.net.VpnService;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.service.notification.StatusBarNotification;
+import android.util.Base64;
 import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.Spinner;
 import android.widget.TextView;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.InputStream;
@@ -28,7 +30,15 @@ import java.net.Proxy;
 import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.security.KeyStore;
+import java.security.cert.CertificateFactory;
 import java.util.Arrays;
+import java.util.Collections;
+import javax.net.ssl.SNIHostName;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLParameters;
+import javax.net.ssl.SSLSocket;
+import javax.net.ssl.TrustManagerFactory;
 
 final class VpnChecks {
     // Default QEMU IPv6 loopback alias, paired with a host fixture bound only to ::1.
@@ -36,7 +46,7 @@ final class VpnChecks {
 
     static String run(Instrumentation test, Activity activity, Bundle fixture) throws Exception {
         int first = port(fixture, "firstPort"), second = port(fixture, "secondPort"), direct = port(fixture, "directPort");
-        int ipv6 = port(fixture, "ipv6Port");
+        int ipv6 = port(fixture, "ipv6Port"), tls = port(fixture, "tlsPort");
         String proof = fixture.getString("proof", "");
         require(proof.matches("[a-f0-9]{24}"), "synthetic proof");
         String fault = fixture.getString("vpnFault", "");
@@ -55,7 +65,7 @@ final class VpnChecks {
         try {
             if (fault.isEmpty()) require(fetch(IPV6_FIXTURE, ipv6).endsWith(proof + "-V6"),
                     "ordinary IPv6 reachable before starting tunnel");
-            start(test, activity, first, second);
+            start(test, activity, first, second, proof);
             await(test, R.string.vpn_ready, 1, "global", "foreground start");
             require(fetch("198.51.100.42", 18080).endsWith(proof + "-A"), "system TCP uses first node");
             if (!fault.isEmpty()) return verifyFailure(test, activity, fault, direct, proof);
@@ -75,6 +85,12 @@ final class VpnChecks {
             await(test, R.string.vpn_ready, 2, "rule", "confirmed rule mode");
             require(fetch("10.0.2.2", direct).endsWith(proof + "-D"), "rule mode honors IP bypass");
             require(fetch("198.51.100.42", 18080).endsWith(proof + "-B"), "rule fallback uses node");
+            String proxyName = "proxy-" + proof + ".test", directName = "direct-" + proof + ".test";
+            require(fetchNamed(proxyName, direct).endsWith(proof + "-B"), "HTTP domain rule selects the proxy for a shared IPv4 address");
+            require(fetchNamed(directName, direct).endsWith(proof + "-D"), "HTTP domain rule can keep the same IPv4 address direct");
+            SSLContext tlsContext = fixtureTLS(fixture.getString("tlsCert", ""));
+            require(fetchTLS(tlsContext, proxyName, tls).endsWith(proof + "-B"), "TLS SNI selects the proxy while retaining the IPv4 destination");
+            require(fetchTLS(tlsContext, directName, tls).endsWith(proof + "-TLS-D"), "TLS SNI can keep the same IPv4 destination direct");
             select(test, activity, 2, 2);
             await(test, R.string.vpn_ready, 2, "direct", "confirmed direct mode");
             require(fetch("10.0.2.2", direct).endsWith(proof + "-D"), "direct mode routes to origin");
@@ -97,7 +113,7 @@ final class VpnChecks {
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             Activity returned = test.startActivitySync(reopen);
             try {
-                start(test, returned, first, second);
+                start(test, returned, first, second, proof);
                 await(test, R.string.vpn_ready, 1, "global", "restart within same process");
                 require(fetch("198.51.100.42", 18080).endsWith(proof + "-A"), "restarted tunnel forwards traffic");
                 test.runOnMainSync(() -> require(!ClayVpnService.stopFromTile(oldTile[0]),
@@ -120,7 +136,7 @@ final class VpnChecks {
 
     private static void verifyCancel(Instrumentation test, Activity activity, int first, int second) throws Exception {
         require(VpnService.prepare(activity) != null, "fixture must have no VPN authorization");
-        start(test, activity, first, second);
+        start(test, activity, first, second, "");
         // Cancel the actual system-owned consent request using its result contract.
         test.runOnMainSync(() -> activity.finishActivity(VpnPanel.CONSENT));
         for (int attempt = 0; attempt < 100; attempt++) {
@@ -178,12 +194,14 @@ final class VpnChecks {
         require(activity.getSystemService(NotificationManager.class).getActiveNotifications().length == 0, "foreground notification removed");
     }
 
-    private static void start(Instrumentation test, Activity activity, int first, int second) {
+    private static void start(Instrumentation test, Activity activity, int first, int second, String proof) {
         test.runOnMainSync(() -> {
             String prefix = "vless://56dc6c3e-8793-4d37-a363-f9f19db29c6d@10.0.2.2:";
             String options = "?encryption=none&security=none&type=tcp#Fixture-";
             edit(activity, MainActivity.ID_NODE_INPUT).setText(prefix + first + options + "A\n" + prefix + second + options + "B");
-            edit(activity, MainActivity.ID_PAC_RULES).setText("IP-CIDR,10.0.2.2/32,DIRECT");
+            edit(activity, MainActivity.ID_PAC_RULES).setText((proof.isEmpty() ? "" :
+                    "DOMAIN,proxy-" + proof + ".test,PROXY\nDOMAIN-SUFFIX,direct-" + proof + ".test,DIRECT\n") +
+                    "IP-CIDR,10.0.2.2/32,DIRECT");
             edit(activity, VpnPanel.ID_DNS).setText("198.51.100.53");
             ((CompoundButton) activity.findViewById(MainActivity.ID_PAC_BYPASS)).setChecked(false);
             ((CompoundButton) activity.findViewById(MainActivity.ID_PAC_DIRECT)).setChecked(false);
@@ -229,14 +247,62 @@ final class VpnChecks {
     }
 
     private static String fetch(String host, int port) throws Exception {
-        try (Socket socket = new Socket(Proxy.NO_PROXY)) {
-            socket.connect(new InetSocketAddress(host, port), 2500);
-            socket.setSoTimeout(2500);
-            socket.getOutputStream().write("GET /clay-vpn HTTP/1.0\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
-            try (InputStream in = socket.getInputStream(); ByteArrayOutputStream reply = new ByteArrayOutputStream()) {
-                for (int ch; reply.size() < 2000 && (ch = in.read()) != -1;) reply.write(ch);
-                return new String(reply.toByteArray(), StandardCharsets.US_ASCII);
+        return fetch(new InetSocketAddress(host, port), "GET /clay-vpn HTTP/1.0\r\n\r\n");
+    }
+
+    private static String fetchNamed(String host, int port) throws Exception {
+        return fetch(namedEndpoint(host, port), "GET /clay-vpn HTTP/1.1\r\nHost: " + host + ":" + port + "\r\nConnection: close\r\n\r\n");
+    }
+
+    private static InetSocketAddress namedEndpoint(String host, int port) {
+        InetSocketAddress endpoint = new InetSocketAddress(host, port); // Android's resolver, via the active VPN.
+        require(!endpoint.isUnresolved() && endpoint.getAddress().getHostAddress().equals("10.0.2.2"),
+                "Android DNS returns the shared synthetic IPv4 address");
+        return endpoint;
+    }
+
+    private static SSLContext fixtureTLS(String encodedCertificate) throws Exception {
+        KeyStore store = KeyStore.getInstance(KeyStore.getDefaultType());
+        store.load(null, null);
+        try (InputStream pem = new ByteArrayInputStream(Base64.decode(encodedCertificate, Base64.DEFAULT))) {
+            store.setCertificateEntry("fixture", CertificateFactory.getInstance("X.509").generateCertificate(pem));
+        }
+        TrustManagerFactory trust = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+        trust.init(store);
+        SSLContext context = SSLContext.getInstance("TLS");
+        context.init(null, trust.getTrustManagers(), null);
+        return context;
+    }
+
+    private static String fetchTLS(SSLContext context, String host, int port) throws Exception {
+        try (Socket plain = new Socket(Proxy.NO_PROXY)) {
+            plain.connect(namedEndpoint(host, port), 2500);
+            try (SSLSocket tls = (SSLSocket) context.getSocketFactory().createSocket(plain, host, port, true)) {
+                tls.setSoTimeout(2500);
+                SSLParameters options = tls.getSSLParameters();
+                options.setEndpointIdentificationAlgorithm("HTTPS");
+                options.setServerNames(Collections.singletonList(new SNIHostName(host)));
+                tls.setSSLParameters(options);
+                tls.startHandshake();
+                // No HTTP Host header here: only the TLS ClientHello carries the name.
+                return exchange(tls, "GET /clay-vpn HTTP/1.0\r\n\r\n");
             }
+        }
+    }
+
+    private static String fetch(InetSocketAddress endpoint, String request) throws Exception {
+        try (Socket socket = new Socket(Proxy.NO_PROXY)) {
+            socket.connect(endpoint, 2500);
+            socket.setSoTimeout(2500);
+            return exchange(socket, request);
+        }
+    }
+
+    private static String exchange(Socket socket, String request) throws Exception {
+        socket.getOutputStream().write(request.getBytes(StandardCharsets.US_ASCII));
+        try (InputStream in = socket.getInputStream(); ByteArrayOutputStream reply = new ByteArrayOutputStream()) {
+            for (int ch; reply.size() < 2000 && (ch = in.read()) != -1;) reply.write(ch);
+            return new String(reply.toByteArray(), StandardCharsets.US_ASCII);
         }
     }
 

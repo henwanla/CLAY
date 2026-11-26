@@ -2,7 +2,7 @@
 
 这个实验验证 Android 如何把系统 TUN 交给 Mihomo，并用 `VpnService.protect()` 避免内核的出站套接字绕回自己的 TUN。实验包没有正式界面，也不会进入正常的离线或 Relay APK 构建。
 
-官方 Android Mihomo v1.19.34 能识别 `tun.file-descriptor`，但用普通应用身份运行时，初始化会试图读取 `/data/system/packages.xml`，因权限被拒而放弃启动 TUN。随附的补丁只在传入系统已打开的描述符、且关闭内核自动路由时跳过包名表读取。应用用私有 Unix 域套接字传递描述符，启动器核对对端 UID、父进程 PID，并在父进程退出时终止。
+官方 Android Mihomo v1.19.34 能识别 `tun.file-descriptor`，但用普通应用身份运行时，初始化会试图读取 `/data/system/packages.xml`，因权限被拒而放弃启动 TUN。随附补丁在传入系统已打开的描述符、且关闭内核自动路由时跳过包名表读取，并把应用预览版的 HTTP/TLS 域名识别限定在 TUN 的规则模式。应用用私有 Unix 域套接字传递描述符，启动器核对对端 UID、父进程 PID，并在父进程退出时终止。
 
 启动器保留已验证对端的 Unix 通道。测试内核通过 `DefaultSocketHook` 在拨号前向服务发送套接字副本，服务调用系统保护接口后才回复。拒绝、超时、断开或无效回复均令本次拨号失败。测试覆盖的是接入该 hook 的 TCP 和 UDP DNS 路径，不能代替所有协议的审核。
 

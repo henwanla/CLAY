@@ -1,9 +1,12 @@
 """Loopback-only TCP and DNS responses for smoke-vpn.sh; nothing is forwarded."""
+from base64 import b64encode
 from pathlib import Path
 from secrets import token_hex
 from socket import AF_INET6
 from socketserver import StreamRequestHandler, ThreadingTCPServer
+from ssl import PROTOCOL_TLS_SERVER, SSLContext
 from struct import pack, unpack
+from subprocess import DEVNULL, run
 from threading import Event, Thread
 from uuid import UUID
 
@@ -13,17 +16,45 @@ uuid = UUID("56dc6c3e-8793-4d37-a363-f9f19db29c6d").bytes
 dns_target = bytes.fromhex("02003501c6336435")
 label = f"clay-{proof}".encode("ascii")
 question = bytes([len(label)]) + label + b"\x04test\x00\x00\x01\x00\x01"
+labels = (f"proxy-{proof}", f"direct-{proof}")
+names = {bytes([len(name)]) + name.encode("ascii") + b"\x04test\x00" for name in labels}
 
+
+def tls_context():
+    # Ephemeral certificate for only the two synthetic names. The Android test
+    # trusts this certificate in its own SSLContext, never at the system level.
+    Path("tls.cnf").write_text("[req]\ndistinguished_name=dn\nx509_extensions=ext\nprompt=no\n"
+                              "[dn]\nCN=CLAY loopback fixture\n[ext]\nsubjectAltName=" +
+                              ",".join(f"DNS:{name}.test" for name in labels) + "\n")
+    run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1",
+         "-nodes", "-days", "1", "-config", "tls.cnf", "-out", "tls.pem", "-keyout", "tls-key.pem"],
+        stdout=DEVNULL, stderr=DEVNULL, check=True)
+    context = SSLContext(PROTOCOL_TLS_SERVER)
+    context.load_cert_chain("tls.pem", "tls-key.pem")
+    Path("tls-key.pem").unlink()
+    return context, b64encode(Path("tls.pem").read_bytes()).decode("ascii")
 
 
 class Request(StreamRequestHandler):
-    def read_request(self):
-        self.connection.settimeout(3)
-        line = self.rfile.readline(512).strip()
+    def reply(self, stream, connection):
+        line = stream.readline(512).strip()
         for _ in range(30):
-            if self.rfile.readline(4096) == b"\r\n":
-                return line
-        return None
+            if stream.readline(4096) == b"\r\n":
+                if line in (b"GET /clay-vpn HTTP/1.0", b"GET /clay-vpn HTTP/1.1"):
+                    body = f"{proof}-{self.server.kind}".encode("ascii")
+                    connection.sendall(f"HTTP/1.0 200 OK\r\nContent-Length: {len(body)}\r\n\r\n".encode("ascii") + body)
+                return
+
+    def read_header(self, size):
+        # Do not buffer past the VLESS header; a ClientHello can follow it in
+        # the same TCP segment and must remain available to the SSL socket.
+        result = b""
+        while len(result) < size:
+            chunk = self.connection.recv(size - len(result))
+            if not chunk:
+                break
+            result += chunk
+        return result
 
     def respond_dns(self):
         size = self.rfile.read(2)
@@ -36,35 +67,61 @@ class Request(StreamRequestHandler):
         if header[:12] != b"\x00\x00\x01\x01" + dns_target:
             return
         size = self.rfile.read(2)
-        if size != pack("!H", 12 + len(question)):
+        if len(size) != 2:
             return
-        query = self.rfile.read(12 + len(question))
-        if query[2:12] != pack("!HHHHH", 0x0100, 1, 0, 0, 0) or query[12:] != question:
+        length, = unpack("!H", size)
+        if not 16 <= length <= 512:
             return
-        octet = 73 if self.server.kind == "A" else 74
-        answer = pack("!HHHIHBBBB", 0xc00c, 1, 1, 0, 4, 203, 0, 113, octet)
-        dns = query[:2] + pack("!HHHHH", 0x8180, 1, 1, 0, 0) + question + answer
+        query = self.rfile.read(length)
+        if query[4:10] != pack("!HHH", 1, 0, 0):
+            return
+        qname = next((name for name in names if query[12:].startswith(name)), None)
+        answer = b""
+        if query[12:] == question:
+            query_question = question
+            address = (203, 0, 113, 73 if self.server.kind == "A" else 74)
+        elif qname is not None:
+            query_question = query[12:16 + len(qname)]
+            qtype = query_question[len(qname):]
+            if qtype == b"\x00\x01\x00\x01":
+                address = (10, 0, 2, 2)
+            elif qtype == b"\x00\x1c\x00\x01":
+                address = None  # IPv6 NODATA for the IPv4-only fixture.
+            else:
+                return
+        else:
+            return
+        if address is not None:
+            answer = pack("!HHHIHBBBB", 0xc00c, 1, 1, 0, 4, *address)
+        dns = query[:2] + pack("!HHHHH", 0x8180, 1, bool(answer), 0, 0) + query_question + answer
         header = b"\x00\x00\x02\x01" + dns_target
         self.wfile.write(b"\x00\x00" + pack("!H", len(header)) + header + pack("!H", len(dns)) + dns)
 
     def handle(self):
         try:
+            self.connection.settimeout(4)
+            tls = self.server.kind == "TLS-D"
             if self.server.kind in ("A", "B"):
-                # VLESS v0, no addons. Accept only the two fixed proof destinations.
+                # VLESS v0, no addons. Accept only original IP/port pairs, never names.
                 prefix = b"\x00" + uuid + b"\x00"
-                if self.rfile.read(len(prefix)) != prefix:
+                if self.read_header(len(prefix)) != prefix:
                     return
-                command = self.rfile.read(1)
+                command = self.read_header(1)
                 if command == b"\x03":
                     self.respond_dns()
                     return
-                if command != b"\x01" or self.rfile.read(7) != bytes.fromhex("46a001c633642a"):
+                if command != b"\x01":
+                    return
+                target = self.read_header(7)
+                tls = target == self.server.tls_target
+                if not tls and target not in (bytes.fromhex("46a001c633642a"), self.server.http_target):
                     return
                 self.wfile.write(b"\x00\x00")
-            request = self.read_request()
-            if request == b"GET /clay-vpn HTTP/1.0":
-                body = f"{proof}-{self.server.kind}".encode("ascii")
-                self.wfile.write(f"HTTP/1.0 200 OK\r\nContent-Length: {len(body)}\r\n\r\n".encode("ascii") + body)
+            if tls:
+                with self.server.tls_context.wrap_socket(self.connection, server_side=True) as sock, sock.makefile("rb") as stream:
+                    self.reply(stream, sock)
+            else:
+                self.reply(self.rfile, self.connection)
         except OSError:
             pass
 
@@ -73,12 +130,28 @@ class LocalIPv6Server(ThreadingTCPServer):
     address_family = AF_INET6
 
 
+def web_server(ports):
+    for port in ports:
+        try:
+            return ThreadingTCPServer(("127.0.0.1", port), Request)
+        except OSError:
+            continue
+    raise RuntimeError("could not allocate a local web fixture port")
+
+
 with ThreadingTCPServer(("127.0.0.1", 0), Request) as a, \
         ThreadingTCPServer(("127.0.0.1", 0), Request) as b, \
-        ThreadingTCPServer(("127.0.0.1", 0), Request) as d, \
-        LocalIPv6Server(("::1", 0), Request) as ipv6:
-    a.kind, b.kind, d.kind, ipv6.kind = "A", "B", "D", "V6"
-    for server in (a, b, d, ipv6):
+        web_server((8000, 8080, 8081, 8888)) as d, \
+        LocalIPv6Server(("::1", 0), Request) as ipv6, \
+        web_server((8443, 9443)) as t:
+    a.kind, b.kind, d.kind, ipv6.kind, t.kind = "A", "B", "D", "V6", "TLS-D"
+    a.http_target = b.http_target = pack("!HBBBBB", d.server_address[1], 1, 10, 0, 2, 2)
+    a.tls_target = b.tls_target = pack("!HBBBBB", t.server_address[1], 1, 10, 0, 2, 2)
+    context, cert = tls_context()
+    a.tls_context = b.tls_context = t.tls_context = context
+    servers = (a, b, d, ipv6, t)
+    for server in servers:
         Thread(target=server.serve_forever, daemon=True).start()
-    Path("fixture-result").write_text(" ".join(str(s.server_address[1]) for s in (a, b, d, ipv6)) + f" {proof}\n")
+    Path("fixture-result.tmp").write_text(" ".join(str(s.server_address[1]) for s in servers) + f" {proof} {cert}\n")
+    Path("fixture-result.tmp").rename("fixture-result")
     Event().wait()

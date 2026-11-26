@@ -33,8 +33,12 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 (cd "$work" && exec python3 "$base/app/src/androidTest/vpn-fixture.py") &
 fixture=$!
-for _ in {1..30}; do [[ ! -s "$work/fixture-result" ]] || break; sleep 0.1; done
-read -r first second direct ipv6 proof < "$work/fixture-result"
+for _ in {1..100}; do
+  if [[ -s "$work/fixture-result" ]] || ! kill -0 "$fixture" 2>/dev/null; then break; fi
+  sleep 0.1
+done
+[[ -s "$work/fixture-result" ]] || { printf 'The loopback test fixtures did not start.\n' >&2; exit 1; }
+read -r first second direct ipv6 tls proof cert < "$work/fixture-result"
 "${adb[@]}" install -g "$2"
 installed=true
 "${adb[@]}" install -t "$3"
@@ -45,7 +49,8 @@ revoker_installed=true
 instrument() {
   # Every payload is synthetic; the tool never accepts arbitrary profiles or destinations.
   "${adb[@]}" shell am instrument -w -r -e firstPort "$first" -e secondPort "$second" \
-    -e directPort "$direct" -e ipv6Port "$ipv6" -e proof "$proof" "$@" "$app.tests/org.clayrelay.preview.PreviewInstrumentation"
+    -e directPort "$direct" -e ipv6Port "$ipv6" -e tlsPort "$tls" -e proof "$proof" -e tlsCert "$cert" \
+    "$@" "$app.tests/org.clayrelay.preview.PreviewInstrumentation"
 }
 check_result() {
   local report current

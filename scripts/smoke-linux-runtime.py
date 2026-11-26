@@ -84,7 +84,7 @@ if MODE == "control":
                 assert value["mode"] != state["mode"], "no-op wrote to controller"
                 state.update(pending="mode", readback=False)
                 if value["mode"] == "direct":
-                    state["failures"] = 2
+                    state["failures"] = DIRECT_FAILURES
                 if value["mode"] != "rule":  # Acknowledge rule without applying it.
                     state["mode"] = value["mode"]
                 self.send(204)
@@ -155,7 +155,7 @@ def run_checks(binary):
 
         def command(mode, *flags, index="2", digest=None):
             report_file.unlink(missing_ok=True)
-            source = f'MODE = {mode!r}\nREPORT = {str(report_file)!r}\n'
+            source = f'MODE = {mode!r}\nREPORT = {str(report_file)!r}\nDIRECT_FAILURES = 2\n'
             script = ENGINE.replace("import json\n", source + "import json\n", 1)
             engine.write_text(script)
             engine.chmod(0o700)

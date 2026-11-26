@@ -266,10 +266,14 @@ def window_checks(binary, directory, profile, gnome=False, plasma=False):
     root = Path(__file__).resolve().parents[2]
     template = runpy.run_path(str(root / "scripts" / "smoke-linux-runtime.py"))["ENGINE"]
     engine, report, rules = (directory / name for name in ("mihomo", "engine-report", "rules.txt"))
-    engine.write_text(template.replace("import json\n", f"MODE = 'control'\nREPORT = {str(report)!r}\nimport json\n", 1),
-                      encoding="utf-8")
-    engine.chmod(0o700)
-    fingerprint = hashlib.sha256(engine.read_bytes()).hexdigest()
+
+    def prepare_engine(direct_failures):
+        setup = f"MODE = 'control'\nREPORT = {str(report)!r}\nDIRECT_FAILURES = {direct_failures}\n"
+        engine.write_text(template.replace("import json\n", setup + "import json\n", 1), encoding="utf-8")
+        engine.chmod(0o700)
+        return hashlib.sha256(engine.read_bytes()).hexdigest()
+
+    fingerprint = prepare_engine(direct_failures=2)
     rules.write_text("DOMAIN-SUFFIX,example.test,DIRECT\n", encoding="utf-8")
 
     host = TrayHost()
@@ -453,6 +457,8 @@ def window_checks(binary, directory, profile, gnome=False, plasma=False):
         # what route we selected in the previous session. Require a new report.
         window.nodes.set_active_id("2")
         window.modes.set_active_id("global")
+        # This fresh session exercises a switch with no injected failures.
+        window.fingerprint.set_text(prepare_engine(direct_failures=0))
         report.unlink()
         previous_pid = pid
         click(window.system if gnome or plasma else window.start)

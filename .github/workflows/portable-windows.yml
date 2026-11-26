@@ -1,4 +1,4 @@
-name: Windows portable CLI
+name: Windows CLI and desktop
 
 on:
   push:
@@ -88,3 +88,14 @@ jobs:
           cl.exe /nologo /O2 /MT /W4 "/Fe:$fixture" "/Fo:$object" Tests/WindowsRuntimeFixture/fixture.c /link Ws2_32.lib
           if ($LASTEXITCODE -ne 0) { throw "Fixture compilation failed: $LASTEXITCODE" }
           python scripts/smoke-windows-runtime.py $binary $fixture
+      - name: Build the desktop app and verify its session bridge
+        run: |
+          $buildDir = swift build -c release --show-bin-path
+          if ($LASTEXITCODE -ne 0) { throw "Swift binary path lookup failed: $LASTEXITCODE" }
+          $binary = Join-Path $buildDir 'clay-portable.exe'
+          $fixture = Join-Path $env:RUNNER_TEMP 'clay-windows-fixture.exe'
+          $desktop = Join-Path $env:RUNNER_TEMP 'clay-desktop-build'
+          dotnet build Platforms/Windows/Desktop/Clay.Windows.csproj -c Release -o $desktop
+          if ($LASTEXITCODE -ne 0) { throw "Desktop build failed: $LASTEXITCODE" }
+          dotnet (Join-Path $desktop 'Clay.Windows.dll') --smoke $binary $fixture
+          if ($LASTEXITCODE -ne 0) { throw "Desktop session bridge failed: $LASTEXITCODE" }

@@ -1,4 +1,26 @@
-# CLAY Portable for Windows / Windows 便携命令行
+# CLAY for Windows / Windows 桌面与命令行
+
+## Desktop preview / 桌面预览
+
+On x64 Windows, build the portable CLI with Swift and the window with the .NET 10 SDK. Run the following in PowerShell from the repository root. The desktop app can also use `clay-portable.exe` copied next to it; the Swift and .NET Desktop runtimes must be available on the host.
+
+在 Windows x64 上先用 Swift 编译便携 CLI，再用 .NET 10 SDK 编译桌面端。在仓库根目录用 PowerShell 执行如下命令。也可以把 `clay-portable.exe` 放在桌面 App 旁边；系统需要可用的 Swift 和 .NET Desktop 运行时。
+
+```powershell
+swift build -c release --product clay-portable
+$bin = Join-Path (swift build -c release --show-bin-path) 'clay-portable.exe'
+dotnet run -c Release --project Platforms/Windows/Desktop -- --cli $bin
+```
+
+Load a local profile, choose the extracted Mihomo executable, enter its verified SHA-256, and choose a node and mode. An optional rules file is used in Rule mode. Start, then enter the displayed loopback address in the client app. Closing the window keeps the session in the system tray. Open the tray menu to switch nodes or mode, stop the proxy, or quit CLAY. The app uses the Windows display language for Simplified Chinese, English, and Japanese.
+
+加载本地节点文件，选择已解压的 Mihomo，填写核验过的 SHA-256，再选择节点、模式，按需导入规则文件。启动后在需要代理的应用里手动填写回环地址。关闭窗口后会话留在 Windows 托盘；托盘菜单可切节点、切模式、停止代理或退出 CLAY。界面随系统语言显示简体中文、英文或日文。
+
+This preview does not configure the Windows system proxy, register for login startup, or download subscriptions. It does not save profile paths, node credentials, or traffic history. CI builds the native Windows app and runs its redirected session bridge using a synthetic local controller. Visual layout and Explorer tray behavior need a physical Windows desktop check.
+
+桌面预览不会设置系统代理、注册开机启动或下载在线订阅，不保存配置路径、节点凭据和流量历史。CI 构建原生 Windows App，用合成回环控制器验收窗口所用的会话桥接；Explorer 托盘外观和实际桌面交互需另行验收。
+
+## Portable CLI / 便携命令行
 
 Windows 10/11 runtime preview. Build with Swift for Windows and provide a native Mihomo executable and its expected SHA-256 from a trusted source. CLAY does not download the executable or import remote subscriptions on Windows.
 

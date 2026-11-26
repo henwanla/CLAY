@@ -25,7 +25,7 @@ struct clay_win_session {
     SOCKET proxy, control;
     uint16_t proxy_port, control_port;
     DWORD pid;
-    BOOL winsock;
+    BOOL winsock, console_handler;
 };
 
 // One foreground run per CLI process. Keep these events alive until exit:
@@ -182,7 +182,12 @@ int32_t clay_win_prepare(const uint16_t *source, const uint8_t expected[32], uin
     if (stop_event || cleaned_event) { free(s); return CLAY_WIN_SIGNALS; }
     stop_event = CreateEventW(NULL, TRUE, FALSE, NULL);
     cleaned_event = CreateEventW(NULL, TRUE, FALSE, NULL);
-    if (!stop_event || !cleaned_event || !SetConsoleCtrlHandler(on_console, TRUE)) { free(s); return CLAY_WIN_SIGNALS; }
+    if (!stop_event || !cleaned_event) { free(s); return CLAY_WIN_SIGNALS; }
+    // The desktop host redirects input and launches without a console.
+    if (GetConsoleCP() != 0) {
+        if (!SetConsoleCtrlHandler(on_console, TRUE)) { free(s); return CLAY_WIN_SIGNALS; }
+        s->console_handler = TRUE;
+    }
     if (!private_dir(s->dir) || !join_path(s->exe, s->dir, L"mihomo.exe") ||
         !join_path(s->config, s->dir, L"clay.json") || !random_bytes(random, 32)) goto fail;
     status = stage(s, (const WCHAR *)source, expected);
@@ -506,8 +511,8 @@ int32_t clay_win_stop(clay_win_session *s) {
     // Remove the credential-bearing config before trying to remove generated state.
     if (s->config[0]) DeleteFileW(s->config);
     BOOL ok = !s->dir[0] || remove_tree(s->dir, 0);
-    free(s);
     SetEvent(cleaned_event);
-    SetConsoleCtrlHandler(on_console, FALSE);
+    if (s->console_handler) SetConsoleCtrlHandler(on_console, FALSE);
+    free(s);
     return ok ? CLAY_WIN_OK : CLAY_WIN_FILES;
 }

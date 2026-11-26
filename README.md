@@ -72,9 +72,11 @@ bash scripts/swift-local.sh build -c release
 python3 scripts/smoke-subscriptions.py .build/release/CLAYCoreChecks
 ```
 
-便携工具 `clay-portable` 可检查本地节点文件和生成 PAC；macOS/Linux 还可查看指定本机 Mihomo 的流量汇总。开发版在 Linux 可前台运行经 SHA-256 核对的 Mihomo，供应用手动接入。它不会修改系统代理或执行输入文件里的订阅与规则提供器链接。使用方法和验证范围见[跨平台计划](docs/跨平台路线.md)。
+便携工具 `clay-portable` 可检查本地节点文件和生成 PAC；macOS/Linux 还可查看指定本机 Mihomo 的流量汇总。Linux 和 Windows 可前台运行经 SHA-256 核对的 Mihomo，供应用手动接入。它不会修改系统代理或执行输入文件里的订阅与规则提供器链接。使用方法和验证范围见[跨平台计划](docs/跨平台路线.md)。
 
 Linux 有 [GTK 桌面预览](Platforms/Linux/README.md)，可以导入本地节点、启动回环代理，并在窗口中切换节点和路由模式。需要在各应用中填写本机代理地址。
+
+[Windows 桌面预览](Platforms/Windows/README.md)可管理手动接入的本机代理；关闭窗口后保留托盘入口，支持切换节点和规则／全局／直连。
 
 [Android ARM64 离线预览](Platforms/Android/README.md)可检查节点和 PAC 规则，支持简体中文、英文和日文。它没有联网权限，也不提供 VPN；调试 APK 已在 Android API 24 ARM64 模拟器验收。
 

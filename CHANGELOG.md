@@ -4,6 +4,8 @@
 
 - Windows 便携 CLI 支持在同一回环会话内切换节点和规则／全局／直连，切换状态由内核读回确认。
 - The Windows portable CLI can switch nodes and Rule, Global, or Direct mode in a running loopback session, with controller readback before confirmation.
+- Windows 新增中英日桌面预览，关闭窗口后可从托盘切节点、切模式或停止手动代理。
+- Add a Windows desktop preview that keeps the manual proxy accessible from the tray, in English, Simplified Chinese, and Japanese.
 - Android 增加独立的本机代理预览：手动接入认证 HTTP/SOCKS5，在同一监听地址切换节点及规则／全局／直连。离线检查版仍无联网权限。
 - Add a separate Android relay preview for authenticated loopback HTTP/SOCKS5, with in-place switching between nodes and Rule, Global, or Direct. The offline preview still has no network permission.
 

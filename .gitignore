@@ -1,6 +1,8 @@
 .build/
 dist/
 .swiftpm/
+Platforms/Windows/Desktop/bin/
+Platforms/Windows/Desktop/obj/
 .DS_Store
 *.pem
 *.key

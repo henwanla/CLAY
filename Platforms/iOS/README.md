@@ -33,7 +33,9 @@ bash scripts/swift-local.sh build -c release --product CLAYCoreChecks
 .build/release/CLAYCoreChecks --packet-fixture | "$out/abi-smoke"
 ```
 
-Go 回归用回环合成节点验证 IPv4 TCP、VLESS XUDP、全局节点选择、IP 规则和重启；C 链接测试检查拒绝无效参数、会话和 Swift 生成的五种节点配置。解析成功不表示五种协议已实测连通，也未验证直连流量、域名规则、DNS 或 VPN 退出时的网络恢复。GitHub 使用两个 iOS SDK 分别检查 ARM64 链接，未启动设备或安装 VPN。
+宿主 Go 回归用 Swift 导入同一份合成 Clash 节点列表，再通过包转发桥连接回环上游。VMess、VLESS、Shadowsocks AEAD、Trojan TLS 与普通／Salamander／Gecko Hysteria2 均实际传输 IPv4 TCP；除 Shadowsocks 夹具外也验证 UDP。规则和全局模式在切换启动节点后分别收到对应应答，无效证书、指纹或密码不会得到数据。C 链接测试验证 Swift 配置和桥接接口，GitHub 用两个 iOS SDK 分别验收 ARM64 链接。宿主流量测试不代表真机、直连流量、域名规则、系统 DNS 或 VPN 退出恢复已验收。
+
+The host test imports a synthetic Clash profile with the shared Swift code, then sends IPv4 through the packet bridge to local protocol servers. It checks TCP for VMess, VLESS, Shadowsocks AEAD, Trojan TLS and Hysteria2 (plain, Salamander and Gecko), plus UDP for all except the Shadowsocks fixture. It verifies routing to the chosen node on each start and rejects untrusted certificates, mismatched pins and wrong passwords. Neither the host tests nor the iOS SDK link checks exercise the device VPN or system DNS.
 
 CI checks arm64 linkage for both iOS SDKs. Before distributing a binary, include the corresponding Mihomo source, bridge source, build instructions, and required license files.
 

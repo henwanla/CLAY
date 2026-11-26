@@ -76,7 +76,7 @@ IP-CIDR,10.0.0.0/8,DIRECT
 
 **兼容范围**：VMess/VLESS 分享链接、Base64 链接列表、V2Ray/Xray JSON 出站、Shadowsocks SIP002（常见 AEAD 密码套件）、TCP/TLS Trojan、Hysteria2（`hysteria2://` 或 `hy2://`），以及 Clash/Mihomo YAML 或 JSON 的内联 `proxies`。每次下载上限 2 MiB，每份最多导入 100 个兼容节点；本机回环测试允许 HTTP。CLAY 只导入兼容的节点，不执行配置里的提供器、策略组、规则、DNS、TUN 或入站。
 
-开发版的 Hysteria2 支持固定端口、SNI、Salamander 和 Gecko。分享链接省略端口时使用 443，并要求通过 TLS 证书验证；带 `insecure=1`、`pinSHA256`、端口跳跃或 Realms 的链接不导入。Clash/Mihomo 内联节点可以显式提供 SHA-256 `fingerprint`，此时使用 Mihomo 自身的证书固定机制。Shadowsocks 插件和跳过 Trojan 证书验证的设置不导入。
+开发版的 Hysteria2 支持固定端口、SNI、Salamander 和 Gecko。分享链接省略端口时使用 443，并要求通过 TLS 证书验证；带 `insecure=1`、`pinSHA256`、端口跳跃或 Realms 的链接不导入。Clash/Mihomo 内联的 Hysteria2 和 Trojan 节点可以显式提供 SHA-256 `fingerprint`，此时使用 Mihomo 自身的证书固定机制。Shadowsocks 插件和跳过 Trojan 证书验证的设置不导入。
 
 ## 源码与验证
 

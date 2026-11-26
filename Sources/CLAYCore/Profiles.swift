@@ -9,7 +9,7 @@ public enum ImportError: String, Error {
 
 private enum PasswordProtocol {
     case shadowsocks(cipher: String)
-    case trojan(sni: String, alpn: [String]?)
+    case trojan(sni: String, alpn: [String]?, certificatePin: String?)
     case hysteria2(sni: String, obfs: String?, obfsPassword: String?, fingerprint: String?)
 }
 
@@ -90,7 +90,7 @@ public struct NodeProfile: Identifiable {
             self.transport = "tcp"
             fallback = "Shadowsocks"
             fields["cipher"] = cipher
-        case .trojan(let sni, let alpn):
+        case .trojan(let sni, let alpn, let certificatePin):
             guard sni.isEmpty || Self.validPasswordNodeHost(sni) else { throw ImportError.unsupportedOption }
             if let alpn {
                 guard alpn.allSatisfy({ (1...255).contains($0.utf8.count) && $0.utf8.allSatisfy { (33...126).contains($0) } }),
@@ -103,6 +103,7 @@ public struct NodeProfile: Identifiable {
             fallback = "Trojan"
             fields["network"] = "tcp"
             fields["skip-cert-verify"] = false
+            if let certificatePin { fields["fingerprint"] = try Self.certificateFingerprint(certificatePin) }
             if !sni.isEmpty { fields["sni"] = sni }
         case .hysteria2(let sni, let obfs, let obfsPassword, let fingerprint):
             guard sni.isEmpty || Self.validPasswordNodeHost(sni) else { throw ImportError.unsupportedOption }
@@ -113,15 +114,7 @@ public struct NodeProfile: Identifiable {
                 fields["obfs"] = obfs
                 fields["obfs-password"] = obfsPassword
             } else if obfs != nil || obfsPassword != nil { throw ImportError.unsupportedOption }
-            if let fingerprint {
-                let parts = fingerprint.split(separator: ":", omittingEmptySubsequences: false)
-                guard parts.count == 1 || (parts.count == 32 && parts.allSatisfy({ $0.utf8.count == 2 }))
-                else { throw ImportError.unsupportedOption }
-                let digest = parts.joined()
-                guard digest.utf8.count == 64, digest.utf8.allSatisfy({ (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0) })
-                else { throw ImportError.unsupportedOption }
-                fields["fingerprint"] = digest.lowercased()
-            }
+            if let fingerprint { fields["fingerprint"] = try Self.certificateFingerprint(fingerprint) }
             self.protocolName = "hysteria2"
             self.security = "tls"
             self.transport = "quic"
@@ -137,6 +130,17 @@ public struct NodeProfile: Identifiable {
 
     private static func validPassword(_ password: String) -> Bool {
         !password.isEmpty && !password.utf8.contains { $0 < 32 || $0 == 127 }
+    }
+
+    private static func certificateFingerprint(_ value: String) throws -> String {
+        let parts = value.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 1 || (parts.count == 32 && parts.allSatisfy({ $0.utf8.count == 2 }))
+        else { throw ImportError.unsupportedOption }
+        let digest = parts.joined()
+        guard digest.utf8.count == 64,
+              digest.utf8.allSatisfy({ (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0) })
+        else { throw ImportError.unsupportedOption }
+        return digest.lowercased()
     }
 
     private static func validPasswordNodeHost(_ host: String) -> Bool {
@@ -282,7 +286,7 @@ public enum ProfileImporter {
         switch kind {
         case "ss": extra = ["cipher"]
         case "hysteria2": extra = ["sni", "obfs", "obfs-password", "skip-cert-verify", "fingerprint"]
-        default: extra = ["network", "tls", "sni", "alpn", "skip-cert-verify"]
+        default: extra = ["network", "tls", "sni", "alpn", "skip-cert-verify", "fingerprint"]
         }
         guard Set(p.keys).isSubset(of: common.union(extra)) else { throw ImportError.unsupportedOption }
         guard let server = p["server"] as? String, let port = int(p["port"]), let password = p["password"] as? String
@@ -302,7 +306,8 @@ public enum ProfileImporter {
             guard (try clashValue(p, "network", as: String.self) ?? "tcp") == "tcp" else { throw ImportError.unsupportedTransport }
             guard try clashValue(p, "tls", as: Bool.self) != false, try clashValue(p, "skip-cert-verify", as: Bool.self) != true
             else { throw ImportError.unsupportedOption }
-            mode = .trojan(sni: try clashValue(p, "sni", as: String.self) ?? "", alpn: try clashValue(p, "alpn", as: [String].self))
+            mode = .trojan(sni: try clashValue(p, "sni", as: String.self) ?? "", alpn: try clashValue(p, "alpn", as: [String].self),
+                           certificatePin: try clashValue(p, "fingerprint", as: String.self))
         }
         return try NodeProfile(name: clashValue(p, "name", as: String.self) ?? "", server: server, port: port,
                                password: password, udp: clashValue(p, "udp", as: Bool.self) ?? (kind == "hysteria2"), mode: mode)
@@ -392,7 +397,7 @@ public enum ProfileImporter {
                       (query["security"] ?? "tls") == "tls", ["0", "false"].contains(query["allowInsecure"] ?? "0")
                 else { throw ImportError.unsupportedOption }
                 guard (query["type"] ?? "tcp") == "tcp" else { throw ImportError.unsupportedTransport }
-                mode = .trojan(sni: query["sni"] ?? "", alpn: query["alpn"].map { $0.components(separatedBy: ",") })
+                mode = .trojan(sni: query["sni"] ?? "", alpn: query["alpn"].map { $0.components(separatedBy: ",") }, certificatePin: nil)
             }
         }
         return try NodeProfile(name: name, server: server, port: port, password: password, udp: true, mode: mode)

@@ -76,7 +76,7 @@ When CLAY shows **系统代理已启用**, the default macOS proxy points to CLA
 
 **Compatibility:** VMess and VLESS share links, Base64 lists, V2Ray/Xray JSON outbounds, Shadowsocks SIP002 (supported AEAD ciphers), TCP/TLS Trojan, Hysteria2 (`hysteria2://` or `hy2://`), and inline `proxies` from Clash/Mihomo YAML or JSON. A subscription has a 2 MiB download limit and can import up to 100 compatible nodes. CLAY does not run imported providers, policy groups, rules, DNS, inbounds, or TUN settings.
 
-The development build adds Hysteria2 with a fixed port, SNI, Salamander, and Gecko. Share links default to port 443 and require TLS certificate validation. Links with `insecure=1`, `pinSHA256`, port hopping, or Realms are not imported. Inline Clash/Mihomo nodes can provide a SHA-256 `fingerprint` to use Mihomo's native certificate pinning. Shadowsocks plugins and Trojan settings that bypass certificate validation are not imported.
+The development build adds Hysteria2 with a fixed port, SNI, Salamander, and Gecko. Share links default to port 443 and require TLS certificate validation. Links with `insecure=1`, `pinSHA256`, port hopping, or Realms are not imported. Inline Clash/Mihomo Hysteria2 and Trojan nodes can provide a SHA-256 `fingerprint` to use Mihomo's native certificate pinning. Shadowsocks plugins and Trojan settings that bypass certificate validation are not imported.
 
 ## Build and verify
 

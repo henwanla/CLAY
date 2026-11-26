@@ -9,6 +9,10 @@ import Darwin
             FileHandle.standardOutput.write(try tests.packetProfileFixture())
             return
         }
+        if CommandLine.arguments.count == 2, CommandLine.arguments[1] == "--packet-profile-stdin" {
+            FileHandle.standardOutput.write(try tests.packetProfileFromFixtureInput())
+            return
+        }
         if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--subscription-fixture" {
             try await tests.testSubscriptionFixture(CommandLine.arguments[2])
             print("CLAY subscription download and refresh checks passed")
@@ -26,6 +30,7 @@ import Darwin
         try tests.testVlessRealityMappingRequiresExplicitKeyAndSNI()
         try tests.testPasswordShareLinks()
         try tests.testClashPasswordNodes()
+        try tests.testTrojanCertificatePin()
         tests.testPasswordNodesRejectUnsupportedOrAmbiguousInput()
         try tests.testHysteria2Nodes()
         tests.testHysteria2RejectsUnsupportedOrAmbiguousInput()
@@ -169,6 +174,20 @@ import Darwin
         let parsed = ProfileImporter.read(yaml)
         XCTAssertTrue(parsed.profiles.isEmpty)
         XCTAssertEqual(parsed.issues, [.unsupportedTransport: 1, .unsupportedOption: 4, .malformed: 1])
+    }
+
+    func testTrojanCertificatePin() throws {
+        let decorated = Array(repeating: "AB", count: 32).joined(separator: ":")
+        func parse(_ pin: String, insecure: Bool = false) -> ImportResult {
+            ProfileImporter.read("{proxies: [{type: trojan, server: origin.test, port: 443, password: example, fingerprint: '\(pin)', skip-cert-verify: \(insecure)}]}")
+        }
+        let pinned = try fields(XCTUnwrap(parse(decorated).profiles.first))
+        XCTAssertEqual(pinned["fingerprint"] as? String, String(repeating: "ab", count: 32))
+        XCTAssertEqual(pinned["skip-cert-verify"] as? Bool, false)
+        for invalid in ["chrome", "AB::CD", String(repeating: "g0", count: 32), ""] {
+            XCTAssertEqual(parse(invalid).issues, [.unsupportedOption: 1])
+        }
+        XCTAssertEqual(parse(decorated, insecure: true).issues, [.unsupportedOption: 1])
     }
 
     func testHysteria2Nodes() throws {
@@ -454,6 +473,20 @@ private func XCTAssertEqual<T: Equatable>(_ given: T, _ expected: T, line: Int =
 }
 
 extension CoreTests {
+    // This executable is a test fixture. Never use a personal profile here.
+    func packetProfileFromFixtureInput() throws -> Data {
+        let limit = ProfileImporter.maxBytes
+        var data = Data()
+        while let bytes = try FileHandle.standardInput.read(upToCount: min(8192, limit + 1 - data.count)), !bytes.isEmpty {
+            data.append(bytes)
+            guard data.count <= limit else { throw ImportError.malformed }
+        }
+        guard let text = String(data: data, encoding: .utf8) else { throw ImportError.malformed }
+        let imported = ProfileImporter.read(text)
+        guard imported.issues.isEmpty, !imported.profiles.isEmpty else { throw ImportError.malformed }
+        return try CoreConfig.makePacketProfile(nodes: imported.profiles)
+    }
+
     func packetProfileFixture() throws -> Data {
         let input = """
         proxies:

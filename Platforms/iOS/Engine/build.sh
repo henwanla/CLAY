@@ -22,6 +22,12 @@ case "$target" in
     ;;
   *) exit 64 ;;
 esac
+if [[ "$target" == host-test ]]; then
+  repo=$(cd "$engine/../../.." && pwd)
+  bash "$repo/scripts/swift-local.sh" build -c release --product CLAYCoreChecks
+  swift_bin=$(bash "$repo/scripts/swift-local.sh" build -c release --show-bin-path)
+  export CLAY_PACKET_FIXTURE_IMPORTER="$swift_bin/CLAYCoreChecks"
+fi
 umask 077
 work=$(mktemp -d "${TMPDIR:-/tmp}/clay-ios-engine.XXXXXX")
 trap 'rm -rf "$work"' EXIT

@@ -62,8 +62,12 @@ private struct StatusIndicator: View {
 
     private var symbol: String {
         if pac.needsRecovery || pac.messageIsError { return "exclamationmark.triangle.fill" }
-        if model.running { return pac.systemService == nil ? "cube.fill" : "checkmark.circle.fill" }
-        return model.busy || pac.busy ? "cube.transparent" : "cube"
+        if pac.busy { return "cube.transparent" }
+        if model.running {
+            if pac.systemPACIsEffective { return "checkmark.circle.fill" }
+            return pac.systemService == nil ? "cube.fill" : "exclamationmark.circle"
+        }
+        return model.busy ? "cube.transparent" : "cube"
     }
 }
 
@@ -88,7 +92,7 @@ private struct StatusMenu: View {
         if pac.hasLiveOwnership || pac.needsRecovery {
             Button("恢复原网络代理设置") { pac.restoreSystem() }.disabled(pac.busy || model.busy)
         }
-        if pac.messageIsError || pac.needsRecovery {
+        if pac.messageIsError || pac.needsRecovery || (pac.systemService != nil && !pac.systemPACIsEffective) {
             Button("查看 PAC 设置…") { showDashboard(.pac) }
         }
         Divider()
@@ -219,13 +223,14 @@ private struct Dashboard: View {
     }
     private var connectionSymbol: String {
         if pac.needsRecovery || pac.messageIsError { return "exclamationmark.triangle.fill" }
-        if model.running, pac.systemService != nil { return "checkmark.circle.fill" }
+        if model.running, pac.systemPACIsEffective { return "checkmark.circle.fill" }
+        if model.running, pac.systemService != nil { return "exclamationmark.circle" }
         return model.running ? "circle.fill" : "circle"
     }
 
     private var connectionColor: Color {
-        if pac.needsRecovery || pac.messageIsError { return .orange }
-        return model.running && pac.systemService != nil ? .green : .secondary
+        if pac.needsRecovery || pac.messageIsError || (pac.systemService != nil && !pac.systemPACIsEffective && !pac.busy) { return .orange }
+        return model.running && pac.systemPACIsEffective ? .green : .secondary
     }
 
     private var controls: some View {

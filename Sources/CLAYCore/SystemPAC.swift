@@ -38,6 +38,8 @@ public enum SystemPACError: LocalizedError {
 
 @_spi(Checks) public protocol SystemPACBackend: AnyObject {
     func withLocked<T>(interactive: Bool, _ body: (any SystemPACSession) throws -> T) throws -> T
+    /// Effective system settings only; this read must not request privileges.
+    func effectivePACURLs() -> Set<String>
 }
 
 @_spi(Checks) public protocol SystemPACSession {
@@ -89,6 +91,12 @@ public enum SystemPACError: LocalizedError {
     }
 
     public func pendingRecovery() throws -> SystemPACService? { try load()?.service }
+
+    /// A committed network service and the system's current proxy settings may
+    /// differ while configd catches up, after a network switch, or after edits.
+    public func isEffective(url: URL) -> Bool {
+        managedService != nil && liveURLs.contains(url.absoluteString) && backend.effectivePACURLs().contains(url.absoluteString)
+    }
 
     public func needsListener(at url: URL) -> Bool {
         liveURLs.contains(url.absoluteString) || ((try? load())?.ownedURLs.contains(url.absoluteString) ?? false)
@@ -261,6 +269,8 @@ private final class MacSystemPACBackend: SystemPACBackend {
 
     deinit { if let authorization { AuthorizationFree(authorization, []) } }
 
+    func effectivePACURLs() -> Set<String> { MacSystemPACSession.effectivePACURLs() }
+
     func withLocked<T>(interactive: Bool, _ body: (any SystemPACSession) throws -> T) throws -> T {
         // SystemConfiguration's privileged helper can request interactive rights
         // itself. Do not call it from a background health check.
@@ -323,15 +333,32 @@ private struct MacSystemPACSession: SystemPACSession {
     func activePACURLs(serviceID: String) -> Set<String> {
         let serviceKey = SCDynamicStoreKeyCreateNetworkServiceEntity(nil, kSCDynamicStoreDomainState,
                                                                       serviceID as CFString, kSCEntNetProxies)
+        let effective = (SCDynamicStoreCopyProxies(nil) as? [String: Any]).map(Self.enabledPACURLs) ?? []
+        let service = SCDynamicStoreCopyValue(nil, serviceKey) as? [String: Any]
+        return effective.union(service.map(Self.enabledPACURLs) ?? [])
+    }
+
+    static func effectivePACURLs() -> Set<String> {
+        guard let values = SCDynamicStoreCopyProxies(nil) as? [String: Any] else { return [] }
+        // The top-level dictionary covers default settings. Scoped entries may
+        // still mention CLAY after a switch to a different default service.
+        return Set([enabledPACURL(values)].compactMap { $0 })
+    }
+
+    private static func enabledPACURL(_ values: [String: Any]) -> String? {
+        guard (values[kSCPropNetProxiesProxyAutoConfigEnable as String] as? NSNumber)?.boolValue == true else { return nil }
+        return values[kSCPropNetProxiesProxyAutoConfigURLString as String] as? String
+    }
+
+    private static func enabledPACURLs(_ values: [String: Any]) -> Set<String> {
         var addresses = Set<String>()
         func collect(_ values: [String: Any]) {
-            if (values[kSCPropNetProxiesProxyAutoConfigEnable as String] as? NSNumber)?.boolValue == true,
-               let url = values[kSCPropNetProxiesProxyAutoConfigURLString as String] as? String { addresses.insert(url) }
+            if let url = enabledPACURL(values) { addresses.insert(url) }
             if let scoped = values["__SCOPED__"] as? [String: [String: Any]] { scoped.values.forEach(collect) }
+            if let services = values["__SERVICES__"] as? [String: [String: Any]] { services.values.forEach(collect) }
             if let supplemental = values["__SUPPLEMENTAL__"] as? [[String: Any]] { supplemental.forEach(collect) }
         }
-        if let proxies = SCDynamicStoreCopyProxies(nil) as? [String: Any] { collect(proxies) }
-        if let service = SCDynamicStoreCopyValue(nil, serviceKey) as? [String: Any] { collect(service) }
+        collect(values)
         return addresses
     }
 

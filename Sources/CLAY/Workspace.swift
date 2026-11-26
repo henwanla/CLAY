@@ -114,8 +114,8 @@ enum Probe {
     }
     var menuStatus: String {
         if pac.needsRecovery { return "系统代理待恢复" }
-        if let service = pac.systemService { return "系统 PAC 已配置 · \(service.name)" }
         if pac.busy { return "正在配置 PAC" }
+        if pac.systemService != nil, running { return pac.modeLabel }
         if running { return "本机代理运行中 · macOS 未接入" }
         if pendingStart != nil { return "正在启动本机代理" }
         return "代理已停止"
@@ -408,6 +408,7 @@ enum Probe {
         return true
     }
     func checkHealth() {
+        pac.refreshEffectiveState()
         guard let core, !core.isRunning else { return }
         let restored = pac.releaseForStop(interactive: false)
         clearSession()

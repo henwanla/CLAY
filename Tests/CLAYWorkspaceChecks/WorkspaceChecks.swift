@@ -8,6 +8,7 @@ private struct CheckFailed: Error, CustomStringConvertible {
 }
 
 private final class NoSystemPACBackend: SystemPACBackend {
+    func effectivePACURLs() -> Set<String> { [] }
     func withLocked<T>(interactive: Bool, _ body: (any SystemPACSession) throws -> T) throws -> T {
         throw CheckFailed("unexpected system PAC mutation")
     }
@@ -19,6 +20,7 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
     static let baseline: [String: Any] = ["HTTPEnable": 1, "HTTPProxy": "proxy.example.test", "ExceptionsList": ["localhost"]]
 
     var denyAuthorization = false
+    var withholdEffectiveState = false
     private(set) var attempts = 0
     private(set) var persisted = baseline
     private(set) var activeURL: String?
@@ -47,6 +49,7 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
         applies += 1
     }
     func activePACURLs(serviceID: String) -> Set<String> { serviceID == Self.service.id ? Set([activeURL].compactMap { $0 }) : [] }
+    func effectivePACURLs() -> Set<String> { withholdEffectiveState ? [] : Set([activeURL].compactMap { $0 }) }
 }
 
 @main struct WorkspaceChecks {
@@ -199,6 +202,15 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
                 try require(activePID == priorPID, "attaching system PAC replaced the running Mihomo")
             }
             try require(installHadLivePAC && fixture.activeURL == endpoint.absoluteString, "mock settings were applied before the PAC server was listening")
+            try require(model.pac.systemPACIsEffective, "status did not reflect the active system proxy setting")
+            let attempts = fixture.attempts
+            fixture.withholdEffectiveState = true
+            model.checkHealth()
+            try require(!model.pac.systemPACIsEffective && model.running && model.pac.hasLiveOwnership && fixture.attempts == attempts,
+                        "read-only health check did not distinguish configuration from effective PAC without changing it")
+            fixture.withholdEffectiveState = false
+            model.checkHealth()
+            try require(model.pac.systemPACIsEffective, "status did not recover when the system PAC became effective again")
             try require(fixture.persisted["ProxyAutoConfigEnable"] as? Int == 1 && fixture.persisted["HTTPEnable"] as? Int == 0,
                         "system PAC was not enabled in the mock settings")
             try await checkPACScript(endpoint, policy: model.pac.policy, proxyPort: proxyPort)
@@ -210,7 +222,7 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
             try require(fixture.matchesBaseline && fixture.activeURL == nil && restoreHadLivePAC && restoreHadLiveProxy,
                         "original settings were not restored while both local listeners were still available")
             let pending = try manager.pendingRecovery()
-            try require(pending == nil && !model.running && model.pac.systemService == nil && !canConnect(to: localProxyPort),
+            try require(pending == nil && !model.running && model.pac.systemService == nil && !model.pac.systemPACIsEffective && !canConnect(to: localProxyPort),
                         "stop retained proxy state or a recovery journal after restoring settings")
             try await wait("restored PAC listener shutdown") { model.pac.localURL == nil && !canConnect(to: pacPort) }
         }

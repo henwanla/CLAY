@@ -40,6 +40,7 @@ private final class PACPreferencesFixture: SystemPACBackend, SystemPACSession {
         })
     }
     func activePACURLs(serviceID: String) -> Set<String> { active }
+    func effectivePACURLs() -> Set<String> { active }
 }
 
 extension CoreTests {
@@ -101,6 +102,22 @@ extension CoreTests {
             try require(restored["HTTPEnable"] as? Int == 2 && restored["ProxyAutoConfigEnable"] as? Int == 0, "overlapping external edits preserved")
             try require(restored["ExceptionsList"] as? [String] == ["other.example.test"], "unrelated external edits preserved")
             try require(restored["SOCKSEnable"] as? Int == 1 && restored[marker] == nil, "remaining CLAY-owned changes are restored")
+        }
+
+        try simulate { fixture, manager in
+            fixture.delayApply = true
+            try manager.enable(url: older)
+            try require(manager.managedService == PACPreferencesFixture.primary && !manager.isEffective(url: older),
+                        "committed preferences do not prove system PAC has taken effect")
+            fixture.delayApply = false
+            try fixture.apply()
+            try require(manager.isEffective(url: older) && !manager.isEffective(url: newer),
+                        "status follows the exact owned URL in the effective settings")
+            fixture.active = [external]
+            try require(!manager.isEffective(url: older) && manager.needsListener(at: older),
+                        "an inactive system PAC is reported without discarding ownership or the recovery journal")
+            try require(fixture.writes.count == 1, "status checks never change configured values")
+            try manager.restore()
         }
 
         try simulate { fixture, manager in

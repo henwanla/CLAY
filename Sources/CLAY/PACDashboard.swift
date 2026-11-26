@@ -40,6 +40,10 @@ struct PACDashboard: View {
             } else if let service = control.systemService {
                 Text("已配置网络服务：\(service.name)。切换到其他网络服务时，先恢复原设置，再连接到新服务。")
                     .font(.callout).foregroundStyle(.secondary)
+                if !control.busy && !control.systemPACIsEffective {
+                    Label("macOS 当前的默认代理设置未使用 CLAY 的 PAC。刚连接时系统可能还在更新；若切换了网络，可先恢复原设置，再连接当前网络服务。", systemImage: "exclamationmark.circle")
+                        .font(.callout).foregroundStyle(.orange)
+                }
                 HStack {
                     Button("更新系统 PAC") { model.publishPAC(toSystem: true) }
                         .disabled(!model.running || model.busy || control.busy || control.activePolicy == control.policy)

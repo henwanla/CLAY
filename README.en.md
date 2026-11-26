@@ -50,7 +50,9 @@ DOMAIN-SUFFIX,example.com,PROXY
 IP-CIDR,10.0.0.0/8,DIRECT
 ```
 
-Rule edits are saved locally. Select Update to apply edits to a running PAC. The local PAC URL changes when you update it, so copy the new URL into manually configured apps. CLAY saves the previous proxy settings for the selected network service before applying system PAC. Use Restore original settings (**恢复原系统设置**) to turn it off; CLAY also tries to restore the previous settings when you stop or quit. macOS may request administrator authorization on apply or restore. Only clients that honor macOS proxy settings will use system PAC. After a forced exit, reopen CLAY and use Restore original network proxy settings (**恢复原网络代理设置**) if prompted. If another tool has taken over, CLAY leaves its settings in place. To apply system PAC to a different network service, restore the original service before choosing the new one.
+Rule edits are saved locally. Select Update to apply edits to a running PAC. The local PAC URL changes when you update it, so copy the new URL into manually configured apps. CLAY saves the previous proxy settings for the selected network service before applying system PAC. Use Restore original settings (**恢复原系统设置**) to turn it off; CLAY also tries to restore the previous settings when you stop or quit. macOS may request administrator authorization on apply or restore. After a forced exit, reopen CLAY and use Restore original network proxy settings (**恢复原网络代理设置**) if prompted. If another tool has taken over, CLAY leaves its settings in place.
+
+In newer builds, **系统默认 PAC 已启用** means the macOS default proxy settings point to CLAY. If **PAC 已配置，未成为系统默认** persists, restore the original settings before reconnecting on the current network. To confirm traffic, select Global routing, open a site that does not match a direct PAC rule in a browser that honors macOS proxy settings, and check Connections or the traffic counters. Direct PAC matches bypass the core even when PAC is active.
 
 ## Dashboards, subscriptions, and diagnostics
 

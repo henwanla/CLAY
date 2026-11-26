@@ -13,6 +13,7 @@ import SwiftUI
     @Published private(set) var services: [SystemPACService] = []
     @Published private(set) var localURL: URL?
     @Published private(set) var systemService: SystemPACService?
+    @Published private(set) var systemPACIsEffective = false
     @Published private(set) var recoveryService: SystemPACService?
     @Published private(set) var activePolicy: PACPolicy?
     @Published private(set) var busy = false
@@ -41,7 +42,9 @@ import SwiftUI
     var needsRecovery: Bool { recoveryService != nil || uncertainOwnership }
     var modeLabel: String {
         if needsRecovery { return "PAC 待恢复" }
-        if let systemService { return "系统 PAC · \(systemService.name)" }
+        if let systemService {
+            return systemPACIsEffective ? "系统默认 PAC 已启用 · \(systemService.name)" : "PAC 已配置，未成为系统默认 · \(systemService.name)"
+        }
         return localURL == nil ? "手动接入" : "本机 PAC"
     }
 
@@ -49,6 +52,13 @@ import SwiftUI
         services = SystemPACManager.services()
         if !serviceID.isEmpty, !services.contains(where: { $0.id == serviceID }) { serviceID = "" }
         refreshRecovery()
+        refreshEffectiveState()
+    }
+
+    /// Keep the status bar current without writing any settings or showing a prompt.
+    func refreshEffectiveState() {
+        let effective = !needsRecovery && systemService != nil && (localURL.map(manager.isEffective) ?? false)
+        if effective != systemPACIsEffective { systemPACIsEffective = effective }
     }
 
     private func refreshRecovery() {
@@ -71,7 +81,12 @@ import SwiftUI
         display(toSystem ? "正在准备系统 PAC…" : "正在准备本机 PAC…")
         operation = Task { [weak self] in
             guard let self else { return }
-            defer { if generation == id { generation = nil; busy = false; operation = nil } }
+            defer {
+                if generation == id {
+                    generation = nil; busy = false; operation = nil
+                    refreshEffectiveState()
+                }
+            }
             var candidate: PACServer?
             defer { candidate?.stop() }
             do {
@@ -123,6 +138,7 @@ import SwiftUI
         do {
             let result = try manager.restore(interactive: interactive)
             systemService = nil; recoveryService = nil; uncertainOwnership = false
+            refreshEffectiveState()
             alternateServers.forEach { $0.stop() }; alternateServers.removeAll()
             switch result {
             case .restored: display("已恢复原网络代理设置。")
@@ -133,6 +149,7 @@ import SwiftUI
         } catch {
             if let systemService { recoveryService = systemService }
             else { refreshRecovery() }
+            refreshEffectiveState()
             display(error.localizedDescription, error: true)
             return false
         }
@@ -157,6 +174,7 @@ import SwiftUI
         server?.stop(); server = nil
         alternateServers.forEach { $0.stop() }; alternateServers.removeAll()
         localURL = nil; activePolicy = nil
+        refreshEffectiveState()
     }
 
     private func display(_ value: String, error: Bool = false) {

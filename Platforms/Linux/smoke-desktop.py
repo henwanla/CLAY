@@ -256,7 +256,11 @@ def gnome_recovery_checks(binary):
 def window_checks(binary, directory, profile, gnome=False, plasma=False):
     import json
 
-    window_class = runpy.run_path(str(Path(__file__).with_name("clay-desktop.py")))["Window"]
+    module_path = Path(os.environ.get("CLAY_LINUX_SMOKE_MODULES", Path(__file__).parent)).resolve()
+    if "CLAY_LINUX_SMOKE_MODULES" in os.environ:
+        assert sys.path[0] == str(module_path)
+        assert Path(sys.modules["session"].__file__).resolve().parent == module_path
+    window_class = runpy.run_path(str(module_path / "clay-desktop.py"))["Window"]
     from gi.repository import GLib
 
     root = Path(__file__).resolve().parents[2]

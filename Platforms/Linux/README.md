@@ -2,7 +2,21 @@
 
 Use this GTK 3 window to load nodes from a local profile, start a SHA-256 verified Mihomo executable, switch nodes and routing modes, and copy the local proxy address. It uses the same managed session as the Linux portable CLI.
 
-On Ubuntu 24.04, install Python 3, GTK 3 bindings, and the runtime tools, then build the CLI from the repository root:
+## Download for Ubuntu 24.04 x86-64 / 下载试用包
+
+Open a successful `main` workflow run in [Linux portable CLI](https://github.com/henwanla/CLAY/actions/workflows/portable-linux.yml?query=branch%3Amain) and download **CLAY-Linux-x64-preview** from Artifacts. GitHub may require sign-in. The archive and its SHA-256 file are inside the artifact. In the same directory, run `sha256sum -c FILE.tar.gz.sha256`, extract the verified archive, then enter the extracted directory and run `./start-clay`. For the base window on Ubuntu 24.04:
+
+~~~sh
+sudo apt install python3-gi gir1.2-gtk-3.0 curl coreutils libstdc++6
+~~~
+
+The preview needs no Swift installation. It runs as your user and includes no Mihomo, node profiles, subscription data, or recovery records. Install the optional runtime packages below if you want the tray, encrypted subscriptions, or desktop PAC. The included KDE helper uses Ubuntu's `libkf5configcore5`; for a distribution without KF5, use manual proxy or build the KF6 helper as described below. The artifact is unsigned and retained for 30 days; the checksum checks the download against the companion file. This is an Actions preview, separate from the tagged macOS release.
+
+在 [Linux 构建记录](https://github.com/henwanla/CLAY/actions/workflows/portable-linux.yml?query=branch%3Amain) 找到一条成功的 `main` 记录，在 Artifacts 下载 **CLAY-Linux-x64-preview**。解开下载结果后，把 tar.gz 与其校验文件放在同一目录，运行 `sha256sum -c FILE.tar.gz.sha256`（替换为实际文件名），通过后解压，再进入解压目录运行 `./start-clay`。支持 Ubuntu 24.04 x86-64，安装上述系统依赖即可，无需 Swift 工具链。下载物是保留 30 天的未签名 CI 预览，不含 Mihomo、节点配置、订阅或恢复记录。请用可信的 Mihomo 并核对其 SHA-256。
+
+## Build from source / 源码构建
+
+To build from the repository root on Ubuntu 24.04:
 
 ```sh
 sudo apt install python3-gi gir1.2-gtk-3.0 curl coreutils

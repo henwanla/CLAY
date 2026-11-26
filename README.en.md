@@ -88,7 +88,7 @@ python3 scripts/smoke-subscriptions.py .build/release/CLAYCoreChecks
 
 `clay-portable` validates local node files and generates PAC. On macOS and Linux it can read summary counters from a specified local Mihomo controller. Linux and Windows can run a verified Mihomo binary in the foreground for manual proxy setup. It leaves system proxy settings alone and does not fetch subscription or provider URLs embedded in input. See the [platform roadmap](docs/跨平台路线.md) for usage and test coverage.
 
-The [GTK desktop preview](Platforms/Linux/README.md) for Linux offers a manual proxy, desktop PAC with restoration for GNOME and Plasma 6, and manually refreshed HTTPS subscriptions with encrypted caching. Switch nodes and routing modes in the window or tray. With a working tray, closing the window keeps a running session active.
+The [downloadable GTK desktop preview](Platforms/Linux/README.md#download-for-ubuntu-2404-x86-64--下载试用包) for Ubuntu 24.04 x86-64 runs without a Swift installation. It offers a manual proxy, desktop PAC with restoration for GNOME and Plasma 6, and manually refreshed HTTPS subscriptions with encrypted caching. Switch nodes and routing modes in the window or tray. With a working tray, closing the window keeps a running session active.
 
 The [Windows desktop preview](Platforms/Windows/README.md) offers a manual loopback proxy, optional Windows PAC with restoration, and manual HTTPS subscription refresh with encrypted caching. Its tray icon keeps the session accessible after the window is closed and offers node and mode switching.
 

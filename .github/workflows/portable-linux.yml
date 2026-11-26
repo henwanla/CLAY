@@ -17,30 +17,74 @@ concurrency:
 jobs:
   linux-portable:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Check out source
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
-      - name: Build portable CLI
+      - name: Build portable CLI with the Swift runtime linked in
         run: |
           swift --version
-          swift build -c release --product clay-portable
-      - name: Run synthetic CLI checks
-        run: python3 scripts/smoke-portable.py .build/release/clay-portable
-      - name: Verify foreground runtime and loopback ownership
-        run: python3 scripts/smoke-linux-runtime.py .build/release/clay-portable
-      - name: Install GTK test dependencies
+          [[ $(swift --version) == 'Swift version 6.4.3 (swift-6.4.3-RELEASE)'$'\nTarget: x86_64-unknown-linux-gnu' ]]
+          swift build -c release --static-swift-stdlib --product clay-portable
+      - name: Install GTK and KDE test dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends python3-gi gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1 dbus-daemon xvfb xauth gsettings-desktop-schemas dconf-gsettings-backend dconf-service libglib2.0-bin python3-cryptography libsecret-tools gnome-keyring
-      - name: Exercise GTK, the tray, GNOME proxy and subscriptions in isolated settings
-        run: bash Platforms/Linux/smoke-gnome.sh .build/release/clay-portable
+          sudo apt-get install -y --no-install-recommends python3-gi gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1 dbus-daemon xvfb xauth gsettings-desktop-schemas dconf-gsettings-backend dconf-service libglib2.0-bin python3-cryptography libsecret-tools gnome-keyring libkf5config-dev qtbase5-dev libproxy-tools
       - name: Build the native KDE configuration helper
         run: |
-          sudo apt-get install -y --no-install-recommends libkf5config-dev qtbase5-dev libproxy-tools
           cmake -S Platforms/Linux/kde -B .build/kde -DCMAKE_BUILD_TYPE=Release
           cmake --build .build/kde --parallel 2
+      - name: Package and check the extracted Ubuntu x64 preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          export LC_ALL=C
+          output="$RUNNER_TEMP/clay-linux-package"
+          extracted="$RUNNER_TEMP/CLAY Linux test"
+          strip --strip-debug .build/release/clay-portable .build/kde/clay-kde-settings
+          archive=$(python3 scripts/package-linux.py .build/release/clay-portable .build/kde/clay-kde-settings "$output")
+          (cd "$output" && sha256sum -c "$(basename "$archive").sha256")
+          mkdir "$extracted"
+          tar -xzf "$archive" --no-same-owner --no-same-permissions -C "$extracted"
+          bundle="$extracted/$(basename "$archive" .tar.gz)"
+          cli="$bundle/bin/clay-portable"
+          unset LD_LIBRARY_PATH LD_PRELOAD
+          export PATH=/usr/bin:/bin
+          readelf -d "$cli" > "$RUNNER_TEMP/clay-linux-dynamic.txt"
+          if grep -Eq 'Shared library: \[(libswift|libFoundation|lib_Foundation|libdispatch|libBlocksRuntime)' "$RUNNER_TEMP/clay-linux-dynamic.txt"; then
+            printf '%s\n' 'The preview still requires dynamic Swift libraries.' >&2
+            exit 1
+          fi
+          for executable in "$cli" "$bundle/bin/clay-kde-settings"; do
+            ldd "$executable" | awk '
+              /not found/ { bad=1 }
+              /=>/ && $3 !~ /^\/(usr\/)?lib\// { bad=1 }
+              END { exit bad }
+            '
+          done
+          xvfb-run -a "$bundle/start-clay" --help
+          printf 'CLAY_LINUX_BUNDLE=%s\n' "$bundle" >> "$GITHUB_ENV"
+      - name: Verify portable CLI and loopback ownership from the extracted package
+        run: |
+          env -u LD_LIBRARY_PATH -u LD_PRELOAD PATH=/usr/bin:/bin python3 scripts/smoke-portable.py "$CLAY_LINUX_BUNDLE/bin/clay-portable"
+          env -u LD_LIBRARY_PATH -u LD_PRELOAD PATH=/usr/bin:/bin python3 scripts/smoke-linux-runtime.py "$CLAY_LINUX_BUNDLE/bin/clay-portable"
+      - name: Exercise GTK, the tray, GNOME proxy and subscriptions from the package
+        run: |
+          env -u LD_LIBRARY_PATH -u LD_PRELOAD PATH=/usr/bin:/bin PYTHONSAFEPATH=1 PYTHONPATH="$CLAY_LINUX_BUNDLE/lib" \
+            CLAY_LINUX_SMOKE_MODULES="$CLAY_LINUX_BUNDLE/lib" bash Platforms/Linux/smoke-gnome.sh "$CLAY_LINUX_BUNDLE/bin/clay-portable"
       - name: Exercise KDE's packaged proxy resolver and tray integration
-        run: bash Platforms/Linux/smoke-kde.sh .build/release/clay-portable .build/kde/clay-kde-settings
+        run: |
+          env -u LD_LIBRARY_PATH -u LD_PRELOAD PATH=/usr/bin:/bin PYTHONSAFEPATH=1 PYTHONPATH="$CLAY_LINUX_BUNDLE/lib" \
+            CLAY_LINUX_SMOKE_MODULES="$CLAY_LINUX_BUNDLE/lib" bash Platforms/Linux/smoke-kde.sh \
+            "$CLAY_LINUX_BUNDLE/bin/clay-portable" "$CLAY_LINUX_BUNDLE/bin/clay-kde-settings"
+      - name: Upload verified Linux desktop preview
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: CLAY-Linux-x64-preview
+          path: ${{ runner.temp }}/clay-linux-package/CLAY-*
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0

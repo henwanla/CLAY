@@ -28,6 +28,20 @@ unzip -l "CLAY-$version-macos-arm64.zip"
 
 维护者确认远端标签指向通过验证的 `main` 提交后，在 [henwanla/CLAY](https://github.com/henwanla/CLAY) 将其发布为 GitHub 预发布。发布说明写清 Apple Silicon、macOS 13+ 构建目标、未公证、Mihomo 需要独立安装并校验，以及当前兼容范围。CI 只做验证，不创建标签或发布。
 
+## Linux GitHub Actions 试用包 / Linux CI preview
+
+Ubuntu 24.04 x86-64 工作流用预装的 Swift 6.4.3 静态链接 Swift 运行时，再构建 KDE 辅助程序。从干净检出的源码打包时，运行如下命令。工作流先解包并检查 ELF 与本机库依赖，再在隔离的桌面会话测试解出的程序；通过后才上传 Artifacts。压缩包里的说明记录完整源码提交，随附版本对应的许可证及 SHA-256 校验文件。Mihomo 和用户配置不入包。
+
+~~~sh
+swift build -c release --static-swift-stdlib --product clay-portable
+cmake -S Platforms/Linux/kde -B .build/kde -DCMAKE_BUILD_TYPE=Release
+cmake --build .build/kde --parallel 2
+strip --strip-debug .build/release/clay-portable .build/kde/clay-kde-settings
+python3 scripts/package-linux.py .build/release/clay-portable .build/kde/clay-kde-settings dist/linux
+~~~
+
+The Ubuntu 24.04 x86-64 workflow packages the GTK app, the statically linked Swift CLI and the built KDE helper. It tests the extracted preview with system libraries and isolated desktop settings before uploading a 30-day Actions artifact. The preview is unsigned and does not publish to GitHub Releases. See the [Linux download guide](../Platforms/Linux/README.md#download-for-ubuntu-2404-x86-64--下载试用包).
+
 ## 本机预览（有独立内核）
 
 验证 [Mihomo 官方资产](https://github.com/henwanla/CLAY/blob/main/README.md#为公开安装包准备-mihomo) 后，使用解压后的可执行文件和 [固定 tag 的许可](https://github.com/MetaCubeX/mihomo/blob/v1.19.34/LICENSE) 生成本机预览目录：

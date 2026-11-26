@@ -58,7 +58,9 @@ internal static class SubscriptionChecks
 
             using var trustedEngine = File.OpenRead(fixture);
             string sha = Convert.ToHexString(await SHA256.HashDataAsync(trustedEngine));
-            await using var session = await PortableSession.StartAsync(cli, selection.Inspection, fixture, sha, null, "global", 1, selection.Source);
+            var rules = Path.Combine(scratch.FullName, "rule.txt");
+            await File.WriteAllTextAsync(rules, "DOMAIN-SUFFIX,example.invalid,DIRECT\n");
+            await using var session = await PortableSession.StartAsync(cli, selection.Inspection, fixture, sha, rules, "global", 1, selection.Source);
             var endpoint = session.Address;
             Check(await session.ApplyAsync(new Route("rule", 2)) == new Route("rule", 2) && session.Address == endpoint, "cached-session-node-and-mode");
             using var timer = new CancellationTokenSource(TimeSpan.FromSeconds(4));

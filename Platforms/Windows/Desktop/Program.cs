@@ -15,7 +15,7 @@ internal static class Program
         if (args is ["--smoke-subscriptions", var subscriptionCli, var subscriptionFixture])
         {
             try { SubscriptionChecks.RunAsync(subscriptionCli, subscriptionFixture).GetAwaiter().GetResult(); return 0; }
-            catch (BridgeException error) { Console.Error.WriteLine($"Windows subscription check failed at {error.Step}."); return 1; }
+            catch (BridgeException error) { Console.Error.WriteLine($"Windows subscription check failed at {error.Step} (exit code {error.ExitCode?.ToString() ?? "unknown"})."); return 1; }
             catch (Exception error) { Console.Error.WriteLine($"Windows subscription check failed: {error.GetType().Name}."); return 1; }
         }
         if (args is ["--smoke-pac", var portable])

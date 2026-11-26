@@ -30,7 +30,7 @@ unzip -l "CLAY-$version-macos-arm64.zip"
 
 ## Linux GitHub Actions 试用包 / Linux CI preview
 
-Ubuntu 24.04 x86-64 工作流用预装的 Swift 6.4.3 静态链接 Swift 运行时，再构建 KDE 辅助程序。从干净检出的源码打包时，运行如下命令。工作流先解包并检查 ELF 与本机库依赖，再在隔离的桌面会话测试解出的程序；通过后才上传 Artifacts。压缩包里的说明记录完整源码提交，随附版本对应的许可证及 SHA-256 校验文件。Mihomo 和用户配置不入包。
+Ubuntu 24.04 x86-64 工作流从 Swift 官网下载固定的 Swift 6.4.3。它先用官方 Swift 6.x 发布密钥验签并核对签名者指纹，再解包、检查版本和目标架构，然后静态链接 Swift 运行时并构建 KDE 辅助程序。本机复验时先准备同一工具链，再从干净检出的源码运行以下命令。CI 会解包检查 ELF 与本机库依赖，在隔离的桌面会话测试通过后才上传 Artifacts。压缩包记录完整源码提交，随附对应许可证及 SHA-256 校验文件。Mihomo 和用户配置不入包。
 
 ~~~sh
 swift build -c release --static-swift-stdlib --product clay-portable
@@ -40,7 +40,7 @@ strip --strip-debug .build/release/clay-portable .build/kde/clay-kde-settings
 python3 scripts/package-linux.py .build/release/clay-portable .build/kde/clay-kde-settings dist/linux
 ~~~
 
-The Ubuntu 24.04 x86-64 workflow packages the GTK app, the statically linked Swift CLI and the built KDE helper. It tests the extracted preview with system libraries and isolated desktop settings before uploading a 30-day Actions artifact. The preview is unsigned and does not publish to GitHub Releases. See the [Linux download guide](../Platforms/Linux/README.md#download-for-ubuntu-2404-x86-64--下载试用包).
+The Ubuntu 24.04 x86-64 workflow verifies the official Swift 6.4.3 archive against the pinned Swift 6.x release signing key before extraction. It checks the compiler version and target, then packages the GTK app, the statically linked Swift CLI and the built KDE helper. It tests the extracted preview with system libraries and isolated desktop settings before uploading a 30-day Actions artifact. The preview is unsigned and does not publish to GitHub Releases. See the [Linux download guide](../Platforms/Linux/README.md#download-for-ubuntu-2404-x86-64--下载试用包).
 
 ## 本机预览（有独立内核）
 

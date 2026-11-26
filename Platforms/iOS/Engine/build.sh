@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-[[ $# == 3 ]] || { printf 'Usage: %s MIHOMO_SOURCE_TGZ host-test|macos|iphoneos|iphonesimulator OUTPUT_DIRECTORY\n' "$0" >&2; exit 64; }
+[[ $# == 3 ]] || { printf 'Usage: %s MIHOMO_SOURCE_TGZ host-test|host-race|macos|iphoneos|iphonesimulator OUTPUT_DIRECTORY\n' "$0" >&2; exit 64; }
 source=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
 target=$2
 mkdir -p "$3"
@@ -12,7 +12,7 @@ export GOTOOLCHAIN=local GOWORK=off GOFLAGS= GOENV=off CGO_ENABLED=1
 compiler=${GO:-go}
 [[ $("$compiler" version) == 'go version go1.24.3 '* ]]
 case "$target" in
-  host-test|macos) export GOOS=darwin GOARCH=$("$compiler" env GOHOSTARCH);;
+  host-test|host-race|macos) export GOOS=darwin GOARCH=$("$compiler" env GOHOSTARCH);;
   iphoneos|iphonesimulator)
     export GOOS=ios GOARCH=arm64
     sdk=$(xcrun --sdk "$target" --show-sdk-path)
@@ -22,7 +22,7 @@ case "$target" in
     ;;
   *) exit 64 ;;
 esac
-if [[ "$target" == host-test ]]; then
+if [[ "$target" == host-test || "$target" == host-race ]]; then
   repo=$(cd "$engine/../../.." && pwd)
   bash "$repo/scripts/swift-local.sh" build -c release --product CLAYCoreChecks
   swift_bin=$(bash "$repo/scripts/swift-local.sh" build -c release --show-bin-path)
@@ -46,6 +46,9 @@ mkdir clay_packet_engine
 cp "$engine"/*.go clay_packet_engine/
 if [[ "$target" == host-test ]]; then
   "$compiler" test -mod=readonly -tags with_gvisor -count=1 -timeout=30s -v ./clay_packet_engine
+elif [[ "$target" == host-race ]]; then
+  "$compiler" test -mod=readonly -tags with_gvisor -race -count=2 -timeout=45s \
+    -run '^(TestLabSwitchClosesActiveTCP|TestImportedProtocols)$/^lab-live-switch-across-protocols$' ./clay_packet_engine
 else
   "$compiler" build -mod=readonly -tags with_gvisor -trimpath -buildmode=c-archive \
     -ldflags '-w -s -buildid=' -o "$out/libCLAYPacketEngine.a" ./clay_packet_engine

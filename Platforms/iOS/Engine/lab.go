@@ -49,7 +49,6 @@ func startLab(data []byte, mode int) (uint64, error) {
 	if engine.live != nil {
 		return 0, errActive
 	}
-	silence()
 	route, err := parseLab(data, mode)
 	if err != nil {
 		return 0, err

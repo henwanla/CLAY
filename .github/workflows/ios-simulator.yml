@@ -79,6 +79,7 @@ jobs:
             -o "$root/mihomo.tgz" https://codeload.github.com/MetaCubeX/mihomo/tar.gz/refs/tags/v1.19.34
           engine=Platforms/iOS/Engine
           bash "$engine/build.sh" "$root/mihomo.tgz" host-test "$root/host"
+          bash "$engine/build.sh" "$root/mihomo.tgz" host-race "$root/host"
           bash "$engine/build.sh" "$root/mihomo.tgz" macos "$root/host"
           bash "$engine/link-check.sh" macos "$root/host"
           bash scripts/swift-local.sh build -c release --product CLAYCoreChecks

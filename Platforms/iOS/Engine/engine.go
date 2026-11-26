@@ -216,7 +216,6 @@ func start(data []byte, chosen, mode int) (uint64, error) {
 	if engine.live != nil {
 		return 0, errActive
 	}
-	silence()
 	cfg, err := loadProfile(data, chosen, mode)
 	if err != nil {
 		return 0, errProfile // The underlying error may contain credentials.
@@ -233,12 +232,10 @@ func start(data []byte, chosen, mode int) (uint64, error) {
 	return publishSession(live), nil
 }
 
-var silenceLogs sync.Once
-
-func silence() {
-	silenceLogs.Do(func() {
-		glog.SetTarget(&glog.Writer{Next: io.Discard})
-	})
+func init() {
+	// The embedded Lab never applies global configuration. Mute these loggers
+	// before there are any packet workers; the Mihomo log level is not atomic.
+	glog.SetTarget(&glog.Writer{Next: io.Discard})
 	log.SetLevel(log.SILENT)
 }
 

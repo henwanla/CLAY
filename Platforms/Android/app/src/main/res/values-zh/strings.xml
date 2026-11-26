@@ -27,7 +27,7 @@
     <string name="pac_reason_loopback">回环保护</string>
     <string name="pac_reason_local">本地或私有地址</string>
     <string name="pac_reason_fallback">默认动作</string>
-    <string name="pac_invalid_rule">第 %1$d 行规则无效。请使用 DOMAIN、DOMAIN-SUFFIX、DOMAIN-KEYWORD 或 IP-CIDR，动作填 DIRECT 或 PROXY。</string>
+    <string name="pac_invalid_rule">第 %1$d 行规则无效。请使用 DOMAIN、DOMAIN-SUFFIX、DOMAIN-KEYWORD、IP-CIDR 或 IP-CIDR6，动作填 DIRECT 或 PROXY。</string>
     <string name="pac_invalid_host">请输入有效的域名、IP 地址或 URL。</string>
     <string name="input_too_large">内容太长，无法预览。</string>
     <string name="running">正在检查…</string>

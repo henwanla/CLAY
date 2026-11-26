@@ -138,12 +138,15 @@ DOMAIN-SUFFIX,example.test,DIRECT
 IP-CIDR,10.21.0.0/16,PROXY
 DOMAIN,2001:db8::10,DIRECT
 DOMAIN,::ffff:192.0.2.1,PROXY
+IP-CIDR6,2001:db8:0:1:8000::/65,DIRECT,no-resolve
 """, encoding="utf-8")
-    assert run("pac-check", pac) == b"valid_pac_rules=4\n"
+    assert run("pac-check", pac) == b"valid_pac_rules=5\n"
     assert run("pac-check", pac, "https://a.example.test/private") == b"decision=DIRECT source=rule:1\n"
     assert run("pac-check", pac, "10.21.1.5") == b"decision=PROXY source=rule:2\n"
     assert run("pac-check", pac, "[2001:db8:0:0:0:0:0:0010]") == b"decision=DIRECT source=rule:3\n"
     assert run("pac-check", pac, "[::FFFF:C000:0201]") == b"decision=PROXY source=rule:4\n"
+    assert run("pac-check", pac, "[2001:db8:0:1:8000::42]") == b"decision=DIRECT source=rule:5\n"
+    assert run("pac-check", pac, "[2001:db8:0:1:7fff::42]") == b"decision=PROXY source=default\n"
     assert run("pac-check", pac, "[::ffff:127.0.0.1]") == b"decision=DIRECT source=loopback\n"
     assert run("pac-check", pac, "[fe80::1%eth0]") == b"decision=DIRECT source=local\n"
     assert run("pac-check", pac, "[fc00::1]", "--no-local-bypass") == b"decision=PROXY source=default\n"

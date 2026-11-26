@@ -24,6 +24,7 @@ import Darwin
             return
         }
         try tests.testPACPolicy()
+        try tests.testIPv6PACPolicy()
         try tests.testSystemPACRecovery()
         try tests.testImportVmessWs()
         try tests.testVlessRejectsSilentDowngradeOfUnsupportedOptions()
@@ -601,6 +602,7 @@ extension CoreTests {
         DOMAIN-KEYWORD,fixture,DIRECT
         DOMAIN,192.0.2.1,PROXY
         DOMAIN,2001:db8::1,DIRECT
+        IP-CIDR6,2001:db8:1234:abcd:ffff::1/65,PROXY,no-resolve
         IP-CIDR,198.51.100.0/24,PROXY,no-resolve
         """), defaultDecision: .proxy, bypassLocal: true)
         let data = try CoreConfig.makePacketProfile(nodes: nodes, policy: policy)
@@ -609,9 +611,10 @@ extension CoreTests {
         let proxies = try XCTUnwrap(object["proxies"] as? [[String: Any]])
         XCTAssertEqual(proxies.compactMap { $0["name"] as? String }, nodes.map(\.localName))
         let rules = try XCTUnwrap(object["rules"] as? [String])
-        XCTAssertEqual(Array(rules.dropFirst(4).prefix(6)), ["DOMAIN,first.example.test,CLAY", "DOMAIN-SUFFIX,example.test,DIRECT",
+        XCTAssertEqual(Array(rules.dropFirst(4).prefix(7)), ["DOMAIN,first.example.test,CLAY", "DOMAIN-SUFFIX,example.test,DIRECT",
                        "DOMAIN-KEYWORD,fixture,DIRECT", "IP-CIDR,192.0.2.1/32,CLAY,no-resolve",
-                       "IP-CIDR6,2001:db8:0:0:0:0:0:1/128,DIRECT,no-resolve", "IP-CIDR,198.51.100.0/24,CLAY,no-resolve"])
+                       "IP-CIDR6,2001:db8:0:0:0:0:0:1/128,DIRECT,no-resolve",
+                       "IP-CIDR6,2001:db8:1234:abcd:8000:0:0:0/65,CLAY,no-resolve", "IP-CIDR,198.51.100.0/24,CLAY,no-resolve"])
         XCTAssertEqual(rules.last, "MATCH,CLAY")
         return data
     }

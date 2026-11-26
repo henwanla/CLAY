@@ -38,7 +38,7 @@ for _ in {1..100}; do
   sleep 0.1
 done
 [[ -s "$work/fixture-result" ]] || { printf 'The loopback test fixtures did not start.\n' >&2; exit 1; }
-read -r first second direct ipv6 tls ipv6_origin proof cert < "$work/fixture-result"
+read -r first second direct ipv6 tls ipv6_origin udp4 udp6 proof cert < "$work/fixture-result"
 "${adb[@]}" install -g "$2"
 installed=true
 "${adb[@]}" install -t "$3"
@@ -50,12 +50,14 @@ instrument() {
   # Every payload is synthetic; the tool never accepts arbitrary profiles or destinations.
   "${adb[@]}" shell am instrument -w -r -e firstPort "$first" -e secondPort "$second" \
     -e directPort "$direct" -e ipv6Port "$ipv6" -e ipv6OriginPort "$ipv6_origin" -e tlsPort "$tls" -e proof "$proof" -e tlsCert "$cert" \
+    -e udp4Port "$udp4" -e udp6Port "$udp6" \
     "$@" "$app.tests/org.clayrelay.preview.PreviewInstrumentation"
 }
 check_result() {
   local report current
   report=$(tr -d '\r' < "$1")
   printf '%s\n' "$report"
+  if [[ -e "$work/unexpected-direct-udp" ]]; then printf 'A UDP packet marked PROXY reached the local origin.\n' >&2; exit 1; fi
   grep -qx "$2" <<< "$report"
   grep -qx 'CLAY_ANDROID_SUBSCRIPTIONS_PASS' <<< "$report"
   grep -qx 'INSTRUMENTATION_CODE: -1' <<< "$report"

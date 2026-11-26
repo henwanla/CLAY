@@ -27,7 +27,7 @@
     <string name="pac_reason_loopback">ループバック保護</string>
     <string name="pac_reason_local">ローカルまたはプライベートアドレス</string>
     <string name="pac_reason_fallback">既定の動作</string>
-    <string name="pac_invalid_rule">%1$d 行目のルールが無効です。DOMAIN、DOMAIN-SUFFIX、DOMAIN-KEYWORD、IP-CIDR のいずれかと、DIRECT または PROXY を指定してください。</string>
+    <string name="pac_invalid_rule">%1$d 行目のルールが無効です。DOMAIN、DOMAIN-SUFFIX、DOMAIN-KEYWORD、IP-CIDR、IP-CIDR6 のいずれかと、DIRECT または PROXY を指定してください。</string>
     <string name="pac_invalid_host">有効なドメイン、IP アドレス、または URL を入力してください。</string>
     <string name="input_too_large">入力が大きすぎるためプレビューできません。</string>
     <string name="running">確認中…</string>

@@ -48,6 +48,7 @@ final class VpnChecks {
         int first = port(fixture, "firstPort"), second = port(fixture, "secondPort"), direct = port(fixture, "directPort");
         int ipv6 = port(fixture, "ipv6Port"), tls = port(fixture, "tlsPort");
         int ipv6Origin = port(fixture, "ipv6OriginPort");
+        int udp4 = port(fixture, "udp4Port"), udp6 = port(fixture, "udp6Port");
         String proof = fixture.getString("proof", "");
         require(proof.matches("[a-f0-9]{24}"), "synthetic proof");
         String fault = fixture.getString("vpnFault", "");
@@ -91,9 +92,9 @@ final class VpnChecks {
             checkDns("2001:db8::53", proof, 74);
             select(test, activity, 2, 0);
             await(test, R.string.vpn_ready, 2, "rule", "confirmed rule mode");
-            require(fetch("10.0.2.2", direct).endsWith(proof + "-D"), "rule mode honors IP bypass");
+            require(fetch("10.0.2.2", direct).endsWith(proof + "-B"), "rule mode honors the first IPv4 rule");
             require(fetch("198.51.100.42", 18080).endsWith(proof + "-B"), "rule fallback uses node");
-            require(fetch(IPV6_FIXTURE, ipv6).endsWith(proof + "-V6"), "rule mode sends the explicit IPv6 literal direct");
+            require(fetch(IPV6_FIXTURE, ipv6).endsWith(proof + "-V6"), "rule mode honors the first IPv6 CIDR rule");
             require(fetch("2001:db8::42", ipv6).endsWith(proof + "-B"), "unmatched IPv6 in rule mode uses the selected node");
             String proxyName = "proxy-" + proof + ".test", directName = "direct-" + proof + ".test";
             require(fetchNamed(proxyName, direct).endsWith(proof + "-B"), "HTTP domain rule selects the proxy for a shared IPv4 address");
@@ -101,9 +102,15 @@ final class VpnChecks {
             SSLContext tlsContext = fixtureTLS(fixture.getString("tlsCert", ""));
             require(fetchTLS(tlsContext, proxyName, tls).endsWith(proof + "-B"), "TLS SNI selects the proxy while retaining the IPv4 destination");
             require(fetchTLS(tlsContext, directName, tls).endsWith(proof + "-TLS-D"), "TLS SNI can keep the same IPv4 destination direct");
+            select(test, activity, 3, 0);
+            await(test, R.string.vpn_ready, 3, "rule", "selected a node without UDP");
+            require(fetch("10.0.2.2", direct).endsWith(proof + "-A"), "TCP still uses the selected node without UDP");
+            require(udpProbe(IPV6_FIXTURE, udp6, "direct-" + proof), "explicit IPv6 DIRECT still forwards UDP");
+            require(!udpProbe("10.0.2.2", udp4, "blocked-" + proof), "proxied UDP must not fall through to DIRECT");
             select(test, activity, 2, 2);
             await(test, R.string.vpn_ready, 2, "direct", "confirmed direct mode");
             require(fetch("10.0.2.2", direct).endsWith(proof + "-D"), "direct mode routes to origin");
+            require(udpProbe("10.0.2.2", udp4, "direct-" + proof), "the UDP origin was reachable in intentional Direct mode");
             require(fetch(IPV6_FIXTURE, ipv6Origin).endsWith(proof + "-V6-ORIGIN"),
                     "direct mode can reach the IPv6 origin that Global did not fall back to");
             select(test, activity, 2, 1);
@@ -233,13 +240,15 @@ final class VpnChecks {
 
     private static void start(Instrumentation test, Activity activity, int first, int second, String proof) {
         test.runOnMainSync(() -> {
-            String prefix = "vless://56dc6c3e-8793-4d37-a363-f9f19db29c6d@";
-            String options = "?encryption=none&security=none&type=tcp#Fixture-";
-            edit(activity, MainActivity.ID_NODE_INPUT).setText(prefix + "10.0.2.2:" + first + options + "A\n" +
-                    prefix + "[" + IPV6_FIXTURE + "]:" + second + options + "B");
+            String vless = ", type: vless, uuid: 56dc6c3e-8793-4d37-a363-f9f19db29c6d, network: tcp, udp: ";
+            edit(activity, MainActivity.ID_NODE_INPUT).setText("proxies:\n" +
+                    "  - {name: Fixture-A, server: 10.0.2.2, port: " + first + vless + "true}\n" +
+                    "  - {name: Fixture-B, server: '" + IPV6_FIXTURE + "', port: " + second + vless + "true}\n" +
+                    "  - {name: Fixture-C, server: 10.0.2.2, port: " + first + vless + "false}");
             edit(activity, MainActivity.ID_PAC_RULES).setText((proof.isEmpty() ? "" :
                     "DOMAIN,proxy-" + proof + ".test,PROXY\nDOMAIN-SUFFIX,direct-" + proof + ".test,DIRECT\n") +
-                    "IP-CIDR,10.0.2.2/32,DIRECT\nDOMAIN," + IPV6_FIXTURE + ",DIRECT");
+                    "IP-CIDR,10.0.2.2/32,PROXY\nIP-CIDR,10.0.2.2/32,DIRECT\n" +
+                    "IP-CIDR6,fec0::/126,DIRECT,no-resolve\nIP-CIDR6,fec0::2/128,PROXY");
             edit(activity, VpnPanel.ID_DNS).setText("198.51.100.53");
             ((CompoundButton) activity.findViewById(MainActivity.ID_PAC_BYPASS)).setChecked(false);
             ((CompoundButton) activity.findViewById(MainActivity.ID_PAC_DIRECT)).setChecked(false);
@@ -281,6 +290,20 @@ final class VpnChecks {
         }
         require(Arrays.equals(answer, Arrays.copyOf(received.getData(), received.getLength())),
                 "UDP DNS answer comes from the selected synthetic node");
+    }
+
+    private static boolean udpProbe(String target, int port, String message) throws Exception {
+        byte[] request = message.getBytes(StandardCharsets.US_ASCII);
+        DatagramPacket reply = new DatagramPacket(new byte[64], 64);
+        try (DatagramSocket socket = new DatagramSocket()) {
+            socket.connect(InetAddress.getByName(target), port);
+            socket.setSoTimeout(2000);
+            socket.send(new DatagramPacket(request, request.length));
+            try { socket.receive(reply); }
+            catch (java.net.SocketTimeoutException | java.net.PortUnreachableException expected) { return false; }
+        }
+        require(Arrays.equals(request, Arrays.copyOf(reply.getData(), reply.getLength())), "UDP fixture returns the synthetic proof");
+        return true;
     }
 
     private static String fetch(String host, int port) throws Exception {
@@ -344,7 +367,7 @@ final class VpnChecks {
     }
 
     private static void select(Instrumentation test, Activity activity, int node, int mode) {
-        NodePickerChecks.choose(test, activity, VpnPanel.ID_NODE, node, node == 1 ? "Fixture-A" : "Fixture-B");
+        NodePickerChecks.choose(test, activity, VpnPanel.ID_NODE, node, "Fixture-" + (char) ('A' + node - 1));
         test.runOnMainSync(() -> {
             ((Spinner) activity.findViewById(VpnPanel.ID_MODE)).setSelection(mode);
             activity.findViewById(VpnPanel.ID_APPLY).performClick();

@@ -63,7 +63,7 @@ public enum CoreConfig {
             } else if rule.kind == .domain, PACTarget.parseIPv6(rule.value) != nil {
                 result.append("IP-CIDR6,\(rule.value)/128,\(action),no-resolve")
             } else {
-                result.append("\(rule.kind.rawValue),\(rule.value),\(action)\(rule.kind == .ipCIDR ? ",no-resolve" : "")")
+                result.append("\(rule.kind.rawValue),\(rule.value),\(action)\(rule.kind.isCIDR ? ",no-resolve" : "")")
             }
         }
         if policy.bypassLocal {

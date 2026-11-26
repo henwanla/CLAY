@@ -16,7 +16,7 @@ public enum PACError: LocalizedError, Equatable, Sendable {
     public var errorDescription: String? {
         switch self {
         case .invalidHost: return "请输入有效的域名、IP 地址或完整 URL。"
-        case .invalidCIDR: return "IPv4 网段格式无效，例如 192.0.2.0/24。"
+        case .invalidCIDR: return "IP 网段格式无效，例如 192.0.2.0/24 或 2001:db8::/32。"
         case .invalidKeyword: return "请输入由字母、数字、点、连字符或下划线组成的域名关键词。"
         case .invalidPort: return "本机代理端口无效。"
         case .invalidRuleLine(let line, let reason): return "第 \(line) 行：\(reason)"
@@ -31,6 +31,9 @@ public struct PACRule: Identifiable, Equatable, Codable, Sendable {
         case domainSuffix = "DOMAIN-SUFFIX"
         case domainKeyword = "DOMAIN-KEYWORD"
         case ipCIDR = "IP-CIDR"
+        case ipCIDR6 = "IP-CIDR6"
+
+        var isCIDR: Bool { self == .ipCIDR || self == .ipCIDR6 }
     }
 
     public let id: UUID
@@ -61,6 +64,9 @@ public struct PACRule: Identifiable, Equatable, Codable, Sendable {
         case .ipCIDR:
             guard let cidr = PACIPv4CIDR(input) else { throw PACError.invalidCIDR }
             self.value = cidr.text
+        case .ipCIDR6:
+            guard let cidr = PACIPv6CIDR(input) else { throw PACError.invalidCIDR }
+            self.value = cidr.text
         }
     }
 
@@ -77,7 +83,7 @@ public struct PACRule: Identifiable, Equatable, Codable, Sendable {
         switch kind {
         case .domain: return PACTarget(value)?.isDomain == true
         case .domainSuffix, .domainKeyword: return true
-        case .ipCIDR: return false
+        case .ipCIDR, .ipCIDR6: return false
         }
     }
 
@@ -89,6 +95,9 @@ public struct PACRule: Identifiable, Equatable, Codable, Sendable {
         case .ipCIDR:
             guard let ip = target.ipv4, let cidr = PACIPv4CIDR(value) else { return false }
             return ip & cidr.mask == cidr.network
+        case .ipCIDR6:
+            guard let ip = target.ipv6, let cidr = PACIPv6CIDR(value) else { return false }
+            return cidr.contains(ip)
         }
     }
 }
@@ -131,7 +140,7 @@ public struct PACPolicy: Equatable, Codable, Sendable {
     }
 
     /// Imports the PAC-compatible subset of Clash rule rows. All rows must be
-    /// valid before any rule is appended. IP-CIDR always skips DNS lookups.
+    /// valid before any rule is appended. CIDR rules always skip DNS lookups.
     public static func importRules(_ text: String) throws -> [PACRule] {
         let source = text.hasPrefix("\u{FEFF}") ? String(text.dropFirst()) : text
         var result: [PACRule] = []
@@ -146,7 +155,7 @@ public struct PACPolicy: Equatable, Codable, Sendable {
             guard let kind = PACRule.Kind(rawValue: columns[0].uppercased()) else {
                 throw PACError.invalidRuleLine(lineNumber, "PAC 不支持这种规则类型。")
             }
-            guard columns.count == 3 || (columns.count == 4 && kind == .ipCIDR && columns[3].lowercased() == "no-resolve"),
+            guard columns.count == 3 || (columns.count == 4 && kind.isCIDR && columns[3].lowercased() == "no-resolve"),
                   let decision = PACDecision(rawValue: columns[2].uppercased()) else {
                 throw PACError.invalidRuleLine(lineNumber, "请使用「类型,目标,DIRECT 或 PROXY」。")
             }
@@ -162,6 +171,9 @@ public struct PACPolicy: Equatable, Codable, Sendable {
             let action = rule.decision == .direct
             if let cidr = rule.kind == .ipCIDR ? PACIPv4CIDR(rule.value) : nil {
                 return [rule.kind.rawValue, cidr.network, cidr.mask, action]
+            }
+            if let cidr = rule.kind == .ipCIDR6 ? PACIPv6CIDR(rule.value) : nil {
+                return [rule.kind.rawValue, cidr.network, cidr.prefix, action]
             }
             return [rule.kind.rawValue, rule.value, action]
         }
@@ -218,6 +230,13 @@ public struct PACPolicy: Equatable, Codable, Sendable {
         }
         return a;
     }
+    function clayIPv6Prefix(address, network, remaining) {
+        for (var i = 0; remaining > 0; i++, remaining -= 16) {
+            var shift = Math.max(0, 16 - remaining);
+            if ((address[i] >>> shift) !== (network[i] >>> shift)) return false;
+        }
+        return true;
+    }
     function claySuffix(host, suffix) {
         return host === suffix || host.slice(-(suffix.length + 1)) === "." + suffix;
     }
@@ -227,17 +246,20 @@ public struct PACPolicy: Equatable, Codable, Sendable {
         if (host.charAt(host.length - 1) === ".") host = host.slice(0, -1);
         var v6 = host.indexOf(":") < 0 ? null : clayIPv6(host);
         var ip = v6 === null ? clayIPv4(host, false) : null;
-        var domain = ip === null && v6 === null;
-        var local = false, localIP = ip;
+        // Mihomo treats IPv4-mapped IPv6 destinations as IPv4 before matching.
+        if (v6 !== null && (v6[0] | v6[1] | v6[2] | v6[3] | v6[4]) === 0 && v6[5] === 65535) {
+            ip = v6[6] * 65536 + v6[7];
+            v6 = null;
+        }
+        var domain = ip === null && v6 === null, local = false;
         if (v6 !== null) {
             var padded = [], leadingZero = true;
             for (var k = 0; k < 8; k++) {
                 padded.push(v6[k].toString(16));
-                if (k < 5 && v6[k] !== 0) leadingZero = false;
+                if (k < 7 && v6[k] !== 0) leadingZero = false;
             }
             host = padded.join(":");
-            if (leadingZero && v6[5] === 0 && v6[6] === 0 && v6[7] <= 1) return "DIRECT";
-            if (leadingZero && v6[5] === 65535) localIP = v6[6] * 65536 + v6[7];
+            if (leadingZero && v6[7] <= 1) return "DIRECT";
             local = (v6[0] & 65024) === 64512 || (v6[0] & 65472) === 65152;
         } else if (ip !== null) {
             host = [ip >>> 24, (ip >>> 16) & 255, (ip >>> 8) & 255, ip & 255].join(".");
@@ -245,9 +267,9 @@ public struct PACPolicy: Equatable, Codable, Sendable {
             if (claySuffix(host, "localhost")) return "DIRECT";
             local = host.indexOf(".") < 0 || claySuffix(host, "local");
         }
-        if (localIP !== null) {
-            var first = localIP >>> 24, second = (localIP >>> 16) & 255;
-            if (localIP === 0 || first === 127) return "DIRECT";
+        if (ip !== null) {
+            var first = ip >>> 24, second = (ip >>> 16) & 255;
+            if (ip === 0 || first === 127) return "DIRECT";
             local = first === 10 || (first === 100 && second >= 64 && second <= 127) ||
                 (first === 169 && second === 254) || (first === 172 && second >= 16 && second <= 31) ||
                 (first === 192 && second === 168);
@@ -256,6 +278,8 @@ public struct PACPolicy: Equatable, Codable, Sendable {
             var r = CLAYRules[i], name = r[0], needle = r[1];
             if (name === "IP-CIDR") {
                 if (ip !== null && ((ip & r[2]) >>> 0) === needle) return r[3] ? "DIRECT" : CLAYProxy;
+            } else if (name === "IP-CIDR6") {
+                if (v6 !== null && clayIPv6Prefix(v6, needle, r[2])) return r[3] ? "DIRECT" : CLAYProxy;
             } else if ((name === "DOMAIN" && host === needle) ||
                        (domain && name === "DOMAIN-SUFFIX" && claySuffix(host, needle)) ||
                        (domain && name === "DOMAIN-KEYWORD" && host.indexOf(needle) >= 0)) {
@@ -286,9 +310,15 @@ struct PACTarget {
             let unscoped = value.split(separator: "%", maxSplits: 1, omittingEmptySubsequences: false)
             if unscoped.count == 2, unscoped[1].isEmpty || !unscoped[1].utf8.allSatisfy({ Self.isDomainCharacter($0) || $0 == 46 }) { return nil }
             guard let groups = Self.parseIPv6(String(unscoped[0])) else { return nil }
-            host = groups.map { String($0, radix: 16) }.joined(separator: ":")
-            ipv6 = groups
-            ipv4 = nil
+            if let address = Self.mappedIPv4(groups) {
+                host = Self.ipv4Text(address)
+                ipv4 = address
+                ipv6 = nil
+            } else {
+                host = Self.ipv6Text(groups)
+                ipv6 = groups
+                ipv4 = nil
+            }
         } else if let address = Self.parseIPv4(value) {
             host = Self.ipv4Text(address)
             ipv4 = address
@@ -366,21 +396,24 @@ struct PACTarget {
         [ip >> 24, (ip >> 16) & 255, (ip >> 8) & 255, ip & 255].map(String.init).joined(separator: ".")
     }
 
-    private var localIP: UInt32? {
-        if let ipv4 { return ipv4 }
-        guard let ipv6, ipv6.prefix(5).allSatisfy({ $0 == 0 }), ipv6[5] == 65535 else { return nil }
-        return UInt32(ipv6[6]) << 16 | UInt32(ipv6[7])
+    fileprivate static func ipv6Text(_ groups: [UInt16]) -> String {
+        groups.map { String($0, radix: 16) }.joined(separator: ":")
+    }
+
+    fileprivate static func mappedIPv4(_ groups: [UInt16]) -> UInt32? {
+        guard groups.prefix(5).allSatisfy({ $0 == 0 }), groups[5] == 65535 else { return nil }
+        return UInt32(groups[6]) << 16 | UInt32(groups[7])
     }
 
     var isLoopback: Bool {
-        if let localIP { return localIP == 0 || localIP >> 24 == 127 }
+        if let ipv4 { return ipv4 == 0 || ipv4 >> 24 == 127 }
         if let ipv6 { return ipv6.prefix(7).allSatisfy({ $0 == 0 }) && ipv6[7] <= 1 }
         return host == "localhost" || host.hasSuffix(".localhost")
     }
 
     var isLocal: Bool {
-        if let localIP {
-            let first = localIP >> 24, second = (localIP >> 16) & 255
+        if let ipv4 {
+            let first = ipv4 >> 24, second = (ipv4 >> 16) & 255
             return first == 10 || (first == 100 && (64...127).contains(second)) ||
                 (first == 169 && second == 254) || (first == 172 && (16...31).contains(second)) || (first == 192 && second == 168)
         }
@@ -403,5 +436,31 @@ private struct PACIPv4CIDR {
         self.prefix = prefix
         mask = prefix == 0 ? 0 : UInt32.max << (32 - prefix)
         network = ip & mask
+    }
+}
+
+private struct PACIPv6CIDR {
+    let network: [UInt16]
+    let mask: [UInt16]
+    let prefix: Int
+    var text: String { "\(PACTarget.ipv6Text(network))/\(prefix)" }
+
+    init?(_ text: String) {
+        let fields = text.split(separator: "/", omittingEmptySubsequences: false)
+        guard fields.count == 2, let address = PACTarget.parseIPv6(fields[0].lowercased()),
+              !fields[1].isEmpty, fields[1].utf8.allSatisfy({ (48...57).contains($0) }),
+              let prefix = Int(fields[1]), (0...128).contains(prefix) else { return nil }
+        // A mapped-only range can never match: those destinations use IP-CIDR.
+        guard prefix < 96 || PACTarget.mappedIPv4(address) == nil else { return nil }
+        self.prefix = prefix
+        mask = address.indices.map { index in
+            let bits = min(16, max(0, prefix - index * 16))
+            return bits == 0 ? 0 : UInt16.max << (16 - bits)
+        }
+        network = zip(address, mask).map { $0 & $1 }
+    }
+
+    func contains(_ address: [UInt16]) -> Bool {
+        network.indices.allSatisfy { address[$0] & mask[$0] == network[$0] }
     }
 }

@@ -13,3 +13,9 @@
 -	if sniffingEnable && snifferDispatcher.Enable() {
 +	// CLAY only needs HTTP/TLS names when routing device traffic by rules.
 +	if mode == Rule && metadata.Type == C.TUN && sniffingEnable && snifferDispatcher.Enable() {
+@@ -684,0 +686,5 @@
++					// A matched VPN rule must not fall through to a different route
++					// (including DIRECT) when its selected node cannot carry UDP.
++					if metadata.Type == C.TUN {
++						return nil, rule, errors.New("matched VPN route does not support UDP")
++					}

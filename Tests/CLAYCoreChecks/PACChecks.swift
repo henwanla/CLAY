@@ -89,8 +89,47 @@ extension CoreTests {
         } catch PACError.invalidRuleLine(3, _) { }
     }
 
+    func testIPv6PACPolicy() throws {
+        let rules = try PACPolicy.importRules("""
+        IP-CIDR6,2001:DB8:1:2:8000::9/128,PROXY,no-resolve
+        IP-CIDR6,2001:db8:1:2:8000::123/65,DIRECT
+        IP-CIDR6,::/0,PROXY
+        IP-CIDR,198.51.100.0/24,PROXY
+        DOMAIN,::ffff:203.0.113.9,PROXY
+        """)
+        try pacExpect(rules[1].exportLine == "IP-CIDR6,2001:db8:1:2:8000:0:0:0/65,DIRECT", "canonical IPv6 network base")
+        let exported = try PACPolicy.importRules(rules.map(\.exportLine).joined(separator: "\n"))
+        try pacExpect(exported.map(\.exportLine) == rules.map(\.exportLine), "IPv6 export round trip retains matching order")
+        let policy = PACPolicy(rules: rules, defaultDecision: .direct, bypassLocal: false)
+        let restored = try JSONDecoder().decode(PACPolicy.self, from: JSONEncoder().encode(policy))
+        try pacExpect(restored == policy, "IPv6 policy round trip")
+        let js = try pacScriptFunction(policy.makeScript(proxyPort: 1070))
+        for (host, decision, reason, index): (String, PACDecision, PACMatch.Reason, Int?) in [
+            ("[2001:db8:1:2:8000::9]", .proxy, .rule, 0),
+            ("[2001:DB8:1:2:8000::]", .direct, .rule, 1),
+            ("2001:db8:1:2:ffff:ffff:ffff:ffff", .direct, .rule, 1),
+            ("2001:db8:1:2:7fff:ffff:ffff:ffff", .proxy, .rule, 2),
+            ("2001:db8:1:3:8000::", .proxy, .rule, 2),
+            ("[::ffff:198.51.100.7]", .proxy, .rule, 3),
+            ("::ffff:cb00:7109", .proxy, .rule, 4),
+            ("::ffff:203.0.113.10", .direct, .fallback, nil),
+            ("::ffff:127.0.0.1", .direct, .loopback, nil),
+            ("[::1]", .direct, .loopback, nil),
+            ("ipv6-origin.test", .direct, .fallback, nil)
+        ] {
+            let hit = try policy.evaluate(host)
+            try pacExpect(hit.decision == decision && hit.reason == reason && hit.ruleIndex == index, "IPv6 preview for \(host)")
+            let expected = decision == .proxy ? "PROXY 127.0.0.1:1070" : "DIRECT"
+            try pacExpect(js.call(withArguments: ["", host])?.toString() == expected, "IPv6 script for \(host)")
+        }
+        for invalid in ["2001:db8::/129", "2001:db8::/-1", "2001:db8::/+8", "2001:db8::/", "2001::db8::1/64",
+                        "fe80::1%en0/64", "::ffff:192.0.2.1/96", "::ffff:c000:200/120", "192.0.2.0/24"] {
+            try pacExpect((try? PACRule(kind: .ipCIDR6, value: invalid, decision: .proxy)) == nil, "invalid IPv6 CIDR: \(invalid)")
+        }
+    }
+
     func testPACServer() async throws {
-        let rules = try PACPolicy.importRules("DOMAIN-SUFFIX,example.test,DIRECT\nDOMAIN,例え.テスト,DIRECT")
+        let rules = try PACPolicy.importRules("DOMAIN-SUFFIX,example.test,DIRECT\nDOMAIN,例え.テスト,DIRECT\nIP-CIDR6,2001:db8:1::/48,DIRECT")
         let policy = PACPolicy(rules: rules, defaultDecision: .proxy, bypassLocal: true)
         let script = try policy.makeScript(proxyPort: 1070)
         let first = try await PACServer.start(script: script)
@@ -123,7 +162,8 @@ extension CoreTests {
         // test sandboxes, so this check lives with the loopback fixture.
         // Evaluating these synthetic URLs does not open connections to them.
         for (address, expected) in [("https://sub.example.test/", kCFProxyTypeNone), ("http://proxy.test/", kCFProxyTypeHTTP),
-                                    ("https://proxy.test/", kCFProxyTypeHTTPS), ("https://例え.テスト/", kCFProxyTypeNone)] {
+                                    ("https://proxy.test/", kCFProxyTypeHTTPS), ("https://例え.テスト/", kCFProxyTypeNone),
+                                    ("https://[2001:db8:1::42]/", kCFProxyTypeNone), ("http://[2001:db8:2::42]/", kCFProxyTypeHTTP)] {
             var error: Unmanaged<CFError>?
             guard let url = URL(string: address),
                   let choices = CFNetworkCopyProxiesForAutoConfigurationScript(script as CFString, url as CFURL, &error)?.takeRetainedValue() as? [[String: Any]],

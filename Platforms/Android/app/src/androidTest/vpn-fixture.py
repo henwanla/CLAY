@@ -1,10 +1,10 @@
-"""Loopback-only TCP and DNS responses for smoke-vpn.sh; nothing is forwarded."""
+"""Loopback-only TCP and UDP responses for smoke-vpn.sh; nothing is forwarded."""
 from base64 import b64encode
 from pathlib import Path
 from secrets import token_hex
 from ipaddress import IPv6Address
 from socket import AF_INET6
-from socketserver import StreamRequestHandler, ThreadingTCPServer
+from socketserver import BaseRequestHandler, StreamRequestHandler, ThreadingTCPServer, UDPServer
 from ssl import PROTOCOL_TLS_SERVER, SSLContext
 from struct import pack, unpack
 from subprocess import DEVNULL, run
@@ -138,6 +138,20 @@ class LocalIPv6Server(ThreadingTCPServer):
     address_family = AF_INET6
 
 
+class DatagramOrigin(BaseRequestHandler):
+    def handle(self):
+        data, sock = self.request
+        if data == f"blocked-{proof}".encode("ascii"):
+            Path("unexpected-direct-udp").touch()
+        elif data != f"direct-{proof}".encode("ascii"):
+            return
+        sock.sendto(data, self.client_address)
+
+
+class LocalIPv6UDPServer(UDPServer):
+    address_family = AF_INET6
+
+
 def web_server(ports):
     for port in ports:
         try:
@@ -152,6 +166,8 @@ with ThreadingTCPServer(("127.0.0.1", 0), Request) as a, \
         web_server((8000, 8080, 8081, 8888)) as d, \
         LocalIPv6Server(("::1", 0), Request) as ipv6, \
         LocalIPv6Server(("::1", 0), Request) as origin_only, \
+        UDPServer(("127.0.0.1", 0), DatagramOrigin) as udp4, \
+        LocalIPv6UDPServer(("::1", 0), DatagramOrigin) as udp6, \
         web_server((8443, 9443)) as t:
     a.kind, b.kind, d.kind, ipv6.kind, origin_only.kind, t.kind = "A", "B", "D", "V6", "V6-ORIGIN", "TLS-D"
     a.http_targets = b.http_targets = {
@@ -161,7 +177,7 @@ with ThreadingTCPServer(("127.0.0.1", 0), Request) as a, \
     a.tls_target = b.tls_target = pack("!HBBBBB", t.server_address[1], 1, 10, 0, 2, 2)
     context, cert = tls_context()
     a.tls_context = b.tls_context = t.tls_context = context
-    servers = (a, b, d, ipv6, t, origin_only)
+    servers = (a, b, d, ipv6, t, origin_only, udp4, udp6)
     for server in servers:
         Thread(target=server.serve_forever, daemon=True).start()
     Path("fixture-result.tmp").write_text(" ".join(str(s.server_address[1]) for s in servers) + f" {proof} {cert}\n")

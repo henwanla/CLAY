@@ -181,7 +181,7 @@ struct PACDashboard: View {
                 Picker("类型", selection: $kind) {
                     ForEach(PACRule.Kind.allCases, id: \.self) { Text(label($0)).tag($0) }
                 }.labelsHidden().fixedSize()
-                TextField(kind == .ipCIDR ? "例如 10.0.0.0/8" : "例如 example.com", text: $matchValue).textFieldStyle(.roundedBorder)
+                TextField(matchPlaceholder, text: $matchValue).textFieldStyle(.roundedBorder)
                 Picker("动作", selection: $decision) {
                     ForEach(PACDecision.allCases, id: \.self) { Text(label($0)).tag($0) }
                 }.labelsHidden().fixedSize()
@@ -190,7 +190,7 @@ struct PACDashboard: View {
                     .disabled(matchValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             if !formError.isEmpty { Text(formError).font(.caption).foregroundStyle(.orange) }
-            Text("IP 网段只匹配 URL 中明确写出的 IPv4 地址，不额外查询 DNS。")
+            Text("IP 网段只匹配 URL 中明确写出的 IPv4 或 IPv6 地址，不额外查询 DNS。")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -198,7 +198,7 @@ struct PACDashboard: View {
     private var importSheet: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("批量导入 PAC 规则").font(.title2.bold())
-            Text("每行一条，可用 DOMAIN、DOMAIN-SUFFIX、DOMAIN-KEYWORD、IP-CIDR，动作填 DIRECT 或 PROXY。导入后追加到列表末尾。")
+            Text("每行一条，可用 DOMAIN、DOMAIN-SUFFIX、DOMAIN-KEYWORD、IP-CIDR、IP-CIDR6，动作填 DIRECT 或 PROXY。导入后追加到列表末尾。")
                 .foregroundStyle(.secondary)
             Text("DOMAIN-SUFFIX,example.com,PROXY").font(.caption.monospaced()).foregroundStyle(.secondary)
             TextEditor(text: $importText).font(.body.monospaced()).frame(height: 150)
@@ -231,6 +231,14 @@ struct PACDashboard: View {
 
     private func resetForm() { editing = nil; matchValue = ""; formError = "" }
 
+    private var matchPlaceholder: String {
+        switch kind {
+        case .ipCIDR: return "例如 10.0.0.0/8"
+        case .ipCIDR6: return "例如 2001:db8::/32"
+        default: return "例如 example.com"
+        }
+    }
+
     private func label(_ decision: PACDecision) -> String { decision == .direct ? "直连" : "走代理" }
     private func label(_ kind: PACRule.Kind) -> String {
         switch kind {
@@ -238,6 +246,7 @@ struct PACDashboard: View {
         case .domainSuffix: return "域名后缀"
         case .domainKeyword: return "域名关键词"
         case .ipCIDR: return "IPv4 网段"
+        case .ipCIDR6: return "IPv6 网段"
         @unknown default: return kind.rawValue
         }
     }

@@ -58,12 +58,13 @@ Choose a routing mode from Overview or the menu bar. **Rule** uses the loaded po
 | System proxy | Select Connect macOS (**连接 macOS**). You can choose the network service in PAC Rules. | Apps that use the macOS proxy follow the current routing mode. The service’s other proxy settings are temporarily disabled. |
 | Custom system PAC | In PAC Rules, select Apply custom PAC (**应用自定义 PAC**). | Direct PAC matches bypass the core. Select Follow routing mode (**跟随流量模式**) to switch back. |
 
-Rules run from top to bottom. The first match wins; unmatched traffic uses your chosen Direct or Proxy default. The initial default is Proxy. Loopback is always direct. Explicit rules can override the optional local and private address bypass. Rules match exact domains or IPs, domain suffixes, domain keywords, and IPv4 CIDR ranges. CIDR applies to literal IPv4 addresses without a DNS lookup. Enter a domain, IP, or URL to see which rule matches. Paste rules one per line to append them in bulk, for example:
+Rules run from top to bottom. The first match wins; unmatched traffic uses your chosen Direct or Proxy default. The initial default is Proxy. Loopback is always direct. Explicit rules can override the optional local and private address bypass. Rules match exact domains or IPs, domain suffixes, domain keywords, and IPv4 CIDR ranges. Development builds add IPv6 CIDR ranges. CIDR rules match destination IPs without a DNS lookup. IPv4-mapped addresses such as `::ffff:192.0.2.7` use IPv4 rules. Enter a domain, IP, or URL to see which rule matches. Paste rules one per line to append them in bulk, for example:
 
 ```text
 DOMAIN,docs.example.com,DIRECT
 DOMAIN-SUFFIX,example.com,PROXY
 IP-CIDR,10.0.0.0/8,DIRECT
+IP-CIDR6,2001:db8:1234::/48,PROXY
 ```
 
 Rule edits are saved locally. Select Update to apply edits to a running custom system PAC or local PAC. The local PAC URL changes when you update it, so copy the new URL into manually configured apps. CLAY saves the previous proxy settings for the selected network service before applying system PAC. Use Restore original settings (**恢复原系统设置**) to turn it off; CLAY also tries to restore the previous settings when you stop or quit. macOS may request administrator authorization on apply or restore. After a forced exit, reopen CLAY and use Restore original network proxy settings (**恢复原网络代理设置**) if prompted. If another tool has taken over, CLAY leaves its settings in place.

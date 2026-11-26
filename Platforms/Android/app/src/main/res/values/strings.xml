@@ -31,7 +31,7 @@
     <string name="pac_reason_loopback">Loopback protection</string>
     <string name="pac_reason_local">Local or private address</string>
     <string name="pac_reason_fallback">Default action</string>
-    <string name="pac_invalid_rule">Invalid rule on line %1$d. Use DOMAIN, DOMAIN-SUFFIX, DOMAIN-KEYWORD, or IP-CIDR with DIRECT or PROXY.</string>
+    <string name="pac_invalid_rule">Invalid rule on line %1$d. Use DOMAIN, DOMAIN-SUFFIX, DOMAIN-KEYWORD, IP-CIDR, or IP-CIDR6 with DIRECT or PROXY.</string>
     <string name="pac_invalid_host">Enter a valid domain, IP address, or URL.</string>
     <string name="input_too_large">This input is too large to preview.</string>
     <string name="running">Checking…</string>

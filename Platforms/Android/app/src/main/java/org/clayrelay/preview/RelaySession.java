@@ -42,6 +42,7 @@ final class RelaySession implements AutoCloseable {
     private int proxy, control;
     private String secret, password;
     private String[] ids;
+    private boolean vpn;
 
     static final class State {
         final int proxy, node;
@@ -61,11 +62,17 @@ final class RelaySession implements AutoCloseable {
     boolean needsCleanup() { return directory != null || child != null; }
 
     State start(Context context, byte[] source, int node, String mode, String rules, int ruleOptions) throws Exception {
+        return start(context, source, node, mode, rules, ruleOptions, null);
+    }
+
+    State start(Context context, byte[] source, int node, String mode, String rules, int ruleOptions,
+                VpnTransport transport) throws Exception {
         if (child != null || directory != null) throw new IOException();
+        vpn = transport != null;
         File lib = new File(context.getApplicationInfo().nativeLibraryDir);
         File engine = new File(lib, "libclay_mihomo.so"), launcher = new File(lib, "libclay_launcher.so");
-        if (!BuildFlavor.RELAY || !BuildFlavor.ENGINE_SHA256.equals(sha256(engine))) throw new IOException();
-        File target = new File(context.getNoBackupFilesDir(), "clay-relay-" + randomHex(16));
+        if (!(vpn ? BuildFlavor.VPN : BuildFlavor.RELAY) || !BuildFlavor.ENGINE_SHA256.equals(sha256(engine))) throw new IOException();
+        File target = new File(context.getNoBackupFilesDir(), (vpn ? "v-" : "clay-relay-") + randomHex(16));
         if (!target.mkdir()) throw new IOException();
         directory = target;
         try {
@@ -77,7 +84,7 @@ final class RelaySession implements AutoCloseable {
                 proxy = first.getLocalPort(); control = second.getLocalPort();
                 JSONObject request = new JSONObject().put("node", node - 1).put("proxy", proxy).put("controller", control)
                         .put("secret", secret).put("password", password).put("mode", mode).put("rules", rules)
-                        .put("ruleOptions", ruleOptions);
+                        .put("ruleOptions", ruleOptions).put("vpn", vpn);
                 byte[] options = request.toString().getBytes(StandardCharsets.UTF_8);
                 byte[] generated;
                 try { generated = NativePreview.config(source, options); }
@@ -100,11 +107,17 @@ final class RelaySession implements AutoCloseable {
             }
             ProcessBuilder process = new ProcessBuilder(launcher.getPath(), Integer.toString(android.os.Process.myPid()),
                     engine.getPath(), "-d", directory.getPath(), "-f", config.getPath());
+            if (transport != null) {
+                transport.establish();
+                process.command(launcher.getPath(), Integer.toString(android.os.Process.myPid()), engine.getPath(),
+                        directory.getPath(), config.getPath(), "protect");
+            }
             Map<String, String> env = process.environment();
             env.clear();
             env.put("HOME", directory.getPath()); env.put("TMPDIR", directory.getPath()); env.put("PATH", "/system/bin");
             child = process.directory(directory).redirectErrorStream(true).redirectOutput(new File("/dev/null")).start();
             child.getOutputStream().close();
+            if (transport != null) transport.attach(directory);
             long deadline = SystemClock.elapsedRealtime() + 8_000;
             while (running() && SystemClock.elapsedRealtime() < deadline) {
                 try {
@@ -121,6 +134,8 @@ final class RelaySession implements AutoCloseable {
         }
     }
 
+    boolean contains(int node) { return ids != null && node >= 1 && node <= ids.length; }
+
     State change(int node, String mode) throws Exception {
         if (ids == null || node < 1 || node > ids.length || !Arrays.asList("rule", "global", "direct").contains(mode)) {
             throw new IOException();
@@ -129,6 +144,7 @@ final class RelaySession implements AutoCloseable {
             State before = refresh();
             if (before.node != node) request("PUT", "/proxies/CLAY", new JSONObject().put("name", ids[node - 1]));
             if (!before.mode.equals(mode)) request("PATCH", "/configs", new JSONObject().put("mode", mode));
+            if (vpn && (before.node != node || !before.mode.equals(mode))) request("DELETE", "/connections", null);
             State state = refresh();
             if (state.node != node || !state.mode.equals(mode)) throw new IOException();
             return state;
@@ -144,6 +160,7 @@ final class RelaySession implements AutoCloseable {
         JSONObject config = request("GET", "/configs", null);
         String mode = config.getString("mode");
         if (config.getInt("mixed-port") != proxy || config.getBoolean("allow-lan")
+                || (vpn && !config.getJSONObject("tun").getBoolean("enable"))
                 || !Arrays.asList("rule", "global", "direct").contains(mode)) throw new IOException();
         String selected = request("GET", "/proxies/CLAY", null).getString("now");
         int index = Arrays.asList(ids).indexOf(selected);
@@ -164,7 +181,7 @@ final class RelaySession implements AutoCloseable {
                 try (java.io.OutputStream output = http.getOutputStream()) { output.write(body); }
             }
             int status = http.getResponseCode();
-            if (object != null && status == 204) return new JSONObject();
+            if ((object != null || method.equals("DELETE")) && status == 204) return new JSONObject();
             if (status != 200) throw new IOException();
             try (InputStream in = http.getInputStream(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
                 byte[] bytes = new byte[4096];
@@ -201,6 +218,11 @@ final class RelaySession implements AutoCloseable {
             child.destroy();
             long deadline = SystemClock.elapsedRealtime() + 2500;
             while (running() && SystemClock.elapsedRealtime() < deadline) SystemClock.sleep(30);
+            if (running() && android.os.Build.VERSION.SDK_INT >= 26) {
+                child.destroyForcibly();
+                deadline = SystemClock.elapsedRealtime() + 1000;
+                while (running() && SystemClock.elapsedRealtime() < deadline) SystemClock.sleep(30);
+            }
             if (running()) throw new IOException();
             child = null;
         }

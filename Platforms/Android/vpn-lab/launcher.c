@@ -25,6 +25,9 @@ static int inherit_fd(int source, int target) {
 int main(int argc, char **argv) {
     if (argc != 6 || (strcmp(argv[5], "off") && strcmp(argv[5], "protect"))) return 64;
     const int protect = !strcmp(argv[5], "protect");
+#ifdef CLAY_REQUIRE_PROTECTION
+    if (!protect) return 64;
+#endif
     char *end = NULL;
     errno = 0;
     long expected = strtol(argv[1], &end, 10);

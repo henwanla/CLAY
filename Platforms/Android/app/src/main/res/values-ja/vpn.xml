@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="vpn_title">CLAY VPN プレビュー</string>
+    <string name="vpn_eyebrow">Android VPN プレビュー</string>
+    <string name="vpn_intro_top">ノードを貼り付けてルールを確認し、必要に応じて IPv4 トンネルを開始します。</string>
+    <string name="vpn_intro">接続中は IPv4 をトンネルに通し、IPv6 を遮断します。信頼できる IPv4 DNS を指定してください。グローバルモードの DNS には UDP 対応ノードが必要です。ノードの名前解決にシステム DNS を使う場合があります。VPN の停止または切断後は通常の通信に戻ります。</string>
+    <string name="vpn_dns">信頼できる IPv4 DNS サーバー</string>
+    <string name="vpn_start">VPN を開始</string>
+    <string name="vpn_stop">VPN を停止</string>
+    <string name="vpn_stopped">VPN は停止しています。</string>
+    <string name="vpn_starting">IPv4 トンネルを開始中…</string>
+    <string name="vpn_updating">ノードとモードを適用中…</string>
+    <string name="vpn_stopping">VPN を停止中…</string>
+    <string name="vpn_ready">IPv4 トンネル接続中 · ノード %1$d · %2$s</string>
+    <string name="vpn_denied">VPN の使用が許可されませんでした。</string>
+    <string name="vpn_failed">VPN を確認できません。ノード、DNS、ルール、システムの VPN 設定を確認してください。</string>
+    <string name="vpn_ended">VPN プロセスが終了し、通常の通信に戻ります。</string>
+    <string name="vpn_revoked">Android によって VPN の許可が取り消されました。</string>
+    <string name="vpn_invalid">ノード設定を貼り付け、ノードと有効な IPv4 DNS を指定してください。</string>
+    <string name="vpn_notification">IPv4 トンネルセッション · CLAY で状態を確認</string>
+    <string name="vpn_cleanup_failed">VPN の終了を確認できません。システムの VPN 設定を確認してください。</string>
+</resources>

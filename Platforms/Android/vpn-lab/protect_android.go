@@ -1,4 +1,4 @@
-// This file is compiled only into the pinned test engine by run.sh.
+// Compiled into the pinned Android VPN engine and the emulator fixture.
 package main
 
 import (
@@ -21,8 +21,10 @@ const (
 	accepted  = 0x01
 )
 
+var clayRequireProtection string // Set by the VPN build; the control cases in the lab may disable protection.
+
 func init() {
-	if os.Getenv("CLAY_VPN_LAB_PROTECT") != "1" {
+	if clayRequireProtection != "1" && os.Getenv("CLAY_VPN_LAB_PROTECT") != "1" {
 		return
 	}
 	file := os.NewFile(protectFD, "clay-protect-channel")

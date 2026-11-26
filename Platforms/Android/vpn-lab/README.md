@@ -21,4 +21,4 @@ export JAVA_HOME=/absolute/path/to/jdk17
 bash Platforms/Android/vpn-lab/run.sh emulator-5576 /absolute/path/to/mihomo-v1.19.34.tgz
 ```
 
-可以用 `ADB`、`ANDROID_ADB_SERVER_PORT` 指定 ADB 和独立端口。脚本只给测试 APK 预设模拟器授权，成功时输出 `CLAY_PROBE_PROTECT_off_PASS`、`CLAY_PROBE_PROTECT_deny_PASS`、`CLAY_PROBE_PROTECT_on_PASS` 和 `CLAY_PROBE_DNS_UDP_PASS`；结束后移除测试客户端、卸载测试包并清理临时文件。它不会发布 APK 或内核；以后如需分发修改后的内核，需随版本提供相应源码、补丁、构建说明和许可。
+可以用 `ADB`、`ANDROID_ADB_SERVER_PORT` 指定 ADB 和独立端口。脚本只给测试 APK 预设模拟器授权，成功时输出 `CLAY_PROBE_PROTECT_off_PASS`、`CLAY_PROBE_PROTECT_deny_PASS`、`CLAY_PROBE_PROTECT_on_PASS` 和 `CLAY_PROBE_DNS_UDP_PASS`；结束后移除测试客户端、卸载测试包并清理临时文件。实验脚本不会发布 APK 或内核。[独立 VPN 技术预览](../README.md#vpn-技术预览--vpn-technical-preview)复用 TUN 补丁和描述符通道，并在构建时强制启用套接字保护。任何公开分发均需随版本提供对应源码、补丁、构建说明和许可。

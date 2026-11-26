@@ -94,7 +94,9 @@ The [Windows desktop preview](Platforms/Windows/README.md) offers a manual loopb
 
 The [Android ARM64 offline preview](Platforms/Android/README.md) checks profiles and PAC rules in Simplified Chinese, English, and Japanese. The debug APK passed tests on an Android API 24 ARM64 emulator. It has no network permission or VPN support.
 
-The [Android local relay preview](Platforms/Android/README.md#本机代理预览--local-relay-preview) uses a separate app ID. Clients that accept authenticated HTTP or SOCKS5 proxies can connect manually over loopback. The app can switch nodes and Rule, Global, or Direct mode. Subscription downloads, device-wide routing, and a persistent background service are still pending.
+The [Android local relay preview](Platforms/Android/README.md#本机代理预览--local-relay-preview) uses a separate app ID. Clients that accept authenticated HTTP or SOCKS5 proxies can connect manually over loopback. The app can switch nodes and Rule, Global, or Direct mode. Only clients configured with the manual proxy are affected.
+
+The separate [Android VPN technical preview](Platforms/Android/README.md#vpn-技术预览--vpn-technical-preview) is a development APK with IPv4 system routing, a foreground service, and node and mode switching. Physical devices, domain rules, and DNS routing need more testing. There is no VPN release APK or subscription downloader yet.
 
 [Contributing](CONTRIBUTING.md) · [Verification record](docs/验收记录.md) · [Release process](docs/RELEASING.md) · [Security maintenance](docs/安全维护.md)
 

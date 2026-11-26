@@ -30,6 +30,13 @@ public func relayConfig(
     // even on loopback; the controller uses its own independent secret.
     config["authentication"] = ["clay:\(password)"]
     config["skip-auth-prefixes"] = [String]()
+    if options["vpn"] as? Bool == true {
+        // Android owns all routes. The supplied IPv4 DNS address is a regular
+        // tunnel destination and follows the selected engine mode/rules.
+        config["tun"] = ["enable": true, "stack": "gvisor", "auto-route": false,
+                         "auto-detect-interface": false, "file-descriptor": 100, "mtu": 1500,
+                         "inet4-address": ["198.18.0.1/30"], "dns-hijack": [String]()]
+    }
     let ids = profiles.map(\.localName)
     // Mihomo reads this as YAML. Preserve the Swift encoding rather than
     // re-serializing the nested object with Android's slash-escaping JSON writer.

@@ -5,11 +5,13 @@ android_dir="$PWD"
 repo=$(cd ../.. && pwd)
 with_tests=false
 relay_archive=
+vpn_archive=
 while [[ $# != 0 ]]; do
   case $1 in
     --test) with_tests=true; shift ;;
     --relay) [[ $# -ge 2 ]]; relay_archive=$2; shift 2 ;;
-    *) printf 'Usage: bash Platforms/Android/build-apk.sh [--test] [--relay VERIFIED_ANDROID_MIHOMO_GZ]\n' >&2; exit 64 ;;
+    --vpn) [[ $# -ge 2 ]]; vpn_archive=$2; shift 2 ;;
+    *) printf 'Usage: bash Platforms/Android/build-apk.sh [--test] [--relay VERIFIED_ANDROID_MIHOMO_GZ | --vpn VERIFIED_MIHOMO_SOURCE_TGZ]\n' >&2; exit 64 ;;
   esac
 done
 
@@ -54,6 +56,14 @@ flavor=preview
 app_id=org.clayrelay.preview
 manifest="$src/AndroidManifest.xml"
 engine_sha=
+min_api=23
+[[ -z "$relay_archive" || -z "$vpn_archive" ]]
+if [[ -n "$vpn_archive" ]]; then
+  flavor=vpn
+  app_id=org.clayrelay.vpn
+  manifest="$android_dir/app/src/vpn/AndroidManifest.xml"
+  min_api=26
+fi
 if [[ -n "$relay_archive" ]]; then
   flavor=relay
   app_id=org.clayrelay.relay
@@ -83,6 +93,12 @@ if [[ "$flavor" == relay ]]; then
   "$ndk/bin/aarch64-linux-android23-clang" -fPIE -pie -O2 -Wall -Wextra -Werror \
     -o "$lib/libclay_launcher.so" "$src/c/relay-launcher.c"
 fi
+if [[ "$flavor" == vpn ]]; then
+  bash "$android_dir/build-vpn-engine.sh" "$vpn_archive" "$lib/libclay_mihomo.so"
+  engine_sha=$(shasum -a 256 < "$lib/libclay_mihomo.so" | cut -d ' ' -f1)
+  "$ndk/bin/aarch64-linux-android23-clang" -DCLAY_REQUIRE_PROTECTION -fPIE -pie -O2 -Wall -Wextra -Werror \
+    -o "$lib/libclay_launcher.so" "$android_dir/vpn-lab/launcher.c"
+fi
 for native in "$lib"/*.so; do
   report=$("$ndk/bin/llvm-readelf" -h "$native")
   grep -q 'Machine:.*AArch64' <<< "$report"
@@ -102,6 +118,12 @@ install -m 644 "$ANDROID_NDK_HOME/NOTICE.toolchain" "$licenses/Android-NDK.txt"
 if [[ "$flavor" == relay ]]; then
   printf '%s\n' 'Mihomo v1.19.34: unmodified upstream Android arm64 executable.' \
     'GPL-3.0; source and license: https://github.com/MetaCubeX/mihomo/tree/v1.19.34' > "$licenses/Mihomo.txt"
+fi
+
+if [[ "$flavor" == vpn ]]; then
+  tar -xOf "$vpn_archive" mihomo-1.19.34/LICENSE > "$licenses/Mihomo-LICENSE.txt"
+  printf '%s\n' 'Mihomo v1.19.34 with CLAY Android TUN and socket protection changes.' \
+    'Corresponding source, patches and build recipe: Platforms/Android in the source checkout used to build this APK.' > "$licenses/Mihomo.txt"
 fi
 
 key="$out/debug.p12"
@@ -124,20 +146,21 @@ compile_java() {
   mkdir -p "$path/classes"
   "$JAVA_HOME/bin/javac" --release 8 -encoding UTF-8 -classpath "$classpath" -d "$path/classes" "$@"
   "$JAVA_HOME/bin/jar" cf "$path/classes.jar" -C "$path/classes" .
-  "$bt/d8" --min-api 23 --lib "$platform" --output "$path" "$path/classes.jar"
+  "$bt/d8" --min-api "$min_api" --lib "$platform" --output "$path" "$path/classes.jar"
   (cd "$path" && zip -q unsigned.apk classes.dex)
 }
 
 main="$stage/main"
 mkdir -p "$main/gen"
 "$bt/aapt2" compile --dir "$src/res" -o "$main/res.zip"
-"$bt/aapt2" link -I "$platform" --manifest "$manifest" --min-sdk-version 23 \
+"$bt/aapt2" link -I "$platform" --manifest "$manifest" --min-sdk-version "$min_api" \
   --target-sdk-version 35 --version-code 1 --version-name "$version" --java "$main/gen" --custom-package org.clayrelay.preview \
   -A "$main/assets" -o "$main/unsigned.apk" "$main/res.zip"
 cat > "$main/gen/org/clayrelay/preview/BuildFlavor.java" <<JAVA
 package org.clayrelay.preview;
 final class BuildFlavor {
     static final boolean RELAY = $(if [[ "$flavor" == relay ]]; then printf true; else printf false; fi);
+    static final boolean VPN = $(if [[ "$flavor" == vpn ]]; then printf true; else printf false; fi);
     static final String ENGINE_SHA256 = "$engine_sha";
 }
 JAVA
@@ -146,6 +169,10 @@ compile_java "$main" "$platform" "$src/java/org/clayrelay/preview/"*.java "$main
 permissions=$("$bt/aapt2" dump permissions "$main/unsigned.apk")
 if [[ "$flavor" == relay ]]; then
   [[ $(grep '^uses-permission' <<< "$permissions") == "uses-permission: name='android.permission.INTERNET'" ]]
+elif [[ "$flavor" == vpn ]]; then
+  expected=$(printf '%s\n' android.permission.{FOREGROUND_SERVICE,FOREGROUND_SERVICE_SYSTEM_EXEMPTED,INTERNET,POST_NOTIFICATIONS} | sort)
+  actual=$(sed -n "s/^uses-permission: name='\([^']*\)'$/\1/p" <<< "$permissions" | sort)
+  [[ "$actual" == "$expected" && $(grep -c '^uses-permission' <<< "$permissions") == 4 ]]
 elif grep -q 'uses-permission' <<< "$permissions"; then
   printf 'The offline APK must not declare device permissions.\n' >&2
   exit 1
@@ -156,13 +183,13 @@ if $with_tests; then
   test_src="$android_dir/app/src/androidTest"
   test_stage="$stage/test"
   mkdir -p "$test_stage"
-  "$bt/aapt2" link -I "$platform" --manifest "$test_src/AndroidManifest.xml" --min-sdk-version 23 \
+  "$bt/aapt2" link -I "$platform" --manifest "$test_src/AndroidManifest.xml" --min-sdk-version "$min_api" \
     --target-sdk-version 35 --rename-manifest-package "$app_id.tests" \
     --rename-instrumentation-target-package "$app_id" -o "$test_stage/unsigned.apk"
   compile_java "$test_stage" "$platform:$main/classes.jar" "$test_src/java/org/clayrelay/preview/"*.java
   finish_apk "$test_stage"
   test_name=test
-  [[ "$flavor" != relay ]] || test_name=relay-test
+  [[ "$flavor" == preview ]] || test_name="$flavor-test"
   mv -f "$test_stage/final.apk" "$out/CLAY-Android-arm64-$test_name.apk"
   printf '%s\n' "$out/CLAY-Android-arm64-$test_name.apk"
 fi

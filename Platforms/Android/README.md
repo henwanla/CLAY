@@ -83,3 +83,24 @@ python3 Platforms/Android/smoke-portable.py \
 ```
 
 可用 `--adb` 和 `--adb-port` 指定隔离的 ADB 安装及端口。测试只使用 `/data/local/tmp` 的随机临时目录，退出时清理。首次实测在单独 ADB 端口的无窗口模拟器中执行，未连接真机。API 24 的老加载器会报告新版 NDK 的两个 ELF 元数据提示；脚本只过滤原样匹配的提示，其余成功命令的标准错误仍会使测试失败。
+
+### VPN 技术预览 / VPN technical preview
+
+另一个 ARM64 调试 APK（Android 8.0+，包名 `org.clayrelay.vpn`）可和离线版及本机代理版共存。先粘贴节点和可选规则，再填写可信的 IPv4 DNS，选择节点与模式，点「启动 VPN」并确认 Android 系统提示。关闭界面后由前台服务继续运行，可在通知或应用内停止。节点和模式从内核读回，变更时会结束现有连接。规则更新需重新启动会话。
+
+当前仅接管 IPv4，未启用 IPv6，也不支持始终开启或断网保护。停止、撤销或进程退出后，设备会恢复普通网络。设备发往所填 DNS 的流量按当前模式和规则转发；全局模式需要节点支持 UDP，节点域名的引导解析可能使用系统 DNS。现阶段只验证了 IP 规则，域名分流、Private DNS、加密 DNS、网络切换和真机仍需验证。预览版不下载订阅，也不打包在当前公开 Release。
+
+The separate Android 8.0+ ARM64 APK imports pasted profiles and optional rules. Enter a trusted IPv4 DNS server, choose a node and mode, then confirm Android's VPN prompt. The service can outlive the screen. Stop it in the app or from its notification. Node and mode changes are confirmed by the engine and close existing connections. Restart to change the rules.
+
+This preview routes IPv4 only; it does not enable IPv6, always-on VPN, or a kill switch. Normal networking resumes after stop, revocation, or process exit. Traffic to the configured DNS follows the selected routing policy; Global mode requires a UDP-capable node, and node hostnames may still use system DNS for bootstrap. The emulator test checks IP rules. Domain rules, Private DNS, encrypted DNS, network changes, and physical devices still need testing. There is no subscription downloader or public VPN APK release yet.
+
+The build verifies the exact [Mihomo v1.19.34 source archive](https://codeload.github.com/MetaCubeX/mihomo/tar.gz/refs/tags/v1.19.34) and uses Go 1.24.3, the NDK and the Swift tools above. Corresponding engine source consists of that archive, [the TUN patch](vpn-lab/external-tun.patch), [the socket hook](vpn-lab/protect_android.go), and the [build recipe](build-vpn-engine.sh). Any distributed APK must ship corresponding source and license materials for that build.
+
+```sh
+bash Platforms/Android/build-apk.sh --test --vpn /absolute/path/to/mihomo-v1.19.34.tgz
+ADB="$ANDROID_HOME/platform-tools/adb" bash Platforms/Android/smoke-vpn.sh emulator-5578 \
+  .build/android-apk/CLAY-Android-arm64-vpn.apk \
+  .build/android-apk/CLAY-Android-arm64-vpn-test.apk
+```
+
+The smoke test uses a disposable Android 15 ARM64 emulator and loopback VLESS fixtures. It preauthorizes the test package and leaves testing the system consent dialog for manual verification. The test checks actual IPv4 forwarding, node changes, Rule/Global/Direct, background operation, both stop controls and route cleanup. It uninstalls the test apps when done.

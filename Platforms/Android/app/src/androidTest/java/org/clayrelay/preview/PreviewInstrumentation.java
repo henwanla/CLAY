@@ -13,7 +13,10 @@ import org.json.JSONObject;
 
 /** Exercises the native Activity and Swift core using synthetic offline inputs. */
 public final class PreviewInstrumentation extends Instrumentation {
+    private Bundle arguments;
+
     @Override public void onCreate(Bundle args) {
+        arguments = args;
         super.onCreate(args);
         start();
     }
@@ -28,7 +31,9 @@ public final class PreviewInstrumentation extends Instrumentation {
             activity = startActivitySync(intent);
             exercise(activity);
             if (BuildFlavor.RELAY) RelayChecks.run(this, activity);
-            report.putString("stream", "\nCLAY_ANDROID_PREVIEW_PASS\n" + (BuildFlavor.RELAY ? "CLAY_ANDROID_RELAY_PASS\n" : ""));
+            if (BuildFlavor.VPN) VpnChecks.run(this, activity, arguments);
+            report.putString("stream", "\nCLAY_ANDROID_PREVIEW_PASS\n" + (BuildFlavor.RELAY ? "CLAY_ANDROID_RELAY_PASS\n" : "")
+                    + (BuildFlavor.VPN ? "CLAY_ANDROID_VPN_PASS\n" : ""));
             result = Activity.RESULT_OK;
         } catch (Exception | AssertionError e) {
             // The only data reported are test step labels, never runtime input.

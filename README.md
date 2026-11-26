@@ -94,7 +94,9 @@ Linux 有 [GTK 桌面预览](Platforms/Linux/README.md)，支持手动和 GNOME 
 
 [Android ARM64 离线预览](Platforms/Android/README.md)可检查节点和 PAC 规则，支持简体中文、英文和日文。它没有联网权限，也不提供 VPN；调试 APK 已在 Android API 24 ARM64 模拟器验收。
 
-[Android 本机代理预览](Platforms/Android/README.md#本机代理预览--local-relay-preview)使用独立应用 ID。它可为支持认证 HTTP/SOCKS5 代理的应用提供手动回环接入、节点切换及规则／全局／直连。下载真实订阅、系统接管和后台常驻仍待实现。
+[Android 本机代理预览](Platforms/Android/README.md#本机代理预览--local-relay-preview)使用独立应用 ID。它可为支持认证 HTTP/SOCKS5 代理的应用提供手动回环接入、节点切换及规则／全局／直连。它只代理手动配置过的应用。
+
+[Android VPN 技术预览](Platforms/Android/README.md#vpn-技术预览--vpn-technical-preview)是独立的调试 APK，支持 IPv4 系统接管、前台服务、节点和模式切换。仍需验证真机、域名与 DNS 分流，暂未提供公开安装包或订阅下载。
 
 [参与开发](CONTRIBUTING.md) · [架构调研](docs/架构调研.md) · [验收记录](docs/验收记录.md) · [打包及发布](docs/RELEASING.md) · [安全维护](docs/安全维护.md)
 

@@ -35,6 +35,7 @@ public final class MainActivity extends Activity {
     private static final int MAX_SOURCE = 2 * 1024 * 1024, MAX_TARGET = 16_384;
     private final ExecutorService workers = Executors.newSingleThreadExecutor();
     private RelayPanel relay;
+    private VpnPanel vpn;
     private int ink, muted, accent;
 
     @Override public void onCreate(Bundle state) {
@@ -68,9 +69,9 @@ public final class MainActivity extends Activity {
             });
             scroll.requestApplyInsets();
         }
-        add(list, label(getString(R.string.eyebrow), 13, accent, true), 0);
+        add(list, label(getString(BuildFlavor.VPN ? R.string.vpn_eyebrow : R.string.eyebrow), 13, accent, true), 0);
         add(list, label(getString(R.string.app_name), 36, ink, true), 4);
-        add(list, label(getString(R.string.intro), 15, muted, false), 7);
+        add(list, label(getString(BuildFlavor.VPN ? R.string.vpn_intro_top : R.string.intro), 15, muted, false), 7);
 
         LinearLayout nodes = card(list, R.string.nodes_title);
         EditText nodeInput = input(nodes, ID_NODE_INPUT, R.string.nodes_label, R.string.nodes_hint, 4);
@@ -88,6 +89,7 @@ public final class MainActivity extends Activity {
                 (direct.isChecked() ? 1 : 0) | (bypass.isChecked() ? 2 : 0)));
         pacAction.clear.setOnClickListener(v -> { rules.setText(""); target.setText(""); pacAction.reset(); });
         if (BuildFlavor.RELAY) relay = new RelayPanel(this, card(list, R.string.relay_title), nodeInput, rules, direct, bypass);
+        if (BuildFlavor.VPN) vpn = new VpnPanel(this, card(list, R.string.vpn_title), nodeInput, rules, direct, bypass);
         list.requestFocus();
     }
 
@@ -96,7 +98,18 @@ public final class MainActivity extends Activity {
         super.onPause();
     }
 
+    @Override protected void onActivityResult(int request, int result, android.content.Intent data) {
+        super.onActivityResult(request, result, data);
+        if (vpn != null && request == VpnPanel.CONSENT) vpn.granted(result == RESULT_OK);
+    }
+
+    @Override public void onRequestPermissionsResult(int request, String[] permissions, int[] grants) {
+        super.onRequestPermissionsResult(request, permissions, grants);
+        if (vpn != null && request == VpnPanel.NOTICES) vpn.requestVpn();
+    }
+
     @Override protected void onDestroy() {
+        if (vpn != null) vpn.destroy();
         if (relay != null) relay.destroy();
         workers.shutdownNow();
         super.onDestroy();

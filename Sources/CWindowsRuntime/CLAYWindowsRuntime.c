@@ -3,6 +3,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#include <winhttp.h>
 #include <bcrypt.h>
 #include <iphlpapi.h>
 #include <sddl.h>
@@ -310,17 +311,16 @@ static BOOL own_listeners(const clay_win_session *s) {
 
 // stdout can be a full pipe. A dedicated worker handling this single, public
 // line keeps console messages and process teardown responsive.
-static char ready_line[112];
-static DWORD WINAPI emit_ready(LPVOID ignored) {
+static char output_line[256];
+static DWORD WINAPI emit_line(LPVOID ignored) {
     (void)ignored;
-    DWORD length = (DWORD)strlen(ready_line), written = 0;
+    DWORD length = (DWORD)strlen(output_line), written = 0;
     HANDLE stdout_handle = GetStdHandle(STD_OUTPUT_HANDLE);
-    return WriteFile(stdout_handle, ready_line, length, &written, NULL) && written == length ? 0 : 1;
+    return WriteFile(stdout_handle, output_line, length, &written, NULL) && written == length ? 0 : 1;
 }
-static int32_t announce(const clay_win_session *s) {
-    if (sprintf_s(ready_line, sizeof(ready_line), "mihomo=ready proxy=127.0.0.1:%u controller=127.0.0.1:%u\r\n",
-                  (unsigned)s->proxy_port, (unsigned)s->control_port) <= 0) return CLAY_WIN_OUTPUT;
-    HANDLE worker = CreateThread(NULL, 0, emit_ready, NULL, 0, NULL);
+int32_t clay_win_emit(clay_win_session *s, const char *line) {
+    if (sprintf_s(output_line, sizeof(output_line), "%s\r\n", line) <= 0) return CLAY_WIN_OUTPUT;
+    HANDLE worker = CreateThread(NULL, 0, emit_line, NULL, 0, NULL);
     if (!worker) return CLAY_WIN_OUTPUT;
     HANDLE waits[] = {stop_event, s->process, worker};
     DWORD wait = WaitForMultipleObjects(3, waits, FALSE, 2000), code = 1;
@@ -334,7 +334,7 @@ static int32_t announce(const clay_win_session *s) {
     return code == 0 ? CLAY_WIN_OK : CLAY_WIN_OUTPUT;
 }
 
-int32_t clay_win_run(clay_win_session *s, const uint8_t *config, size_t length) {
+int32_t clay_win_start(clay_win_session *s, const uint8_t *config, size_t length) {
     if (stopped()) return CLAY_WIN_INTERRUPTED;
     if (!write_config(s, config, length)) return CLAY_WIN_FILES;
     if (!launch(s)) return stopped() ? CLAY_WIN_INTERRUPTED : CLAY_WIN_LAUNCH;
@@ -347,14 +347,118 @@ int32_t clay_win_run(clay_win_session *s, const uint8_t *config, size_t length) 
         if (own_listeners(s) && WaitForSingleObject(s->process, 0) == WAIT_TIMEOUT) break;
         if (GetTickCount64() >= deadline) return CLAY_WIN_LISTENERS;
     }
-    int32_t status = announce(s);
+    char line[112];
+    if (sprintf_s(line, sizeof(line), "mihomo=ready proxy=127.0.0.1:%u controller=127.0.0.1:%u",
+                  (unsigned)s->proxy_port, (unsigned)s->control_port) <= 0) return CLAY_WIN_OUTPUT;
+    return clay_win_emit(s, line);
+}
+
+int32_t clay_win_run(clay_win_session *s, const uint8_t *config, size_t length) {
+    int32_t status = clay_win_start(s, config, length);
     if (status != CLAY_WIN_OK) return status;
+    HANDLE waits[] = {stop_event, s->process};
     for (;;) {
         DWORD wait = WaitForMultipleObjects(2, waits, FALSE, 500);
         if (wait == WAIT_OBJECT_0) return CLAY_WIN_INTERRUPTED;
         if (wait != WAIT_TIMEOUT) return CLAY_WIN_EXITED;
         if (!own_listeners(s)) return CLAY_WIN_LISTENERS;
     }
+}
+
+// The console or redirected input can be idle indefinitely. Only the input
+// worker blocks; the session thread can still stop and reap its private job.
+static uint8_t input_chunk[512];
+static DWORD input_size;
+static DWORD WINAPI read_chunk(LPVOID ignored) {
+    (void)ignored;
+    HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
+    if (ReadFile(input, input_chunk, sizeof(input_chunk), &input_size, NULL)) return input_size ? CLAY_WIN_OK : CLAY_WIN_EOF;
+    DWORD error = GetLastError();
+    return error == ERROR_BROKEN_PIPE || error == ERROR_HANDLE_EOF ? CLAY_WIN_EOF : CLAY_WIN_INPUT;
+}
+
+int32_t clay_win_read(clay_win_session *s, uint8_t *buffer, uint32_t capacity, uint32_t *count) {
+    if (capacity < sizeof(input_chunk)) return CLAY_WIN_INPUT;
+    *count = 0;
+    HANDLE worker = CreateThread(NULL, 0, read_chunk, NULL, 0, NULL);
+    if (!worker) return CLAY_WIN_INPUT;
+    HANDLE waits[] = {stop_event, s->process, worker};
+    int32_t status;
+    for (;;) {
+        DWORD wait = WaitForMultipleObjects(3, waits, FALSE, 500), result;
+        if (wait == WAIT_OBJECT_0) { status = CLAY_WIN_INTERRUPTED; break; }
+        if (wait == WAIT_OBJECT_0 + 1) { status = CLAY_WIN_EXITED; break; }
+        if (wait == WAIT_OBJECT_0 + 2) {
+            status = GetExitCodeThread(worker, &result) ? (int32_t)result : CLAY_WIN_INPUT;
+            if (status == CLAY_WIN_OK) { memcpy(buffer, input_chunk, input_size); *count = input_size; }
+            CloseHandle(worker);
+            return status;
+        }
+        if (wait != WAIT_TIMEOUT) { status = CLAY_WIN_INPUT; break; }
+        if (!own_listeners(s)) { status = CLAY_WIN_LISTENERS; break; }
+    }
+    CancelSynchronousIo(worker);
+    // On early return the worker uses only static storage and the CLI exits
+    // after cleanup. It never touches the caller's buffer or session.
+    CloseHandle(worker);
+    return status;
+}
+
+static int32_t control_health(const clay_win_session *s) {
+    if (stopped()) return CLAY_WIN_INTERRUPTED;
+    if (WaitForSingleObject(s->process, 0) != WAIT_TIMEOUT) return CLAY_WIN_EXITED;
+    return own_listeners(s) ? CLAY_WIN_OK : CLAY_WIN_LISTENERS;
+}
+
+int32_t clay_win_control(clay_win_session *s, int32_t operation, const char *secret, const char *body,
+                         uint8_t *response, uint32_t capacity, uint32_t *count) {
+    *count = 0;
+    int32_t status = control_health(s);
+    if (status != CLAY_WIN_OK) return status;
+    static const WCHAR *verbs[] = {L"GET", L"GET", L"PATCH", L"PUT"};
+    static const WCHAR *paths[] = {L"/configs", L"/proxies/CLAY", L"/configs", L"/proxies/CLAY"};
+    if (operation < CLAY_CTL_GET_MODE || operation > CLAY_CTL_SET_NODE || !capacity ||
+        strlen(secret) != 64 || strspn(secret, "0123456789abcdef") != 64) return CLAY_WIN_CONTROLLER;
+    BOOL change = operation >= CLAY_CTL_SET_MODE;
+    size_t length = body ? strlen(body) : 0;
+    if ((change && (!length || length > 256)) || (!change && length)) return CLAY_WIN_CONTROLLER;
+    status = CLAY_WIN_CONTROLLER;
+    HINTERNET session = WinHttpOpen(L"CLAY", WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_NO_PROXY_NAME,
+                                    WINHTTP_NO_PROXY_BYPASS, 0), connection = NULL, request = NULL;
+    if (!session || !WinHttpSetTimeouts(session, 500, 600, 600, 600)) goto done;
+    connection = WinHttpConnect(session, L"127.0.0.1", s->control_port, 0);
+    if (!connection) goto done;
+    request = WinHttpOpenRequest(connection, verbs[operation], paths[operation], NULL,
+                                 WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, 0);
+    if (!request) goto done;
+    DWORD disable = WINHTTP_DISABLE_REDIRECTS | WINHTTP_DISABLE_COOKIES | WINHTTP_DISABLE_AUTHENTICATION;
+    if (!WinHttpSetOption(request, WINHTTP_OPTION_DISABLE_FEATURE, &disable, sizeof(disable))) goto done;
+    WCHAR headers[160];
+    if (swprintf_s(headers, _countof(headers), L"Authorization: Bearer %hs\r\nContent-Type: application/json\r\n", secret) <= 0) goto done;
+    BOOL sent = WinHttpSendRequest(request, headers, (DWORD)-1, (void *)body, (DWORD)length, (DWORD)length, 0);
+    SecureZeroMemory(headers, sizeof(headers));
+    if (!sent || !WinHttpReceiveResponse(request, NULL)) goto done;
+    DWORD http = 0, size = sizeof(http);
+    if (!WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                             WINHTTP_HEADER_NAME_BY_INDEX, &http, &size, WINHTTP_NO_HEADER_INDEX)) goto done;
+    if ((change && http != 204 && http != 200) || (!change && http != 200)) goto done;
+    if (!change) {
+        ULONGLONG deadline = GetTickCount64() + 1600;
+        for (;;) {
+            DWORD read = 0;
+            if (stopped() || GetTickCount64() >= deadline || *count >= capacity ||
+                !WinHttpReadData(request, response + *count, capacity - *count, &read)) goto done;
+            if (!read) break;
+            *count += read;
+        }
+    }
+    status = CLAY_WIN_OK;
+done:
+    if (request) WinHttpCloseHandle(request);
+    if (connection) WinHttpCloseHandle(connection);
+    if (session) WinHttpCloseHandle(session);
+    int32_t health = control_health(s);
+    return health == CLAY_WIN_OK ? status : health;
 }
 
 // Remove generated files without ever traversing a directory reparse point.

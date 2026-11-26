@@ -34,7 +34,8 @@ def main(cli: Path, fixture: Path):
         rules.write_text("DOMAIN-SUFFIX,example.invalid,DIRECT\n", encoding="utf-8")
 
         def command(password, sha=digest, *extra):
-            profile.write_text(f"ss://aes-128-gcm:{password}@example.invalid:443#synthetic\n", encoding="utf-8")
+            profile.write_text(f"ss://aes-128-gcm:{password}@example.invalid:443#synthetic\n"
+                               "ss://aes-128-gcm:second-dummy@example.invalid:444#second\n", encoding="utf-8")
             return [str(cli), "mihomo-run", str(profile), "1", str(engine), sha,
                     "--mode", "global", "--pac-rules", str(rules), *extra]
 
@@ -64,11 +65,8 @@ def main(cli: Path, fixture: Path):
             match = re.fullmatch(r"mihomo=ready proxy=127\.0\.0\.1:(\d+) controller=127\.0\.0\.1:(\d+)\n", line)
             assert match, ("readiness", process.poll())
             ports = [int(p) for p in match.groups()]
-            for port in ports:
-                with socket.create_connection(("127.0.0.1", port), timeout=2) as connection:
-                    connection.sendall(b"GET http://example.invalid/ HTTP/1.1\r\nHost: example.invalid\r\n\r\n")
-                    response = connection.makefile("rb").read()
-                    assert response.endswith(b"\r\n\r\nfixture"), "fixture response missing"
+            assert request(ports[0], "http://example.invalid/").endswith(b"\r\n\r\nfixture"), "fixture response missing"
+            assert request(ports[1], "/configs").startswith(b"HTTP/1.1 401 "), "controller accepted an unauthenticated request"
             dirs = set(root.glob("clay-win-" + "?" * 32)) - existing
             assert len(dirs) == 1, "wrong runtime directory count"
             runtime = dirs.pop()
@@ -105,7 +103,74 @@ foreach ($path in @($env:CLAY_ACL_DIR, $env:CLAY_ACL_FILE)) {
                 except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait(timeout=5)
-    print("Windows runtime smoke passed: verified engine, private ACL, owned loopback traffic, and cleanup")
+
+        def run_interactive(password, exit_method):
+            process = subprocess.Popen(command(password, digest, "--interactive", "--all-nodes"), env=env,
+                                       stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                       text=True, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+            replies = queue.Queue()
+
+            def capture():
+                for line in process.stdout:
+                    replies.put(line.strip())
+
+            reader = threading.Thread(target=capture, daemon=True)
+            reader.start()
+
+            def send(text):
+                process.stdin.write(text)
+                process.stdin.flush()
+
+            def expect(expected):
+                assert replies.get(timeout=7) == expected, f"interactive reply did not match {expected}"
+
+            try:
+                ready = re.fullmatch(r"mihomo=ready proxy=127\.0\.0\.1:(\d+) controller=127\.0\.0\.1:(\d+)",
+                                     replies.get(timeout=14))
+                assert ready, "interactive listener ownership not confirmed"
+                proxy, control = map(int, ready.groups())
+                send("sta")
+                send("tus\nnode 2\nstatus\nmode rule\nmode direct\nstatus\n")
+                expect("mode=global node=1")
+                expect("node=2")
+                expect("mode=global node=2")
+                expect("mode=rule")
+                denied = password == "ignore-update-dummy"
+                expect("error=controller-unconfirmed" if denied else "mode=direct")
+                expect(f"mode={'rule' if denied else 'direct'} node=2")
+                send("node 999\n" + "x" * 630 + "\nmode global\nstatus\n")
+                expect("error=unavailable-node")
+                expect("error=invalid-command")
+                expect("mode=global")
+                expect("mode=global node=2")
+                assert request(proxy, "http://example.invalid/").endswith(b"\r\n\r\nfixture"), "proxy moved during update"
+                assert request(control, "/configs").startswith(b"HTTP/1.1 401 "), "controller no longer requires authentication"
+                if exit_method == "quit": send("quit\n")
+                elif exit_method == "eof": process.stdin.close()
+                else: process.send_signal(signal.CTRL_BREAK_EVENT)
+                assert process.wait(timeout=10) == (130 if exit_method == "signal" else 0), "interactive exit failed"
+                reader.join(timeout=2)
+                assert replies.empty() and not process.stderr.read(), "private text escaped the session"
+                assert set(root.glob("clay-win-" + "?" * 32)) == existing, "interactive session left private files"
+                for port in (proxy, control):
+                    with socket.socket() as attempt:
+                        attempt.settimeout(1)
+                        assert attempt.connect_ex(("127.0.0.1", port)) != 0, "interactive listener remains"
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.wait(timeout=5)
+
+        for finish in ("quit", "eof", "signal"):
+            run_interactive("ignore-update-dummy" if finish == "eof" else "valid-dummy", finish)
+    print("Windows runtime smoke passed: verified engine, private ACL, authenticated switching and cleanup")
+
+
+def request(port, target):
+    with socket.create_connection(("127.0.0.1", port), timeout=2) as connection:
+        connection.sendall(f"GET {target} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n".encode("ascii"))
+        with connection.makefile("rb") as response:
+            return response.read()
 
 
 if __name__ == "__main__":

@@ -33,7 +33,7 @@ excludedCoreSources = ["PACServer.swift", "Runtime.swift", "Subscriptions.swift"
 portableDependencies.append("CWindowsRuntime")
 platformTargets.append(.target(name: "CWindowsRuntime", linkerSettings: [
     .linkedLibrary("Advapi32"), .linkedLibrary("Bcrypt"), .linkedLibrary("Iphlpapi"),
-    .linkedLibrary("Ole32"), .linkedLibrary("Shell32"), .linkedLibrary("Ws2_32")
+    .linkedLibrary("Ole32"), .linkedLibrary("Shell32"), .linkedLibrary("Winhttp"), .linkedLibrary("Ws2_32")
 ]))
 #endif
 

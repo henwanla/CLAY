@@ -8,13 +8,13 @@ Windows 10/11 runtime preview. Build with Swift for Windows and provide a native
 swift build -c release --product clay-portable
 $bin = Join-Path (swift build -c release --show-bin-path) 'clay-portable.exe'
 & $bin inspect .\nodes.txt --numbered
-& $bin mihomo-run .\nodes.txt 1 .\mihomo.exe '<64-digit SHA-256>' --mode rule --pac-rules .\rules.txt
+& $bin mihomo-run .\nodes.txt 1 .\mihomo.exe '<64-digit SHA-256>' --all-nodes --interactive --mode rule --pac-rules .\rules.txt
 ```
 
-The example runs node 1. The PAC rules file is optional; use it with `--mode rule`. The printed `proxy=127.0.0.1:PORT` address can be set as the HTTP proxy in an individual browser or app. To keep the port fixed, pass `--proxy-port PORT`. Press Ctrl+C to end the foreground session. Switch node or route mode by restarting with a new node number or `--mode` option.
+The example starts with node 1. The PAC rules file is optional; it is used in Rule mode. Enter the printed `proxy=127.0.0.1:PORT` address as the proxy in a client app. To keep the port fixed across sessions, pass `--proxy-port PORT`. While the session is running, enter `status`, `node 2`, or `mode rule|global|direct`. Node and mode changes are checked against Mihomo's reported state and do not restart the listener. Use `quit` or Ctrl+C to stop. Without `--all-nodes`, the session only loads the requested node.
 
-示例运行第 1 个节点。PAC 规则文件可省略，使用时选 `--mode rule`。看到 `proxy=127.0.0.1:端口` 后，在需要代理的浏览器或应用中填入该地址。可用 `--proxy-port 端口` 固定端口。按 Ctrl+C 停止；更换节点或路由模式时，用新的节点编号或 `--mode` 参数重启命令。
+示例从第 1 个节点启动。PAC 规则文件可省略，由规则模式使用。看到 `proxy=127.0.0.1:端口` 后，在需要代理的应用里填写该地址。可用 `--proxy-port 端口` 让不同会话使用同一端口。会话中输入 `status`、`node 2` 或 `mode rule|global|direct`；内核读回成功才确认切换，端口不变。输入 `quit` 或按 Ctrl+C 停止。不加 `--all-nodes` 时只加载启动时选择的节点。
 
-Windows does not yet offer a GUI, interactive switching, or automatic system proxy settings. Config and generated state live in a private directory under the Windows local application data folder, accessible by default to the current user. CLAY stops the engine and removes the directory on normal termination. If Windows or the CLI is force-terminated before cleanup, the private directory can remain; remove only the stale `clay-win-*` directory after confirming the session has ended.
+This is a foreground CLI and does not change Windows system proxy settings. Config and generated state live in a private directory under the Windows local application data folder, accessible by default to the current user. The controller key stays in the session and config file. CLAY stops the engine and removes the directory on normal termination. If Windows or the CLI is force-terminated before cleanup, the private directory can remain; remove only the stale `clay-win-*` directory after confirming the session has ended.
 
-Windows 暂无图形界面、运行时切换或自动设置系统代理。配置和运行文件放在 Windows 本地应用数据目录下的私有文件夹，默认只允许当前用户访问。正常停止时会关闭内核并移除这个目录。若系统或命令行被强制终止，可能留下该目录；确认会话已结束后，再删除对应的残留 `clay-win-*` 目录。
+这是前台命令行预览，不会修改 Windows 系统代理。配置和运行文件放在 Windows 本地应用数据目录下的私有文件夹，默认只允许当前用户访问。控制密钥留在会话和配置文件中。正常停止会关闭内核并移除目录。若系统或命令行被强制终止，可能留下目录；确认会话已结束后，再删除对应的残留 `clay-win-*` 目录。

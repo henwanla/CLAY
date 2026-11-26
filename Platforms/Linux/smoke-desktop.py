@@ -96,9 +96,96 @@ def adapter_checks(binary, directory, profile):
     print("PASS desktop adapter rejects stale settings, invalid listeners and unconfirmed changes")
 
 
+class TrayHost:
+    """Minimal panel on a private session bus; exercises actual SNI and D-Bus menus."""
+
+    XML = """<node><interface name="org.kde.StatusNotifierWatcher">
+      <method name="RegisterStatusNotifierItem"><arg type="s" direction="in"/></method>
+      <property name="ProtocolVersion" type="i" access="read"/>
+      <property name="RegisteredStatusNotifierItems" type="as" access="read"/>
+      <property name="IsStatusNotifierHostRegistered" type="b" access="read"/>
+      <signal name="StatusNotifierHostRegistered"/><signal name="StatusNotifierHostUnregistered"/>
+    </interface></node>"""
+
+    def __init__(self):
+        from gi.repository import Gio, GLib
+        from tray import HOST_PROPERTY, WATCHER, WATCHER_PATH
+
+        self.GLib, self.Gio = GLib, Gio
+        self.interface, self.path, self.property = WATCHER, WATCHER_PATH, HOST_PROPERTY
+        self.bus = Gio.DBusConnection.new_for_address_sync(
+            Gio.dbus_address_get_for_bus_sync(Gio.BusType.SESSION, None),
+            Gio.DBusConnectionFlags.AUTHENTICATION_CLIENT | Gio.DBusConnectionFlags.MESSAGE_BUS_CONNECTION,
+            None, None)
+        self.present = False
+        self.item = None
+        self.info = Gio.DBusNodeInfo.new_for_xml(self.XML)
+        self.registration = self.bus.register_object(self.path, self.info.interfaces[0], self.register, self.read_property, None)
+        assert self.bus.call_sync("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "RequestName",
+                                  GLib.Variant("(su)", (self.interface, 4)), GLib.VariantType.new("(u)"),
+                                  Gio.DBusCallFlags.NONE, 2000, None).unpack() == (1,)
+
+    def register(self, _bus, sender, _path, _interface, _method, parameters, call):
+        (path,) = parameters.unpack()
+        assert path.startswith("/")
+        self.item = (sender, path)
+        call.return_value(None)
+
+    def read_property(self, _bus, _sender, _path, _interface, name):
+        if name == self.property:
+            return self.GLib.Variant("b", self.present)
+        if name == "ProtocolVersion":
+            return self.GLib.Variant("i", 0)
+        if name == "RegisteredStatusNotifierItems":
+            return self.GLib.Variant("as", ["".join(self.item)] if self.item is not None else [])
+        return None
+
+    def set_present(self, present):
+        self.present = present
+        signal = "StatusNotifierHostRegistered" if present else "StatusNotifierHostUnregistered"
+        self.bus.emit_signal(None, self.path, self.interface, signal, None)
+
+    def invoke(self, until, owner, path, interface, method, parameters):
+        result = []
+        self.bus.call(owner, path, interface, method, parameters, None, self.Gio.DBusCallFlags.NONE,
+                      2500, None, lambda _bus, reply, *_: result.append(reply))
+        until(lambda: result)
+        return self.bus.call_finish(result[0]).unpack()
+
+    def menu(self, until):
+        owner, item = self.item
+        get_menu = self.GLib.Variant("(ss)", ("org.kde.StatusNotifierItem", "Menu"))
+        (path,) = self.invoke(until, owner, item, "org.freedesktop.DBus.Properties", "Get", get_menu)
+        return owner, path
+
+    def layout(self, until):
+        owner, path = self.menu(until)
+        request = self.GLib.Variant("(iias)", (0, -1, ["label", "enabled", "toggle-state"]))
+        _, root = self.invoke(until, owner, path, "com.canonical.dbusmenu", "GetLayout", request)
+
+        def items(branch):
+            index, properties, children = branch
+            if "label" in properties:
+                yield properties["label"], (index, properties)
+            for child in children:
+                yield from items(child)
+
+        return dict(items(root))
+
+    def click(self, until, label):
+        until(lambda: label in self.layout(until))
+        item_id, _ = self.layout(until)[label]
+        owner, path = self.menu(until)
+        click = self.GLib.Variant("(isvu)", (item_id, "clicked", self.GLib.Variant("i", 0), 0))
+        self.invoke(until, owner, path, "com.canonical.dbusmenu", "Event", click)
+
+    def close(self):
+        self.bus.unregister_object(self.registration)
+        self.bus.close_sync(None)
+
+
 def window_checks(binary, directory, profile):
     import json
-    import signal
 
     window_class = runpy.run_path(str(Path(__file__).with_name("clay-desktop.py")))["Window"]
     from gi.repository import GLib
@@ -112,6 +199,7 @@ def window_checks(binary, directory, profile):
     fingerprint = hashlib.sha256(engine.read_bytes()).hexdigest()
     rules.write_text("DOMAIN-SUFFIX,example.test,DIRECT\n", encoding="utf-8")
 
+    host = TrayHost()
     window = window_class(binary)
     destroyed = threading.Event()
     window.connect("destroy", lambda *_: destroyed.set())
@@ -134,6 +222,9 @@ def window_checks(binary, directory, profile):
         until(lambda: not window.busy)
 
     try:
+        assert window.tray is not None, "Install the Ayatana typelib for GTK tray checks"
+        until(lambda: window.tray.registered and host.item is not None)
+        assert not window.tray.available
         assert not window.start.get_sensitive()
         assert window.profile.set_filename(str(profile))
         until(lambda: window.profile.get_filename() == str(profile))
@@ -159,28 +250,63 @@ def window_checks(binary, directory, profile):
         assert window.address.get_text() == f"127.0.0.1:{proxy}"
         assert window.nodes.get_active_id() == "2" and "Global mode" in window.status.get_text()
 
-        window.nodes.set_active_id("1")
-        click(window.set_node)
+        host.set_present(True)
+        until(lambda: window.tray.available)
+        window.close()
+        until(lambda: not window.get_visible())
+        assert not destroyed.is_set() and Path(f"/proc/{pid}").exists()
+
+        layout = host.layout(until)
+        assert "Global · Node 2" in layout and "Open CLAY" in layout
+        assert layout["Node 2"][1]["toggle-state"] == 1 and layout["Global"][1]["toggle-state"] == 1
+        assert not any("private-label" in title or "127.0.0.1" in title for title in layout)
+        host.click(until, "Node 1")
+        until(lambda: not window.busy and window.nodes.get_active_id() == "1")
         assert "Node 1" in window.status.get_text() and window.address.get_text()
-        window.modes.set_active_id("rule")
-        click(window.set_mode)
+        host.click(until, "Rule")
+        until(lambda: not window.busy and window.session.state is None)
         assert not window.address.get_text() and not window.set_mode.get_sensitive()
-        click(window.refresh)
+        layout = host.layout(until)
+        assert "Status unconfirmed" in layout
+        host.click(until, "Refresh status")
+        until(lambda: not window.busy and window.session.state is not None)
         assert window.modes.get_active_id() == "global" and window.address.get_text()
-        window.modes.set_active_id("direct")
-        click(window.set_mode)
+        host.click(until, "Direct")
+        until(lambda: not window.busy and window.modes.get_active_id() == "direct")
         assert "Direct mode" in window.status.get_text()
 
-        # Dismissing the actual window drives its delete-event cleanup handler.
+        host.click(until, "Open CLAY")
+        until(window.get_visible)
         window.close()
+        until(lambda: not window.get_visible())
+        host.set_present(False)
+        until(lambda: not window.tray.available and window.get_visible())
+        assert window.session.state == State("direct", 1, proxy)
+        host.set_present(True)
+        until(lambda: window.tray.available)
+        window.close()
+        until(lambda: not window.get_visible())
+        host.click(until, "Stop proxy")
+        until(lambda: window.session.process is None and not window.busy)
+        assert not Path(directory_name).exists() and not Path(f"/proc/{pid}").exists()
+        assert not destroyed.is_set()
+
+        host.click(until, "Open CLAY")
+        until(window.get_visible)
+        click(window.start)
+        directory_name, pid, proxy, _ = json.loads(report.read_text(encoding="utf-8"))
+        window.close()
+        until(lambda: not window.get_visible())
+        host.click(until, "Quit CLAY")
         until(destroyed.is_set)
         assert not Path(directory_name).exists() and not Path(f"/proc/{pid}").exists()
         assert window.session.process is None
     finally:
         if not destroyed.is_set():
-            window.close_window()
+            window.request_quit()
             until(destroyed.is_set)
-    print("PASS GTK profile loading, engine verification, controller readback and close cleanup")
+        host.close()
+    print("PASS GTK and D-Bus tray: background session, node/mode readback, host loss, stop and quit cleanup")
 
 
 def main():

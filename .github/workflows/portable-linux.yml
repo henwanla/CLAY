@@ -34,6 +34,6 @@ jobs:
       - name: Install GTK test dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends python3-gi gir1.2-gtk-3.0 xvfb xauth
-      - name: Exercise the GTK preview in a virtual display
-        run: xvfb-run -a /usr/bin/python3 -B Platforms/Linux/smoke-desktop.py .build/release/clay-portable
+          sudo apt-get install -y --no-install-recommends python3-gi gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1 dbus-daemon xvfb xauth
+      - name: Exercise GTK and the tray in an isolated desktop session
+        run: dbus-run-session -- xvfb-run -a /usr/bin/python3 -B Platforms/Linux/smoke-desktop.py .build/release/clay-portable

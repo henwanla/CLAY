@@ -12,6 +12,7 @@ gi.require_version("Gtk", "3.0")
 from gi.repository import GLib, Gtk
 
 from session import DesktopError, MODES, Session, inspect
+from tray import create_tray
 
 
 class Window(Gtk.Window):
@@ -26,6 +27,8 @@ class Window(Gtk.Window):
         self.preview = None
         self.busy = False
         self.closing = False
+        self.destroyed = False
+        self.backgrounded = False
 
         root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         self.add(root)
@@ -77,8 +80,11 @@ class Window(Gtk.Window):
         self.stop.connect("clicked", lambda *_: self.request_stop())
         self.refresh = Gtk.Button(label="Refresh status")
         self.refresh.connect("clicked", self.refresh_session)
+        quit_button = Gtk.Button(label="Quit CLAY")
+        quit_button.connect("clicked", lambda *_: self.request_quit())
         for button in (self.start, self.stop, self.refresh):
             actions.pack_start(button, False, False, 0)
+        actions.pack_end(quit_button, False, False, 0)
 
         self.status = Gtk.Label(label="Stopped. Load a profile to get started.", xalign=0, wrap=True)
         root.pack_start(self.status, False, False, 0)
@@ -87,9 +93,13 @@ class Window(Gtk.Window):
         note = Gtk.Label(label="Enter this address in each app that should use HTTP or SOCKS5. "
                                "CLAY does not change system proxy settings.", xalign=0, wrap=True)
         root.pack_start(note, False, False, 0)
+        self.tray_note = Gtk.Label(xalign=0, wrap=True)
+        root.pack_start(self.tray_note, False, False, 0)
+        self.tray = create_tray(self)
+        self.tray_availability_changed(False)
         self.connect("delete-event", self.close_window)
         self.poll_source = GLib.timeout_add(400, self.watch_child)
-        self.connect("destroy", lambda *_: GLib.source_remove(self.poll_source))
+        self.connect("destroy", self.window_destroyed)
         self.sync_controls()
 
     @staticmethod
@@ -100,8 +110,9 @@ class Window(Gtk.Window):
 
     def sync_controls(self):
         running = self.session.process is not None
-        confirmed = not self.busy and self.session.state is not None
-        editable = not self.busy and not running
+        active = self.busy or self.closing
+        confirmed = not active and self.session.state is not None
+        editable = not active and not running
         for widget in (self.profile, self.load, self.engine, self.fingerprint, self.use_rules):
             widget.set_sensitive(editable)
         self.rules.set_sensitive(editable and self.use_rules.get_active())
@@ -111,7 +122,10 @@ class Window(Gtk.Window):
         self.set_mode.set_sensitive(confirmed)
         self.start.set_sensitive(editable and self.preview is not None)
         self.stop.set_sensitive(running or self.busy)
-        self.refresh.set_sensitive(running and not self.busy)
+        self.refresh.set_sensitive(running and not active)
+        if self.tray is not None:
+            self.tray.update(running=running, state=self.session.state, busy=active,
+                             count=len(self.preview.nodes) if self.preview else 0)
 
     def profile_changed(self, *_):
         self.preview = None
@@ -143,8 +157,12 @@ class Window(Gtk.Window):
             self.busy = False
             if error is not None:
                 self.status.set_text(error)
+                if self.closing or self.session.process is None:
+                    self.show_window()
             elif not self.cancel.is_set():
                 completed(result)
+            if self.destroyed:
+                return GLib.SOURCE_REMOVE
             self.sync_controls()
             if self.cancel.is_set():
                 self.request_stop()
@@ -186,15 +204,23 @@ class Window(Gtk.Window):
                   lambda: self.session.start(path, preview, node, engine, digest, mode, rules), self.display_state)
 
     def change_node(self, *_):
-        node = int(self.nodes.get_active_id())
-        self.task("Checking the selected node…", lambda: self.session.change(node=node), self.display_state)
+        if self.nodes.get_active_id() is not None:
+            self.apply_node(int(self.nodes.get_active_id()))
+
+    def apply_node(self, node):
+        if self.set_node.get_sensitive():
+            self.task("Checking the selected node…", lambda: self.session.change(node=node), self.display_state)
 
     def change_mode(self, *_):
-        mode = self.modes.get_active_id()
-        self.task("Checking the routing mode…", lambda: self.session.change(mode=mode), self.display_state)
+        self.apply_mode(self.modes.get_active_id())
+
+    def apply_mode(self, mode):
+        if self.set_mode.get_sensitive():
+            self.task("Checking the routing mode…", lambda: self.session.change(mode=mode), self.display_state)
 
     def refresh_session(self, *_):
-        self.task("Checking the session…", self.session.refresh, self.display_state)
+        if self.refresh.get_sensitive():
+            self.task("Checking the session…", self.session.refresh, self.display_state)
 
     def display_state(self, state):
         self.nodes.set_active_id(str(state.node))
@@ -205,8 +231,11 @@ class Window(Gtk.Window):
     def watch_child(self):
         child = self.session.process
         if not self.busy and child is not None and child.poll() is not None:
-            self.task("Closing the local session…", self.session.stop,
-                      lambda _: self.status.set_text("The local session ended. Start it again to reconnect."))
+            def ended(_):
+                self.status.set_text("The local session ended. Start it again to reconnect.")
+                self.show_window()
+
+            self.task("Closing the local session…", self.session.stop, ended)
         return GLib.SOURCE_CONTINUE
 
     def request_stop(self):
@@ -227,9 +256,33 @@ class Window(Gtk.Window):
             stopped()
 
     def close_window(self, *_):
+        child = self.session.process
+        if not self.closing and self.tray is not None and self.tray.available and child is not None and child.poll() is None:
+            self.backgrounded = True
+            self.hide()
+        else:
+            self.request_quit()
+        return True
+
+    def request_quit(self):
         self.closing = True
         self.request_stop()
-        return True
+
+    def show_window(self):
+        self.backgrounded = False
+        self.present()
+
+    def tray_availability_changed(self, available):
+        self.tray_note.set_text("While the proxy is running, closing this window keeps it in the tray. Use Quit CLAY to exit."
+                                if available else "No active tray. Closing this window stops the proxy.")
+        if not available and self.backgrounded:
+            self.show_window()
+
+    def window_destroyed(self, *_):
+        self.destroyed = True
+        GLib.source_remove(self.poll_source)
+        if self.tray is not None:
+            self.tray.close()
 
 
 def main():
@@ -240,7 +293,7 @@ def main():
     signal_sources = []
 
     def stop_on_signal():
-        window.close_window()
+        window.request_quit()
         return GLib.SOURCE_CONTINUE
 
     for kind in (signal.SIGINT, signal.SIGTERM):

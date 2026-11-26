@@ -3,14 +3,19 @@
 
 import argparse
 import hashlib
+import os
 from pathlib import Path
 import runpy
+import stat
+import subprocess
 import sys
 import tempfile
 import threading
 import time
+from urllib.error import HTTPError
+from urllib.request import ProxyHandler, build_opener
 
-from session import DesktopError, Session, State, inspect
+from session import DesktopError, Session, State, default_pac, inspect
 
 
 ADAPTER_CLI = '''
@@ -184,7 +189,71 @@ class TrayHost:
         self.bus.close_sync(None)
 
 
-def window_checks(binary, directory, profile):
+def gsettings(action, key, *values, schema="org.gnome.system.proxy"):
+    return subprocess.check_output(["/usr/bin/gsettings", action, schema, key, *values],
+                                   text=True, timeout=8).strip()
+
+
+def fetch_pac(url):
+    with build_opener(ProxyHandler({})).open(url, timeout=5) as response:
+        assert response.headers.get_content_type() == "application/x-ns-proxy-autoconfig"
+        return response.read(16385)
+
+
+def gnome_recovery_checks(binary):
+    from gnome_pac import GnomePac, GnomeSettings, Snapshot
+
+    settings = GnomeSettings.open()
+    baseline = settings.read()
+    assert baseline.user == (None, None), "Run this fixture with a fresh dconf profile"
+    script = default_pac(binary, 18790)
+    pac = GnomePac.open()
+    try:
+        assert stat.S_IMODE(pac.directory.stat().st_mode) == 0o700
+        expect_error(lambda: default_pac(binary, 65536), "no confirmed port")
+        try:
+            second = GnomePac.open()
+        except BlockingIOError:
+            pass
+        else:
+            second.close()
+            raise AssertionError("two CLAY processes obtained the same recovery lock")
+        pac.enable(script)
+        assert stat.S_IMODE(pac.journal.stat().st_mode) == 0o600
+        assert pac.pending and pac.confirmed()
+        url = pac.server.url
+        assert gsettings("get", "mode") == "'auto'" and gsettings("get", "autoconfig-url") == repr(url)
+        assert fetch_pac(url) == script and b'PROXY 127.0.0.1:18790' in script
+        try:
+            fetch_pac(url.rsplit("/", 1)[0] + "/other.pac")
+        except HTTPError as error:
+            assert error.code == 404
+        else:
+            raise AssertionError("the PAC server returned the script at another path")
+        # Simulate app exit before it could restore the user's GSettings values.
+    finally:
+        pac.close()
+
+    pac = GnomePac.open()
+    try:
+        assert pac.pending and not pac.serving
+        assert pac.release() == "restored" and settings.read() == baseline
+        assert not pac.pending
+        pac.enable(script)
+        external = "https://newer.example.invalid/other.pac"
+        gsettings("set", "autoconfig-url", external)
+        assert pac.release() == "external"
+        assert settings.read() == Snapshot(("auto", external), ("auto", external))
+        assert not pac.pending and not pac.serving
+        gsettings("reset", "mode")
+        gsettings("reset", "autoconfig-url")
+        assert settings.read() == baseline
+    finally:
+        pac.close()
+    print("PASS GNOME recovery: private snapshot, exclusive owner, actual dconf readback, reset on restart, external change preserved")
+
+
+def window_checks(binary, directory, profile, gnome=False):
     import json
 
     window_class = runpy.run_path(str(Path(__file__).with_name("clay-desktop.py")))["Window"]
@@ -200,7 +269,13 @@ def window_checks(binary, directory, profile):
     rules.write_text("DOMAIN-SUFFIX,example.test,DIRECT\n", encoding="utf-8")
 
     host = TrayHost()
-    window = window_class(binary)
+    old_url = "https://original.example.invalid/setup.pac"
+    old_host = "original.example.invalid"
+    if gnome:
+        gsettings("set", "mode", "manual")
+        gsettings("set", "autoconfig-url", old_url)
+        gsettings("set", "host", old_host, schema="org.gnome.system.proxy.http")
+    window = window_class(binary, use_system=gnome)
     destroyed = threading.Event()
     window.connect("destroy", lambda *_: destroyed.set())
     window.show_all()
@@ -249,6 +324,9 @@ def window_checks(binary, directory, profile):
         directory_name, pid, proxy, _ = json.loads(report.read_text(encoding="utf-8"))
         assert window.address.get_text() == f"127.0.0.1:{proxy}"
         assert window.nodes.get_active_id() == "2" and "Global mode" in window.status.get_text()
+        if gnome:
+            assert gsettings("get", "mode") == "'manual'"
+            assert gsettings("get", "autoconfig-url") == repr(old_url)
 
         host.set_present(True)
         until(lambda: window.tray.available)
@@ -260,6 +338,12 @@ def window_checks(binary, directory, profile):
         assert "Global · Node 2" in layout and "Open CLAY" in layout
         assert layout["Node 2"][1]["toggle-state"] == 1 and layout["Global"][1]["toggle-state"] == 1
         assert not any("private-label" in title or "127.0.0.1" in title for title in layout)
+        if gnome:
+            host.click(until, "Apply to GNOME")
+            until(lambda: not window.busy and window.pac.confirmed())
+            url = window.pac.server.url
+            assert b'PROXY 127.0.0.1:' + str(proxy).encode() in fetch_pac(url)
+            assert gsettings("get", "mode") == "'auto'" and gsettings("get", "autoconfig-url") == repr(url)
         host.click(until, "Node 1")
         until(lambda: not window.busy and window.nodes.get_active_id() == "1")
         assert "Node 1" in window.status.get_text() and window.address.get_text()
@@ -274,6 +358,8 @@ def window_checks(binary, directory, profile):
         host.click(until, "Direct")
         until(lambda: not window.busy and window.modes.get_active_id() == "direct")
         assert "Direct mode" in window.status.get_text()
+        if gnome:
+            assert window.pac.confirmed() and gsettings("get", "autoconfig-url") == repr(url)
 
         host.click(until, "Open CLAY")
         until(window.get_visible)
@@ -286,6 +372,16 @@ def window_checks(binary, directory, profile):
         until(lambda: window.tray.available)
         window.close()
         until(lambda: not window.get_visible())
+        if gnome:
+            # An external change still points to the CLAY listener. Stop must
+            # leave both the settings and current process alone until resolved.
+            gsettings("set", "mode", "manual")
+            host.click(until, "Stop proxy")
+            until(lambda: not window.busy and "need recovery" in window.system_status.get_text())
+            assert window.get_visible() and window.pac.pending and Path(f"/proc/{pid}").exists()
+            assert gsettings("get", "mode") == "'manual'" and gsettings("get", "autoconfig-url") == repr(url)
+            assert fetch_pac(url)
+            gsettings("set", "autoconfig-url", old_url)
         host.click(until, "Stop proxy")
         until(lambda: window.session.process is None and not window.busy)
         assert not Path(directory_name).exists() and not Path(f"/proc/{pid}").exists()
@@ -293,27 +389,43 @@ def window_checks(binary, directory, profile):
 
         host.click(until, "Open CLAY")
         until(window.get_visible)
-        click(window.start)
+        click(window.system if gnome else window.start)
         directory_name, pid, proxy, _ = json.loads(report.read_text(encoding="utf-8"))
+        if gnome:
+            assert window.pac.confirmed() and gsettings("get", "mode") == "'auto'"
         window.close()
         until(lambda: not window.get_visible())
         host.click(until, "Quit CLAY")
         until(destroyed.is_set)
         assert not Path(directory_name).exists() and not Path(f"/proc/{pid}").exists()
         assert window.session.process is None
+        if gnome:
+            assert gsettings("get", "mode") == "'manual'" and gsettings("get", "autoconfig-url") == repr(old_url)
+            assert gsettings("get", "host", schema="org.gnome.system.proxy.http") == repr(old_host)
     finally:
         if not destroyed.is_set():
+            if gnome:
+                gsettings("set", "autoconfig-url", old_url)
             window.request_quit()
             until(destroyed.is_set)
         host.close()
     print("PASS GTK and D-Bus tray: background session, node/mode readback, host loss, stop and quit cleanup")
+    if gnome:
+        print("PASS GTK GNOME PAC: manual path unchanged, apply from tray, stable URL on switch, conflict preserves listener, quit restores settings")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("cli", type=Path)
     parser.add_argument("--adapter-only", action="store_true")
+    parser.add_argument("--gnome-fixture", action="store_true")
     options = parser.parse_args()
+    if options.gnome_fixture:
+        fixture = Path(os.environ.get("CLAY_GNOME_FIXTURE", ""))
+        assert fixture.is_absolute() and fixture.is_dir() and stat.S_IMODE(fixture.stat().st_mode) == 0o700
+        assert os.environ.get("GSETTINGS_BACKEND") == "dconf" and os.environ.get("DBUS_SESSION_BUS_ADDRESS")
+        for suffix in ("config", "state", "runtime"):
+            assert os.environ.get(f"XDG_{suffix.upper()}_HOME" if suffix != "runtime" else "XDG_RUNTIME_DIR") == str(fixture / suffix)
     binary = options.cli.resolve(strict=True)
     with tempfile.TemporaryDirectory(prefix="clay-desktop-check-") as scratch:
         directory = Path(scratch)
@@ -321,7 +433,9 @@ def main():
         profile.write_text(PROFILE, encoding="utf-8")
         adapter_checks(binary, directory, profile)
         if not options.adapter_only:
-            window_checks(binary, directory, profile)
+            if options.gnome_fixture:
+                gnome_recovery_checks(binary)
+            window_checks(binary, directory, profile, gnome=options.gnome_fixture)
 
 
 if __name__ == "__main__":

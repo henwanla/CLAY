@@ -88,7 +88,7 @@ python3 scripts/smoke-subscriptions.py .build/release/CLAYCoreChecks
 
 便携工具 `clay-portable` 可检查本地节点文件和生成 PAC；macOS/Linux 还可查看指定本机 Mihomo 的流量汇总。Linux 和 Windows 可前台运行经 SHA-256 核对的 Mihomo，供应用手动接入。它不会修改系统代理或执行输入文件里的订阅与规则提供器链接。使用方法和验证范围见[跨平台计划](docs/跨平台路线.md)。
 
-Linux 有 [GTK 桌面预览](Platforms/Linux/README.md)，可以导入本地节点、启动回环代理，并从窗口或可选托盘切换节点与模式。托盘可用时，运行中关闭窗口会保留会话。需要在各应用中填写本机代理地址。
+Linux 有 [GTK 桌面预览](Platforms/Linux/README.md)，支持手动和 GNOME 系统 PAC 接入，也可从窗口或可选托盘切换节点与模式。托盘可用时，运行中关闭窗口会保留会话。
 
 [Windows 桌面预览](Platforms/Windows/README.md)支持手动接入，也可显式启用和恢复当前用户的 Windows PAC。关闭窗口后保留托盘入口，支持切换节点和规则／全局／直连。
 

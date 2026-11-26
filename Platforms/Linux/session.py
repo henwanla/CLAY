@@ -136,10 +136,42 @@ def launch(binary, *arguments):
         raise DesktopError("Could not run the supplied clay-portable binary.") from None
 
 
+def default_pac(binary, port, cancel=None):
+    if not isinstance(port, int) or not 1 <= port <= 65535:
+        raise DesktopError("The local proxy has no confirmed port.")
+    # No custom rules go into the system PAC. The default PAC keeps local
+    # hosts direct and the same running core handles all other routing modes.
+    with tempfile.NamedTemporaryFile(prefix="clay-pac-rules-") as rules:
+        with launch(binary, "pac-script", rules.name, str(port)) as child:
+            output = bytearray()
+            deadline = time.monotonic() + 5
+            try:
+                with selectors.DefaultSelector() as selector:
+                    selector.register(child.stdout, selectors.EVENT_READ)
+                    while time.monotonic() < deadline:
+                        if cancel is not None and cancel.is_set():
+                            raise DesktopError("Operation stopped.")
+                        if not selector.select(0.1):
+                            continue
+                        data = os.read(child.stdout.fileno(), 1024)
+                        if not data:
+                            if child.wait(timeout=1) == 0 and output:
+                                return bytes(output)
+                            break
+                        output.extend(data)
+                        if len(output) > 16384:
+                            break
+                raise DesktopError("Could not generate the default PAC script.")
+            finally:
+                if child.poll() is None:
+                    child.kill()
+
+
 class Session:
-    def __init__(self, binary, cancel):
+    def __init__(self, binary, cancel, before_stop=None):
         self.binary = binary
         self.cancel = cancel
+        self.before_stop = before_stop
         self.process = None
         self.state = None
 
@@ -223,6 +255,8 @@ class Session:
         child = self.process
         if child is None:
             return
+        if self.before_stop is not None:
+            self.before_stop()
         if child.poll() is None:
             if not interrupt and not child.stdin.closed:
                 try:

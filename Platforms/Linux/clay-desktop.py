@@ -11,7 +11,9 @@ import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import GLib, Gtk
 
-from gnome_pac import GnomePac, RECOVERY_NEEDED, ReleaseError
+from desktop_pac import ReleaseError
+from gnome_pac import GnomePac
+from kde_pac import KdePac, plasma6_session
 from session import DesktopError, MODES, Session, default_pac, inspect
 from subscription_dialog import SubscriptionDialog
 from subscriptions import Manager, Store, wipe
@@ -28,11 +30,17 @@ class Window(Gtk.Window):
         self.cancel = threading.Event()
         self.session = Session(binary, self.cancel, before_stop=self.restore_before_stop)
         self.pac_notice = None
+        self.system_confirmed = False
+        self.system_probe_pending = False
+        self.system_generation = 0
+        self.desktop_name = "Plasma" if plasma6_session() else "GNOME"
         try:
-            self.pac = GnomePac.open() if use_system else None
+            self.pac = (KdePac.open(binary) if self.desktop_name == "Plasma" else GnomePac.open()) if use_system else None
         except OSError:
             self.pac = None
-            self.pac_notice = "GNOME proxy control is unavailable. Manual proxy is still available."
+            self.pac_notice = f"{self.desktop_name} proxy control is unavailable. Manual proxy is still available."
+        if use_system and self.desktop_name == "Plasma" and self.pac is None and self.pac_notice is None:
+            self.pac_notice = "Manual proxy · Install the Plasma settings helper beside clay-portable for system PAC."
         self.process_seen_ended = None
         self.poll_ticks = 0
         self.preview = None
@@ -94,7 +102,7 @@ class Window(Gtk.Window):
         root.pack_start(actions, False, False, 0)
         self.start = Gtk.Button(label="Start session")
         self.start.connect("clicked", self.start_session)
-        self.system = Gtk.Button(label="Connect GNOME")
+        self.system = Gtk.Button(label="Connect desktop proxy")
         self.system.connect("clicked", self.toggle_system)
         self.stop = Gtk.Button(label="Stop")
         self.stop.connect("clicked", lambda *_: self.request_stop())
@@ -112,8 +120,8 @@ class Window(Gtk.Window):
         root.pack_start(self.system_status, False, False, 0)
         self.address = Gtk.Entry(editable=False, can_focus=True, placeholder_text="No confirmed local proxy address")
         root.pack_start(self.address, False, False, 0)
-        note = Gtk.Label(label="Use the loopback address for manual HTTP or SOCKS5. Connect GNOME applies "
-                               "a script for apps that follow the GNOME proxy settings.", xalign=0, wrap=True)
+        note = Gtk.Label(label="Use the loopback address for manual HTTP or SOCKS5. The desktop PAC applies only "
+                               "to apps that use these proxy settings.", xalign=0, wrap=True)
         root.pack_start(note, False, False, 0)
         self.tray_note = Gtk.Label(xalign=0, wrap=True)
         root.pack_start(self.tray_note, False, False, 0)
@@ -155,29 +163,49 @@ class Window(Gtk.Window):
     def sync_system_controls(self):
         pending = self.pac is not None and self.pac.pending
         running = self.session.process is not None
-        enabled = self.pac is not None and not self.busy and not self.closing and (
+        enabled = self.pac is not None and not self.busy and not self.closing and self.subscription_dialog is None and (
             pending or (self.session.state is not None if running else self.start.get_sensitive()))
-        label = "Restore GNOME proxy" if pending else "Apply to GNOME" if running else "Connect GNOME"
+        name = self.desktop_name
+        label = (f"Restore {name} proxy" if pending else f"Apply to {name}" if running else
+                 f"Connect {name}" if self.pac is not None else "Desktop proxy unavailable")
         self.system.set_label(label)
         self.system.set_sensitive(enabled)
         if self.tray is not None:
             self.tray.update_system(label, enabled and (running or pending))
         if self.busy and pending:
-            return  # Keep the prior system indicator while the worker is active.
-        configured = False
+            return
         if pending:
+            recovery = self.pac.recovery_message
+            message = (f"{name} PAC configured for apps that follow desktop proxy settings."
+                       if self.system_confirmed and self.pac_notice != recovery else recovery)
+        else:
+            message = self.pac_notice or (f"Manual proxy · {name} settings unchanged" if self.pac is not None
+                                          else "Manual proxy · Desktop proxy integration unavailable in this session")
+        self.system_status.set_text(message)
+
+    def probe_system(self):
+        # KConfig can block on filesystem/helper I/O. Never wait for it on GTK's thread.
+        if self.system_probe_pending or not self.pac.serving:
+            return
+        self.system_probe_pending = True
+        generation = self.system_generation
+
+        def check():
+            confirmed = False
             try:
-                configured = self.pac.confirmed()
+                confirmed = self.pac.confirmed()
             except Exception:
                 pass
-        if configured and self.pac_notice != RECOVERY_NEEDED:
-            message = "GNOME PAC configured for apps that follow desktop proxy settings."
-        elif pending:
-            message = RECOVERY_NEEDED
-        else:
-            message = self.pac_notice or ("Manual proxy · GNOME settings unchanged" if self.pac is not None
-                                          else "Manual proxy · GNOME integration unavailable in this session")
-        self.system_status.set_text(message)
+            GLib.idle_add(finish, confirmed)
+
+        def finish(confirmed):
+            self.system_probe_pending = False
+            if not self.destroyed and not self.busy and generation == self.system_generation:
+                self.system_confirmed = confirmed
+                self.sync_system_controls()
+            return GLib.SOURCE_REMOVE
+
+        threading.Thread(target=check, daemon=True).start()
 
     def profile_changed(self, *_):
         self.clear_subscription()
@@ -221,6 +249,7 @@ class Window(Gtk.Window):
         if self.busy:
             return
         self.busy = True
+        self.system_generation += 1
         self.cancel.clear()
         if not system_only:
             self.status.set_text(message)
@@ -285,7 +314,7 @@ class Window(Gtk.Window):
             message += f" Skipped {preview.skipped} entries."
         self.status.set_text(message)
 
-    def start_session(self, *_, connect_gnome=False):
+    def start_session(self, *_, connect_desktop=False):
         rules = self.rules.get_filename() if self.use_rules.get_active() else None
         if self.preview is None or not self.start.get_sensitive():
             return
@@ -298,43 +327,45 @@ class Window(Gtk.Window):
         engine, digest = self.engine.get_filename(), self.fingerprint.get_text().strip()
         def start():
             state = self.session.start(path, preview, node, engine, digest, mode, rules, source=source)
-            if connect_gnome and not self.cancel.is_set():
+            if connect_desktop and not self.cancel.is_set():
                 try:
-                    self.enable_gnome(state)
+                    self.enable_desktop(state)
                 except DesktopError as error:
                     self.pac_notice = str(error)
                 except Exception:
-                    self.pac_notice = "GNOME PAC could not be configured. The manual proxy is still available."
+                    self.pac_notice = f"{self.desktop_name} PAC could not be configured. The manual proxy is still available."
             return state
 
         self.task("Starting Mihomo and checking its controller…", start, self.display_state)
 
-    def enable_gnome(self, state):
+    def enable_desktop(self, state):
         script = default_pac(self.session.binary, state.port, self.cancel)
         child = self.session.process
         if self.cancel.is_set() or child is None or child.poll() is not None:
             raise DesktopError("The local session is no longer ready.")
         self.pac.enable(script)
+        self.system_confirmed = True
         self.pac_notice = None
 
-    def restore_gnome(self):
+    def restore_desktop(self):
         result = self.pac.release()
-        self.pac_notice = {"restored": "Original GNOME proxy settings restored.",
-                           "external": "The newer GNOME proxy settings were preserved."}.get(result)
+        self.system_confirmed = False
+        self.pac_notice = {"restored": f"Original {self.desktop_name} proxy settings restored.",
+                           "external": f"The newer {self.desktop_name} proxy settings were preserved."}.get(result)
 
     def restore_before_stop(self):
         if self.pac is not None and self.pac.serving:
-            self.restore_gnome()
+            self.restore_desktop()
 
     def toggle_system(self, *_):
-        if self.busy or self.pac is None:
+        if self.busy or self.pac is None or self.subscription_dialog is not None:
             return
         if self.pac.pending:
-            self.task("Checking and restoring GNOME settings…", self.restore_gnome, lambda _: None, system_only=True)
+            self.task(f"Checking and restoring {self.desktop_name} settings…", self.restore_desktop, lambda _: None, system_only=True)
         elif self.session.process is None and self.start.get_sensitive():
-            self.start_session(connect_gnome=True)
+            self.start_session(connect_desktop=True)
         elif (confirmed := self.session.state) is not None and self.system.get_sensitive():
-            self.task("Configuring GNOME PAC…", lambda: self.enable_gnome(confirmed), lambda _: None, system_only=True)
+            self.task(f"Configuring {self.desktop_name} PAC…", lambda: self.enable_desktop(confirmed), lambda _: None, system_only=True)
 
     def change_node(self, *_):
         if self.nodes.get_active_id() is not None:
@@ -373,7 +404,7 @@ class Window(Gtk.Window):
         elif not self.busy and self.pac is not None and self.pac.pending:
             self.poll_ticks += 1
             if self.poll_ticks % 5 == 0:
-                self.sync_system_controls()
+                self.probe_system()
         return GLib.SOURCE_CONTINUE
 
     def request_stop(self):

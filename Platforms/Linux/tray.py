@@ -46,7 +46,7 @@ class Tray:
         self.mode_items = {mode: self.choice(mode_menu, mode.title(), lambda mode=mode: window.apply_mode(mode))
                            for mode in MODES}
         self.refresh = self.item(self.menu, "Refresh status", window.refresh_session)
-        self.system = self.item(self.menu, "Apply to GNOME", window.toggle_system)
+        self.system = self.item(self.menu, "Desktop proxy", window.toggle_system)
         self.stop = self.item(self.menu, "Stop proxy", window.request_stop)
         self.menu.append(Gtk.SeparatorMenuItem())
         self.item(self.menu, "Quit CLAY", window.request_quit)

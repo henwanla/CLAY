@@ -23,7 +23,17 @@ For the optional tray, install `gir1.2-ayatanaappindicator3-0.1` and use a deskt
 
 On GNOME, **Connect GNOME** starts the core and applies a PAC to apps that follow GNOME proxy settings. If a manual session is running, choose **Apply to GNOME** from the window or tray. The PAC keeps local destinations direct and sends other requests to Mihomo, where Rule, Global and Direct take effect. Switching modes or nodes does not replace the PAC URL. Manual usage remains available on other desktops or when system proxy settings are locked.
 
-Use **Restore GNOME proxy** to restore the previous GNOME mode and script without stopping the core. Stop and Quit restore settings that CLAY still owns before closing the listener. If the process is terminated abruptly, reopen CLAY in GNOME to recover. If another app changes the settings, CLAY preserves newer values. If the script still points to CLAY but the mode or address no longer matches, remove CLAY's script address in GNOME Network Proxy and retry. The recovery snapshot is stored locally with owner-only permissions; it may contain the prior PAC URL and is removed after recovery. It isn't sent anywhere. KDE system proxy, TUN, and login startup are outside this preview. The tray exports node numbers and confirmed modes to the local session bus; profile paths, engine logs and node credentials are not included.
+Use **Restore GNOME proxy** to restore the previous GNOME mode and script without stopping the core. Stop and Quit restore settings that CLAY still owns before closing the listener. If the process is terminated abruptly, reopen CLAY in the same desktop session to recover. If another app changes the settings, CLAY preserves the newer values it reads. If the script still points to CLAY but the mode or address no longer matches, remove CLAY's script address in the desktop's proxy settings and retry. The recovery snapshot is stored locally with owner-only permissions; it may contain the prior PAC URL and is removed after recovery. It isn't sent anywhere. TUN and login startup are outside this preview. The tray exports node numbers and confirmed modes to the local session bus; profile paths, engine logs and node credentials are not included.
+
+On **Plasma 6**, install CMake, Qt Base and the KDE KConfig development package (for example `qt6-base-dev` and `libkf6config-dev` on suitable Debian-based systems), then build the settings helper once:
+
+~~~sh
+cmake -S Platforms/Linux/kde -B .build/kde -DCMAKE_BUILD_TYPE=Release
+cmake --build .build/kde
+install -m 755 .build/kde/clay-kde-settings "$(dirname "$(realpath .build/release/clay-portable)")/clay-kde-settings"
+~~~
+
+Use **Connect Plasma**, **Apply to Plasma**, or **Restore Plasma proxy** in the window or tray. CLAY temporarily changes only the user's proxy mode and script URL through KConfig. Existing proxy fields and bypass lists remain in place; whether an app uses them depends on its resolver. PAC applies to clients that read the Plasma settings, such as ones using libproxy with its KDE backend and PAC support. Some already-open apps may need to be reopened. If an app uses its own proxy settings, use the manual address. Plasma 5 and managed or nonstandard configurations are outside this preview.
 
 ## 中文说明
 
@@ -42,7 +52,9 @@ Linux 桌面预览可以读取本地节点配置、启动通过 SHA-256 校验�
 
 在 GNOME 中可用 **Connect GNOME** 启动并应用系统 PAC。手动会话已启动时，可从窗口或托盘选择 **Apply to GNOME**。遵循 GNOME 代理设置的应用会保留本地地址直连，其他流量交给内核的规则／全局／直连模式。切节点或模式不改变 PAC 地址。其他桌面或系统设置锁定时仍可手动接入。
 
-**Restore GNOME proxy** 恢复原 GNOME 模式和脚本地址，同时保留内核。停止或退出会先恢复仍由 CLAY 管理的设置，再关监听。异常退出后，在 GNOME 重新打开 CLAY 会尝试恢复。检测到外部新设置时会保留；若脚本仍指向 CLAY，但模式或地址已被改过，请在 GNOME 的「网络代理」中移除 CLAY 脚本地址，再重试。恢复记录保存在当前用户专用目录，可能包含原 PAC 地址，恢复后删除，不会上传。暂不支持 KDE 系统代理、TUN 和开机启动；托盘不展示节点名、服务器或凭据。
+**Restore GNOME proxy** 恢复原 GNOME 模式和脚本地址，同时保留内核。停止或退出会先恢复仍由 CLAY 管理的设置，再关监听。异常退出后，在同一桌面环境重新打开 CLAY 会尝试恢复。检测到外部新设置时会保留；若脚本仍指向 CLAY，但模式或地址已被改过，请在桌面的代理设置中移除 CLAY 脚本地址，再重试。恢复记录保存在当前用户专用目录，可能包含原 PAC 地址，恢复后删除，不会上传。暂不支持 TUN 和开机启动；托盘不展示节点名、服务器或凭据。
+
+**Plasma 6** 可按上面的命令构建 KConfig 辅助程序，再使用 **Connect Plasma**、**Apply to Plasma** 或 **Restore Plasma proxy**。CLAY 只临时改代理模式和脚本地址，原有手动代理字段和例外列表仍保留。需要应用支持读取 Plasma 代理设置，例如使用带 KDE 后端和 PAC 支持的 libproxy；部分已打开的应用可能需要重启。使用独立代理设置的应用可填手动地址。Plasma 5 和受管理或非标准配置不在本次预览范围。
 
 ## Synthetic checks / 测试
 

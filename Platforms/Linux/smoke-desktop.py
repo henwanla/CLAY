@@ -253,7 +253,7 @@ def gnome_recovery_checks(binary):
     print("PASS GNOME recovery: private snapshot, exclusive owner, actual dconf readback, reset on restart, external change preserved")
 
 
-def window_checks(binary, directory, profile, gnome=False):
+def window_checks(binary, directory, profile, gnome=False, plasma=False):
     import json
 
     window_class = runpy.run_path(str(Path(__file__).with_name("clay-desktop.py")))["Window"]
@@ -275,7 +275,7 @@ def window_checks(binary, directory, profile, gnome=False):
         gsettings("set", "mode", "manual")
         gsettings("set", "autoconfig-url", old_url)
         gsettings("set", "host", old_host, schema="org.gnome.system.proxy.http")
-    window = window_class(binary, use_system=gnome)
+    window = window_class(binary, use_system=gnome or plasma)
     destroyed = threading.Event()
     window.connect("destroy", lambda *_: destroyed.set())
     window.show_all()
@@ -301,6 +301,11 @@ def window_checks(binary, directory, profile, gnome=False):
         until(lambda: window.tray.registered and host.item is not None)
         assert not window.tray.available
         assert not window.start.get_sensitive()
+        if plasma:
+            from desktop_pac import Snapshot
+
+            baseline = Snapshot(("0", ""), (None, None))
+            assert window.pac.settings.read() == baseline
         assert window.profile.set_filename(str(profile))
         until(lambda: window.profile.get_filename() == str(profile))
         click(window.load)
@@ -352,6 +357,18 @@ def window_checks(binary, directory, profile, gnome=False):
             until(lambda: not window.busy and window.pac.confirmed())
             previous_pac, url = url, window.pac.server.url
             assert previous_pac != url and b'PROXY 127.0.0.1:' + str(proxy).encode() in fetch_pac(url)
+        if plasma:
+            host.click(until, "Apply to Plasma")
+            until(lambda: not window.busy and window.system_confirmed)
+            url = window.pac.server.url
+            assert window.pac.settings.read() == Snapshot(("2", url), ("2", url))
+            host.click(until, "Restore Plasma proxy")
+            until(lambda: not window.busy and not window.pac.pending)
+            assert window.session.state == State("global", 2, proxy) and window.pac.settings.read() == baseline
+            host.click(until, "Apply to Plasma")
+            until(lambda: not window.busy and window.system_confirmed)
+            assert window.pac.server.url != url
+            url = window.pac.server.url
         host.click(until, "Node 1")
         until(lambda: not window.busy and window.nodes.get_active_id() == "1")
         assert "Node 1" in window.status.get_text() and window.address.get_text()
@@ -368,6 +385,8 @@ def window_checks(binary, directory, profile, gnome=False):
         assert "Direct mode" in window.status.get_text()
         if gnome:
             assert window.pac.confirmed() and gsettings("get", "autoconfig-url") == repr(url)
+        if plasma:
+            assert window.pac.confirmed() and window.pac.server.url == url
 
         host.click(until, "Open CLAY")
         until(window.get_visible)
@@ -418,7 +437,7 @@ def window_checks(binary, directory, profile, gnome=False):
         window.modes.set_active_id("global")
         report.unlink()
         previous_pid = pid
-        click(window.system if gnome else window.start)
+        click(window.system if gnome or plasma else window.start)
         assert window.session.state is not None, window.status.get_text()
         directory_name, pid, proxy, _ = json.loads(report.read_text(encoding="utf-8"))
         assert pid != previous_pid and Path(f"/proc/{pid}").exists()
@@ -429,6 +448,8 @@ def window_checks(binary, directory, profile, gnome=False):
             until(lambda: not window.busy and window.session.state == State("global", 1, proxy))
             host.click(until, "Direct")
             until(lambda: not window.busy and window.session.state == State("direct", 1, proxy))
+        if plasma:
+            assert window.pac.confirmed() and window.system_confirmed and window.pac.server.url != url
         window.close()
         until(lambda: not window.get_visible())
         host.click(until, "Quit CLAY")
@@ -438,6 +459,8 @@ def window_checks(binary, directory, profile, gnome=False):
         if gnome:
             assert gsettings("get", "mode") == "'manual'" and gsettings("get", "autoconfig-url") == repr(old_url)
             assert gsettings("get", "host", schema="org.gnome.system.proxy.http") == repr(old_host)
+        if plasma:
+            assert window.pac.settings.read() == baseline
     finally:
         if not destroyed.is_set():
             if gnome:

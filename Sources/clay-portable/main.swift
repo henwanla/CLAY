@@ -28,6 +28,8 @@ private struct PortableCLI {
         catch {
             #if os(Linux)
             if let problem = error as? LinuxMihomoError { quit(problem.message, code: problem.exitCode) }
+            #elseif os(Windows)
+            if let problem = error as? WindowsMihomoError { quit(problem.message, code: problem.exitCode) }
             #endif
             quit("The loopback Mihomo controller did not return a usable response.", code: 69)
         }
@@ -42,6 +44,8 @@ private struct PortableCLI {
         """
         #if os(Linux)
         return common + "\n" + LinuxRunOptions.usage
+        #elseif os(Windows)
+        return common + "\n" + WindowsRunOptions.usage
         #else
         return common
         #endif
@@ -110,6 +114,15 @@ private struct PortableCLI {
                 try PACPolicy(rules: PACPolicy.importRules(readText($0)), defaultDecision: .proxy, bypassLocal: true)
             }
             let status = try LinuxMihomoRuntime.run(profiles: profiles, options: options, policy: policy)
+            if status != 0 { exit(status) }
+        #elseif os(Windows)
+        case "mihomo-run":
+            guard let options = WindowsRunOptions(arguments) else { throw CommandError.usage }
+            let profiles = ProfileImporter.read(try readText(options.source)).profiles
+            let policy = try options.rules.map {
+                try PACPolicy(rules: PACPolicy.importRules(readText($0)), defaultDecision: .proxy, bypassLocal: true)
+            }
+            let status = try WindowsMihomoRuntime.run(profiles: profiles, options: options, policy: policy)
             if status != 0 { exit(status) }
         #endif
         default: throw CommandError.usage

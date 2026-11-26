@@ -74,3 +74,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Swift binary path lookup failed: $LASTEXITCODE" }
           $binary = Join-Path $buildDir 'clay-portable.exe'
           python scripts/smoke-portable.py $binary --offline-only
+      - name: Run native Windows loopback smoke
+        run: |
+          $buildDir = swift build -c release --show-bin-path
+          if ($LASTEXITCODE -ne 0) { throw "Swift binary path lookup failed: $LASTEXITCODE" }
+          $binary = Join-Path $buildDir 'clay-portable.exe'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vs = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vs) { throw 'Visual Studio C compiler is missing' }
+          & (Join-Path $vs 'Common7\Tools\Launch-VsDevShell.ps1') -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
+          $fixture = Join-Path $env:RUNNER_TEMP 'clay-windows-fixture.exe'
+          $object = Join-Path $env:RUNNER_TEMP 'clay-windows-fixture.obj'
+          cl.exe /nologo /O2 /MT /W4 "/Fe:$fixture" "/Fo:$object" Tests/WindowsRuntimeFixture/fixture.c /link Ws2_32.lib
+          if ($LASTEXITCODE -ne 0) { throw "Fixture compilation failed: $LASTEXITCODE" }
+          python scripts/smoke-windows-runtime.py $binary $fixture

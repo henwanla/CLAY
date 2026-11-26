@@ -344,6 +344,14 @@ def window_checks(binary, directory, profile, gnome=False):
             url = window.pac.server.url
             assert b'PROXY 127.0.0.1:' + str(proxy).encode() in fetch_pac(url)
             assert gsettings("get", "mode") == "'auto'" and gsettings("get", "autoconfig-url") == repr(url)
+            host.click(until, "Restore GNOME proxy")
+            until(lambda: not window.busy and not window.pac.pending)
+            assert window.session.state == State("global", 2, proxy) and Path(f"/proc/{pid}").exists()
+            assert gsettings("get", "mode") == "'manual'" and gsettings("get", "autoconfig-url") == repr(old_url)
+            host.click(until, "Apply to GNOME")
+            until(lambda: not window.busy and window.pac.confirmed())
+            previous_pac, url = url, window.pac.server.url
+            assert previous_pac != url and b'PROXY 127.0.0.1:' + str(proxy).encode() in fetch_pac(url)
         host.click(until, "Node 1")
         until(lambda: not window.busy and window.nodes.get_active_id() == "1")
         assert "Node 1" in window.status.get_text() and window.address.get_text()
@@ -377,7 +385,7 @@ def window_checks(binary, directory, profile, gnome=False):
             # leave both the settings and current process alone until resolved.
             gsettings("set", "mode", "manual")
             host.click(until, "Stop proxy")
-            until(lambda: not window.busy and "need recovery" in window.system_status.get_text())
+            until(lambda: not window.busy and window.get_visible() and "need recovery" in window.system_status.get_text())
             assert window.get_visible() and window.pac.pending and Path(f"/proc/{pid}").exists()
             assert gsettings("get", "mode") == "'manual'" and gsettings("get", "autoconfig-url") == repr(url)
             assert fetch_pac(url)
@@ -389,10 +397,18 @@ def window_checks(binary, directory, profile, gnome=False):
 
         host.click(until, "Open CLAY")
         until(window.get_visible)
+        # The synthetic core only accepts this startup pair, regardless of
+        # what route we selected in the previous session. Require a new report.
+        window.nodes.set_active_id("2")
+        window.modes.set_active_id("global")
+        report.unlink()
+        previous_pid = pid
         click(window.system if gnome else window.start)
+        assert window.session.state is not None, window.status.get_text()
         directory_name, pid, proxy, _ = json.loads(report.read_text(encoding="utf-8"))
+        assert pid != previous_pid and Path(f"/proc/{pid}").exists()
         if gnome:
-            assert window.pac.confirmed() and gsettings("get", "mode") == "'auto'"
+            assert window.pac.confirmed() and gsettings("get", "mode") == "'auto'", window.system_status.get_text()
         window.close()
         until(lambda: not window.get_visible())
         host.click(until, "Quit CLAY")
@@ -424,6 +440,7 @@ def main():
         fixture = Path(os.environ.get("CLAY_GNOME_FIXTURE", ""))
         assert fixture.is_absolute() and fixture.is_dir() and stat.S_IMODE(fixture.stat().st_mode) == 0o700
         assert os.environ.get("GSETTINGS_BACKEND") == "dconf" and os.environ.get("DBUS_SESSION_BUS_ADDRESS")
+        assert os.environ.get("DCONF_PROFILE") == str(fixture / "dconf-profile")
         for suffix in ("config", "state", "runtime"):
             assert os.environ.get(f"XDG_{suffix.upper()}_HOME" if suffix != "runtime" else "XDG_RUNTIME_DIR") == str(fixture / suffix)
     binary = options.cli.resolve(strict=True)

@@ -15,6 +15,8 @@
 		B00100000000000000000007 = {isa = PBXBuildFile; productRef = B00800000000000000000001; };
 		B00100000000000000000008 = {isa = PBXBuildFile; fileRef = A00300000000000000000005; };
 		B00100000000000000000009 = {isa = PBXBuildFile; fileRef = B0020000000000000000000C; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, CodeSignOnCopy,); }; };
+		B0010000000000000000000A = {isa = PBXBuildFile; fileRef = B0020000000000000000000E; };
+		B0010000000000000000000B = {isa = PBXBuildFile; fileRef = B0020000000000000000000F; };
 		A00100000000000000000001 /* CLAYOfflineApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000001 /* CLAYOfflineApp.swift */; };
 		A00100000000000000000002 /* OfflineSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00200000000000000000002 /* OfflineSummary.swift */; };
 		A00100000000000000000003 /* CLAYCore in Frameworks */ = {isa = PBXBuildFile; productRef = A00800000000000000000002 /* CLAYCore */; };
@@ -43,6 +45,8 @@
 		B0020000000000000000000B = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CLAYTunnelLab.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B0020000000000000000000C = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CLAYPacketTunnel.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		B0020000000000000000000D = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = TunnelLab/Lab.xcconfig; sourceTree = "<group>"; };
+		B0020000000000000000000E = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunnelLab/LabSubscriptionStore.swift; sourceTree = "<group>"; };
+		B0020000000000000000000F = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TunnelLab/LabSubscriptionsView.swift; sourceTree = "<group>"; };
 		A00200000000000000000001 /* CLAYOfflineApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CLAYOfflineApp.swift; sourceTree = "<group>"; };
 		A00200000000000000000002 /* OfflineSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfflineSummary.swift; sourceTree = "<group>"; };
 		A00200000000000000000003 /* CLAY.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CLAY.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -65,7 +69,7 @@
 /* Begin PBXGroup section */
 		B00300000000000000000001 /* Tunnel Lab */ = {
 			isa = PBXGroup;
-			children = (B00200000000000000000001, B00200000000000000000002, B00200000000000000000003, B00200000000000000000004, B00200000000000000000005, B00200000000000000000006, B00200000000000000000007, B00200000000000000000008, B00200000000000000000009, B0020000000000000000000A, B0020000000000000000000D,);
+			children = (B00200000000000000000001, B00200000000000000000002, B00200000000000000000003, B00200000000000000000004, B00200000000000000000005, B00200000000000000000006, B00200000000000000000007, B00200000000000000000008, B00200000000000000000009, B0020000000000000000000A, B0020000000000000000000D, B0020000000000000000000E, B0020000000000000000000F,);
 			name = "Tunnel Lab";
 			sourceTree = "<group>";
 		};
@@ -161,7 +165,7 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		B00400000000000000000001 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (B00100000000000000000001, B00100000000000000000002, B00100000000000000000003, B00100000000000000000004,); runOnlyForDeploymentPostprocessing = 0; };
+		B00400000000000000000001 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (B00100000000000000000001, B00100000000000000000002, B00100000000000000000003, B00100000000000000000004, B0010000000000000000000A, B0010000000000000000000B,); runOnlyForDeploymentPostprocessing = 0; };
 		B00400000000000000000005 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (B00100000000000000000005, B00100000000000000000006,); runOnlyForDeploymentPostprocessing = 0; };
 		A00400000000000000000002 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;

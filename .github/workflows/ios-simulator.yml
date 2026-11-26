@@ -37,6 +37,8 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
+      - name: Exercise the encrypted subscription cache using synthetic responses
+        run: bash Platforms/iOS/TunnelLab/check-subscriptions.sh
       - name: Build and check the iOS Simulator app
         shell: bash
         run: |

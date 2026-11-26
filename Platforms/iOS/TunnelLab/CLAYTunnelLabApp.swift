@@ -14,6 +14,8 @@ private struct TunnelLabView: View {
     @State private var input = ""
     @State private var nodes: [NodeProfile] = []
     @State private var selected: UUID?
+    @State private var showSubscriptions = false
+    @State private var subscriptionName: String?
     @State private var mode: LabConnection.Mode = .rule
     @State private var attemptedImport = false
     @State private var probeID: UUID?
@@ -32,6 +34,16 @@ private struct TunnelLabView: View {
                         .font(.caption.monospaced())
                 }
                 Section("Configuration text") {
+                    Button { showSubscriptions = true } label: {
+                        Label("lab.subscription.title", systemImage: "tray.full")
+                    }
+                    if let subscriptionName {
+                        LabeledContent("lab.subscription.source") {
+                            if subscriptionName.isEmpty { Text("lab.subscription.unnamed") }
+                            else { Text(verbatim: subscriptionName).lineLimit(1) }
+                        }
+                        .privacySensitive()
+                    }
                     TextEditor(text: $input)
                         .font(.body.monospaced())
                         .frame(minHeight: 120)
@@ -49,6 +61,7 @@ private struct TunnelLabView: View {
                         let result = ProfileImporter.read(input)
                         nodes = result.profiles
                         selected = nodes.first?.id
+                        subscriptionName = nil
                         attemptedImport = true
                     }
                     .disabled(input.isEmpty || oversized)
@@ -56,7 +69,7 @@ private struct TunnelLabView: View {
                         input.removeAll()
                         resetNodes()
                     }
-                    .disabled(input.isEmpty)
+                    .disabled(input.isEmpty && subscriptionName == nil)
                     if attemptedImport && nodes.isEmpty { Text("lab.noNodes").foregroundStyle(.secondary) }
                     if !nodes.isEmpty {
                         Picker("lab.node", selection: $selected) {
@@ -123,6 +136,15 @@ private struct TunnelLabView: View {
             .navigationBarTitleDisplayMode(.inline)
             #endif
         }
+        .sheet(isPresented: $showSubscriptions) {
+            LabSubscriptionsView { entry, imported in
+                nodes = imported
+                selected = imported.first?.id
+                subscriptionName = entry.name
+                attemptedImport = false
+                editing = false
+            }
+        }
         .task { await connection.refresh() }
         .onChange(of: scenePhase) { phase in
             if phase == .active { Task { await connection.refresh() } }
@@ -149,6 +171,7 @@ private struct TunnelLabView: View {
     private func resetNodes() {
         nodes.removeAll()
         selected = nil
+        subscriptionName = nil
         attemptedImport = false
     }
 

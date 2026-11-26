@@ -48,9 +48,19 @@ CI repeats Lab TCP switching and restart tests with Go's race detector, then che
 
 另一个 Xcode scheme `CLAYTunnelLab` 打包自己的 Packet Tunnel 扩展，与离线 App 分开。界面支持中文、英文和日文，可粘贴、导入和选择测试节点，以规则或全局模式开始，读取系统 VPN 状态，发送固定测试请求并停止。已连接时可选新节点和模式，再点「应用到测试隧道」；只有扩展确认后才显示已应用。切换保留系统测试路由，关闭旧上游连接，新连接走新节点。已经排队的旧包仍可能送达原 TCP 流。未收到确认时可重试或停止；导入和编辑本身不更改线路。系统 VPN 的授权提示以设备显示为准，启用本实验可能暂停其他 VPN。
 
-系统只加入 `198.51.100.42/32` 测试路由，扩展还会拒绝不符合地址、TCP 端口 `18080` 或包格式的流量。没有默认路由、DNS 覆盖、IPv6 路由或按需启动。系统 VPN 配置只保存本实验的扩展标识和固定标签，所选节点仅随手动启动或应用更新发送，应用不把输入写入文件或日志。实验中的规则和全局都只把这一个目标交给所选节点，未提供直连模式。此功能用于接入验收，不能当作全设备 VPN。
+系统只加入 `198.51.100.42/32` 测试路由，扩展还会拒绝不符合地址、TCP 端口 `18080` 或包格式的流量。没有默认路由、DNS 覆盖、IPv6 路由或按需启动。系统 VPN 配置只保存本实验的扩展标识和固定标签，所选节点仅随手动启动或应用更新发送，手动粘贴的内容不保存。实验中的规则和全局都只把这一个目标交给所选节点，未提供直连模式。此功能用于接入验收，不能当作全设备 VPN。
 
 The separate scheme embeds a Packet Tunnel extension with a single documentation IPv4 route. Only unfragmented TCP for `198.51.100.42:18080` is admitted. It leaves DNS and default routes alone. CLAY sends only the selected node on an explicit start or update and keeps credentials out of VPN preferences and logs. Apply a new node or mode while connected, then wait for the provider acknowledgment before sending a fresh probe. Old upstream connections close; packets already queued may still reach their original TCP flow. Both Rule and Global use the selected node for the fixed test destination.
+
+### 订阅 / Subscriptions
+
+在隧道实验打开「订阅」，输入 HTTPS 地址，点「下载并保存」。从保存的订阅点「使用缓存」，再选节点并启动，或在已连接时应用到测试隧道。刷新只更新本机缓存，要重新选用才会影响草稿；正在运行的线路还须手动应用。下载失败保留上一份缓存。无可用网络时也可以选已有缓存，或者直接粘贴节点。
+
+订阅仅手动下载，信任系统 TLS 验证，只跟随同源跳转，解析前限制内容为 2 MiB。地址、名称和节点文本在 App 的私有目录以 AES-256-GCM 保存，目录排除系统备份；密钥保存在仅本机且解锁时可访问的 Keychain。缓存不交给扩展，扩展只接收一次操作选中的节点。若缓存无法解密，可以在列表删除它再添加。离线检查目标没有订阅入口。
+
+In Tunnel Lab, save an HTTPS subscription, use the saved copy, and then choose a node. Refresh saves a new copy without changing the draft or a running tunnel. Re-select the cache and apply explicitly to switch. Downloads are manual, use system TLS verification and same-origin redirects, and cap the decoded response at 2 MiB. Cache records are encrypted in the app, excluded from backups, and use a device-only Keychain key that requires the device to be unlocked. The offline checker has no subscription controls.
+
+在 macOS 运行 `bash Platforms/iOS/TunnelLab/check-subscriptions.sh`，用合成响应验证加密、跨记录替换拒绝、无效刷新保留原件和并发删除。签名真机还应验证保存后重启 App 能离线选用、锁屏时无法读写、重新解锁后可恢复，以及正常刷新和连线状态彼此独立。
 
 有完整 Xcode 时，从仓库根目录构建未签名的设备目标。模拟器将两个 SDK 参数分别换成 `iphonesimulator` 和 `generic/platform=iOS Simulator`：
 

@@ -192,6 +192,19 @@ if $with_tests; then
   [[ "$flavor" == preview ]] || test_name="$flavor-test"
   mv -f "$test_stage/final.apk" "$out/CLAY-Android-arm64-$test_name.apk"
   printf '%s\n' "$out/CLAY-Android-arm64-$test_name.apk"
+  if [[ "$flavor" == vpn ]]; then
+    fixture="$test_src/vpn-revoker"
+    fixture_stage="$stage/vpn-revoker"
+    mkdir -p "$fixture_stage"
+    "$bt/aapt2" link -I "$platform" --manifest "$fixture/AndroidManifest.xml" --min-sdk-version "$min_api" \
+      --target-sdk-version 35 -o "$fixture_stage/unsigned.apk"
+    compile_java "$fixture_stage" "$platform" "$fixture/Revoker.java"
+    fixture_permissions=$("$bt/aapt2" dump permissions "$fixture_stage/unsigned.apk")
+    ! grep -q '^uses-permission' <<< "$fixture_permissions" || exit 1
+    finish_apk "$fixture_stage"
+    mv -f "$fixture_stage/final.apk" "$out/CLAY-Android-arm64-vpn-revoker.apk"
+    printf '%s\n' "$out/CLAY-Android-arm64-vpn-revoker.apk"
+  fi
 fi
 mv -f "$main/final.apk" "$out/CLAY-Android-arm64-$flavor.apk"
 printf '%s\n' "$out/CLAY-Android-arm64-$flavor.apk"

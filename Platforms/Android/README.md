@@ -100,7 +100,12 @@ The build verifies the exact [Mihomo v1.19.34 source archive](https://codeload.g
 bash Platforms/Android/build-apk.sh --test --vpn /absolute/path/to/mihomo-v1.19.34.tgz
 ADB="$ANDROID_HOME/platform-tools/adb" bash Platforms/Android/smoke-vpn.sh emulator-5578 \
   .build/android-apk/CLAY-Android-arm64-vpn.apk \
-  .build/android-apk/CLAY-Android-arm64-vpn-test.apk
+  .build/android-apk/CLAY-Android-arm64-vpn-test.apk \
+  .build/android-apk/CLAY-Android-arm64-vpn-revoker.apk
 ```
 
-The smoke test uses a disposable Android 15 ARM64 emulator and loopback VLESS fixtures. It preauthorizes the test package and leaves testing the system consent dialog for manual verification. The test checks actual IPv4 forwarding, node changes, Rule/Global/Direct, background operation, both stop controls and route cleanup. It uninstalls the test apps when done.
+复验用可丢弃的 Android 15 ARM64 模拟器，要求默认 QEMU 回环别名能访问本机测试服务：IPv4 为 `10.0.2.2`，IPv6 为 `fec0::2`。复验检查系统授权取消、两个 VLESS 节点的 IPv4 TCP 与 UDP DNS、IP 规则、全局／直连、后台运行、两种停止方式与同进程重启。它还强制停止应用自己的内核，再由一个独立、无联网权限的测试包请求系统 VPN 授权，核对 CLAY 响应实际撤销并清除进程、路由和通知。连接前后验证 IPv6 夹具可达，连接期间检验全局和直连模式下 IPv6 TCP 均不能旁路。
+
+The test uses a disposable Android 15 ARM64 emulator with QEMU's default host loopback aliases (`10.0.2.2` and `fec0::2`). It checks system consent cancellation, IPv4 TCP and UDP DNS through two VLESS nodes, routing modes, background operation, both stop controls, and same-process restart. It forcibly terminates CLAY's own engine and separately transfers VPN authorization to a test-only app with no network permissions. Both cases must clear the engine, routes, notification, and private runtime files. IPv6 TCP must reach the host before and after the VPN, and must fail during Global and Direct modes. The script removes all three APKs after the test.
+
+The DNS check sends a plain UDP query to the address entered into CLAY and verifies the selected node's answer. It does not validate Android's automatic resolver selection, Private DNS, or encrypted DNS. The emulator first cancels the platform prompt using Android's activity result mechanism, then preauthorizes the fixtures for subsequent cases. Physical device prompts and recovery still need manual verification.

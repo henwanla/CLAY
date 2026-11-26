@@ -1,0 +1,9 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.clayrelay.vpnrevoker">
+    <application android:label="CLAY VPN revocation fixture" android:allowBackup="false" android:testOnly="true">
+        <service android:name=".Revoker$Holder" android:exported="true" android:permission="android.permission.BIND_VPN_SERVICE">
+            <intent-filter><action android:name="android.net.VpnService" /></intent-filter>
+            <meta-data android:name="android.net.VpnService.SUPPORTS_ALWAYS_ON" android:value="false" />
+        </service>
+    </application>
+    <instrumentation android:name=".Revoker" android:targetPackage="org.clayrelay.vpnrevoker" />
+</manifest>

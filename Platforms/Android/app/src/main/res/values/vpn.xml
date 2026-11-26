@@ -19,4 +19,8 @@
     <string name="vpn_invalid">Paste a profile, choose a node, and enter a valid IPv4 DNS server.</string>
     <string name="vpn_notification">IPv4 tunnel session · Open CLAY to view status</string>
     <string name="vpn_cleanup_failed">Could not confirm VPN cleanup. Check VPN settings before trying again.</string>
+    <string name="vpn_tile_title">CLAY VPN</string>
+    <string name="vpn_tile_open">Open CLAY</string>
+    <string name="vpn_tile_waiting">Please wait</string>
+    <string name="vpn_tile_detail">%1$s · %2$s</string>
 </resources>

@@ -19,4 +19,8 @@
     <string name="vpn_invalid">请粘贴节点配置、选择节点并填写有效的 IPv4 DNS。</string>
     <string name="vpn_notification">IPv4 隧道会话 · 打开 CLAY 查看状态</string>
     <string name="vpn_cleanup_failed">未能确认 VPN 已完全退出。请先检查系统 VPN 设置再重试。</string>
+    <string name="vpn_tile_title">CLAY VPN</string>
+    <string name="vpn_tile_open">打开 CLAY</string>
+    <string name="vpn_tile_waiting">请稍候</string>
+    <string name="vpn_tile_detail">%1$s · %2$s</string>
 </resources>

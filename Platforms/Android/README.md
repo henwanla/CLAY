@@ -100,11 +100,15 @@ python3 Platforms/Android/smoke-portable.py \
 
 ### VPN 技术预览 / VPN technical preview
 
-另一个 ARM64 调试 APK（Android 8.0+，包名 `org.clayrelay.vpn`）可和离线版及本机代理版共存。先选择订阅缓存或粘贴节点，填入可选规则和可信的 IPv4 DNS，选择节点与模式，点「启动 VPN」并确认 Android 系统提示。关闭界面后由前台服务继续运行，可在通知或应用内停止。节点和模式从内核读回，变更时会结束现有连接。规则更新需重新启动会话。
+另一个 ARM64 调试 APK（Android 8.0+，包名 `org.clayrelay.vpn`）可和离线版及本机代理版共存。先选择订阅缓存或粘贴节点，填入可选规则和可信的 IPv4 DNS，选择节点与模式，点「启动 VPN」并确认 Android 系统提示。关闭界面后由前台服务继续运行，可在通知、快捷设置磁贴或应用内停止。节点和模式从内核读回，变更时会结束现有连接。规则更新需重新启动会话。
+
+从屏幕顶端拉下快捷设置，编辑磁贴并添加「CLAY VPN」。未连接时点磁贴打开应用，由你选择配置并启动；已连接时点「停止 VPN」，在设备锁定时需先解锁。磁贴只显示连接动作，不显示节点、订阅或地址。
 
 当前仅接管 IPv4，未启用 IPv6，也不支持始终开启或断网保护。停止、撤销或进程退出后，设备会恢复普通网络。设备发往所填 DNS 的流量按当前模式和规则转发；全局模式需要节点支持 UDP，节点域名的引导解析可能使用系统 DNS。现阶段只验证了 IP 规则，域名分流、Private DNS、加密 DNS、网络切换和真机仍需验证。当前公开 Release 没有 VPN 安装包。
 
-The separate Android 8.0+ ARM64 APK accepts saved subscriptions or pasted profiles, plus optional rules. Enter a trusted IPv4 DNS server, choose a node and mode, then confirm Android's VPN prompt. The service can outlive the screen. Stop it in the app or from its notification. Node and mode changes are confirmed by the engine and close existing connections. Restart to change the rules.
+The separate Android 8.0+ ARM64 APK accepts saved subscriptions or pasted profiles, plus optional rules. Enter a trusted IPv4 DNS server, choose a node and mode, then confirm Android's VPN prompt. The service can outlive the screen. Stop it in the app, from its notification, or using its Quick Settings tile. Node and mode changes are confirmed by the engine and close existing connections. Restart to change the rules.
+
+Add **CLAY VPN** from the system's Quick Settings editor. When disconnected, the tile opens the app so you can select a profile and start it. When connected, it can stop the current session, after unlocking if needed. It shows no node, subscription or address information.
 
 This preview routes IPv4 only; it does not enable IPv6, always-on VPN, or a kill switch. Normal networking resumes after stop, revocation, or process exit. Traffic to the configured DNS follows the selected routing policy; Global mode requires a UDP-capable node, and node hostnames may still use system DNS for bootstrap. The emulator test checks IP rules. Domain rules, Private DNS, encrypted DNS, network changes, and physical devices still need testing. There is no public VPN APK yet.
 
@@ -118,8 +122,8 @@ ADB="$ANDROID_HOME/platform-tools/adb" bash Platforms/Android/smoke-vpn.sh emula
   .build/android-apk/CLAY-Android-arm64-vpn-revoker.apk
 ```
 
-复验用可丢弃的 Android 15 ARM64 模拟器，要求默认 QEMU 回环别名能访问本机测试服务：IPv4 为 `10.0.2.2`，IPv6 为 `fec0::2`。复验检查系统授权取消、两个 VLESS 节点的 IPv4 TCP 与 UDP DNS、IP 规则、全局／直连、后台运行、两种停止方式与同进程重启。它还强制停止应用自己的内核，再由一个独立、无联网权限的测试包请求系统 VPN 授权，核对 CLAY 响应实际撤销并清除进程、路由和通知。连接前后验证 IPv6 夹具可达，连接期间检验全局和直连模式下 IPv6 TCP 均不能旁路。
+复验用可丢弃的 Android 15 ARM64 模拟器，要求默认 QEMU 回环别名能访问本机测试服务：IPv4 为 `10.0.2.2`，IPv6 为 `fec0::2`。复验检查系统授权取消、两个 VLESS 节点的 IPv4 TCP 与 UDP DNS、IP 规则、全局／直连、后台运行、两种停止方式与同进程重启。其中磁贴用同一控制路径验证当前会话能停止、旧操作不能停止新会话；模拟器未操作系统下拉面板或锁屏。它还强制停止应用自己的内核，再由一个独立、无联网权限的测试包请求系统 VPN 授权，核对 CLAY 响应实际撤销并清除进程、路由和通知。连接前后验证 IPv6 夹具可达，连接期间检验全局和直连模式下 IPv6 TCP 均不能旁路。
 
-The test uses a disposable Android 15 ARM64 emulator with QEMU's default host loopback aliases (`10.0.2.2` and `fec0::2`). It checks system consent cancellation, IPv4 TCP and UDP DNS through two VLESS nodes, routing modes, background operation, both stop controls, and same-process restart. It forcibly terminates CLAY's own engine and separately transfers VPN authorization to a test-only app with no network permissions. Both cases must clear the engine, routes, notification, and private runtime files. IPv6 TCP must reach the host before and after the VPN, and must fail during Global and Direct modes. The script removes all three APKs after the test.
+The test uses a disposable Android 15 ARM64 emulator with QEMU's default host loopback aliases (`10.0.2.2` and `fec0::2`). It checks system consent cancellation, IPv4 TCP and UDP DNS through two VLESS nodes, routing modes, background operation, both stop controls, and same-process restart. It exercises the tile's stop handler on a live VPN, including rejecting a stale request after restart. It does not interact with the system tile or lock screen. It forcibly terminates CLAY's own engine and separately transfers VPN authorization to a test-only app with no network permissions. Both cases must clear the engine, routes, notification, and private runtime files. IPv6 TCP must reach the host before and after the VPN, and must fail during Global and Direct modes. The script removes all three APKs after the test.
 
 The DNS check sends a plain UDP query to the address entered into CLAY and verifies the selected node's answer. It does not validate Android's automatic resolver selection, Private DNS, or encrypted DNS. The emulator first cancels the platform prompt using Android's activity result mechanism, then preauthorizes the fixtures for subsequent cases. Physical device prompts and recovery still need manual verification.

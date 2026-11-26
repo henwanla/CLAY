@@ -5,7 +5,9 @@ import android.app.Instrumentation;
 import android.app.Notification;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.content.ComponentName;
 import android.content.Intent;
+import android.content.pm.ServiceInfo;
 import android.net.VpnService;
 import android.os.Bundle;
 import android.os.SystemClock;
@@ -43,6 +45,13 @@ final class VpnChecks {
             return "CLAY_ANDROID_VPN_CONSENT_CANCEL_PASS";
         }
         require(VpnService.prepare(activity) == null, "isolated emulator VPN permission");
+        if (fault.isEmpty()) {
+            ServiceInfo service = activity.getPackageManager().getServiceInfo(new ComponentName(activity, ClayVpnTile.class), 0);
+            require(service.exported && "android.permission.BIND_QUICK_SETTINGS_TILE".equals(service.permission),
+                    "only the system can bind the VPN tile");
+            test.runOnMainSync(() -> require(ClayVpnTile.action(ClayVpnService.state()) == ClayVpnTile.Action.OPEN,
+                    "idle tile opens app"));
+        }
         try {
             if (fault.isEmpty()) require(fetch(IPV6_FIXTURE, ipv6).endsWith(proof + "-V6"),
                     "ordinary IPv6 reachable before starting tunnel");
@@ -50,6 +59,11 @@ final class VpnChecks {
             await(test, R.string.vpn_ready, 1, "global", "foreground start");
             require(fetch("198.51.100.42", 18080).endsWith(proof + "-A"), "system TCP uses first node");
             if (!fault.isEmpty()) return verifyFailure(test, activity, fault, direct, proof);
+            ClayVpnService.Snapshot[] oldTile = new ClayVpnService.Snapshot[1];
+            test.runOnMainSync(() -> {
+                oldTile[0] = ClayVpnService.state();
+                require(ClayVpnTile.action(oldTile[0]) == ClayVpnTile.Action.STOP, "connected tile offers stop");
+            });
             checkIPv6Blocked(ipv6);
             checkDns(proof, 73);
             select(test, activity, 2, 1);
@@ -85,8 +99,17 @@ final class VpnChecks {
                 start(test, returned, first, second);
                 await(test, R.string.vpn_ready, 1, "global", "restart within same process");
                 require(fetch("198.51.100.42", 18080).endsWith(proof + "-A"), "restarted tunnel forwards traffic");
-                test.runOnMainSync(() -> returned.findViewById(VpnPanel.ID_STOP).performClick());
-                await(test, R.string.vpn_stopped, 0, null, "in-app stop cleaned session");
+                test.runOnMainSync(() -> require(!ClayVpnService.stopFromTile(oldTile[0]),
+                        "outdated tile action cannot stop a new session"));
+                require(fetch("198.51.100.42", 18080).endsWith(proof + "-A"), "stale action leaves live route intact");
+                test.runOnMainSync(() -> {
+                    require(ClayVpnService.stopFromTile(ClayVpnService.state()), "current tile can request stop");
+                    require(ClayVpnTile.action(ClayVpnService.state()) == ClayVpnTile.Action.WAIT,
+                            "tile waits while removing a live tunnel");
+                });
+                await(test, R.string.vpn_stopped, 0, null, "quick settings stop cleaned session");
+                test.runOnMainSync(() -> require(ClayVpnTile.action(ClayVpnService.state()) == ClayVpnTile.Action.OPEN,
+                        "tile returns to open after VPN cleanup"));
             } finally { test.runOnMainSync(returned::finish); }
             assertClean(activity);
             require(fetch(IPV6_FIXTURE, ipv6).endsWith(proof + "-V6"), "ordinary IPv6 resumes after stopping VPN");

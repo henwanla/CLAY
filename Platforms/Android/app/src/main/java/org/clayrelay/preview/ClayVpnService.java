@@ -49,10 +49,14 @@ public final class ClayVpnService extends VpnService {
     }
 
     static Snapshot state() { return snapshot; }
+    private static void publish(Snapshot next) {
+        snapshot = next;
+        ClayVpnTile.refresh(next);
+    }
     static void begin(Context context, Draft draft) {
         if (owner != null || pending != null || !BuildFlavor.VPN) { draft.wipe(); return; }
         pending = draft;
-        snapshot = new Snapshot(R.string.vpn_starting, 0, null, true);
+        publish(new Snapshot(R.string.vpn_starting, 0, null, true));
         try { context.startForegroundService(new Intent(context, ClayVpnService.class).setAction(START)); }
         catch (RuntimeException failure) { discardPending(draft); return; }
         MAIN.postDelayed(() -> discardPending(draft), 10_000);
@@ -61,11 +65,18 @@ public final class ClayVpnService extends VpnService {
         if (pending != draft) return;
         pending = null;
         draft.wipe();
-        snapshot = new Snapshot(R.string.vpn_failed, 0, null, false);
+        publish(new Snapshot(R.string.vpn_failed, 0, null, false));
     }
     static void apply(int node, String mode) { if (owner != null) owner.change(node, mode); }
     static boolean canStop() { return owner != null && !owner.ending; }
     static void stopFromPanel() { if (owner != null) owner.finish(R.string.vpn_stopped); }
+
+    static boolean stopFromTile(Snapshot shown) {
+        // Unlocking may have taken long enough for the session or selection to change.
+        if (shown != snapshot || shown.busy || shown.node == 0 || !canStop()) return false;
+        stopFromPanel();
+        return true;
+    }
 
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final RelaySession engine = new RelaySession();
@@ -134,12 +145,12 @@ public final class ClayVpnService extends VpnService {
 
     private void change(int node, String mode) {
         if (ending || snapshot.busy || snapshot.node == 0) return;
-        snapshot = new Snapshot(R.string.vpn_updating, 0, null, true);
+        publish(new Snapshot(R.string.vpn_updating, 0, null, true));
         worker.execute(() -> {
             try {
                 RelaySession.State current = engine.refresh();
                 if (!engine.contains(node)) { MAIN.post(() -> {
-                    if (!ending && owner == this) snapshot = new Snapshot(R.string.relay_invalid, current.node, current.mode, false);
+                    if (!ending && owner == this) publish(new Snapshot(R.string.relay_invalid, current.node, current.mode, false));
                 }); return; }
                 RelaySession.State confirmed = engine.change(node, mode);
                 MAIN.post(() -> { if (!ending && owner == this) confirmed(confirmed); });
@@ -148,13 +159,13 @@ public final class ClayVpnService extends VpnService {
     }
 
     private void confirmed(RelaySession.State state) {
-        snapshot = new Snapshot(R.string.vpn_ready, state.node, state.mode, false);
+        publish(new Snapshot(R.string.vpn_ready, state.node, state.mode, false));
     }
 
     private void finish(int message) {
         if (ending || owner != this) return;
         ending = true;
-        snapshot = new Snapshot(R.string.vpn_stopping, 0, null, true);
+        publish(new Snapshot(R.string.vpn_stopping, 0, null, true));
         MAIN.removeCallbacks(watch);
         if (transport != null) transport.close();
         worker.execute(() -> {
@@ -177,7 +188,7 @@ public final class ClayVpnService extends VpnService {
     private void publishTerminal() {
         if (owner == this && terminalMessage != 0) {
             owner = null;
-            snapshot = new Snapshot(terminalMessage, 0, null, false);
+            publish(new Snapshot(terminalMessage, 0, null, false));
         }
     }
 

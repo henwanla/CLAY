@@ -19,4 +19,8 @@
     <string name="vpn_invalid">ノード設定を貼り付け、ノードと有効な IPv4 DNS を指定してください。</string>
     <string name="vpn_notification">IPv4 トンネルセッション · CLAY で状態を確認</string>
     <string name="vpn_cleanup_failed">VPN の終了を確認できません。システムの VPN 設定を確認してください。</string>
+    <string name="vpn_tile_title">CLAY VPN</string>
+    <string name="vpn_tile_open">CLAY を開く</string>
+    <string name="vpn_tile_waiting">お待ちください</string>
+    <string name="vpn_tile_detail">%1$s · %2$s</string>
 </resources>

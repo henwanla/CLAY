@@ -42,6 +42,10 @@ TUIC v5 的两种 UDP 中继（native、quic）也已在同一组宿主测试中
 
 Both TUIC v5 UDP relay modes (native and quic) now pass TCP and UDP in the same host suite and TCP live switching in the Lab. Wrong passwords, mismatched certificate pins, and unpinned self-signed certificates yield no response. The Lab exposes one explicitly selected IPv4/TCP endpoint per connection.
 
+Shadowsocks 2022 的三种密码套件，以及 AES-128／AES-256 的服务器与用户双密钥，都在宿主包转发桥上通过了 IPv4 TCP 和 UDP。实验只转发 TCP，已验证在线切换至这些节点；错误用户密钥无法取得应答。真机尚未复验。
+
+The host packet bridge verifies IPv4 TCP and UDP for three Shadowsocks 2022 suites and both AES suites with server and user keys. The TCP-only Lab can switch into all five variants while connected. A wrong user key yields no response. These checks do not run on an iPhone.
+
 CI repeats Lab TCP switching and restart tests with Go's race detector, then checks arm64 linkage for both iOS SDKs. Before distributing a binary, include the corresponding Mihomo source, bridge source, build instructions, and required license files.
 
 ## CLAY 隧道实验 / CLAY Tunnel Lab

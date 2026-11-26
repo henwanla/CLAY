@@ -4,6 +4,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"net/netip"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -87,6 +89,30 @@ func cloneFields(source map[string]any) map[string]any {
 	return fields
 }
 
+func syntheticSSKey(size int, value byte) string {
+	return base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{value}, size))
+}
+
+func sharedLoopbackPort(t *testing.T) string {
+	t.Helper()
+	ip := net.IPv4(127, 0, 0, 1)
+	for attempt := 0; attempt < 5; attempt++ {
+		tcp, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: ip})
+		if err != nil {
+			t.Fatal("unable to reserve a test TCP port")
+		}
+		port := tcp.Addr().(*net.TCPAddr).Port
+		udp, err := net.ListenUDP("udp4", &net.UDPAddr{IP: ip, Port: port})
+		_ = tcp.Close()
+		if err == nil {
+			_ = udp.Close()
+			return strconv.Itoa(port)
+		}
+	}
+	t.Fatal("unable to reserve a shared test port")
+	return ""
+}
+
 func TestImportedProtocols(t *testing.T) {
 	// No external CA, account data, forwarding or real DNS is involved.
 	cert, private, pin, err := ca.NewRandomTLSKeyPair(ca.KeyPairTypeP256)
@@ -110,9 +136,15 @@ func TestImportedProtocols(t *testing.T) {
 			t.Fatalf("%s loopback listener failed", label)
 		}
 		t.Cleanup(func() { _ = listener.Close() })
-		addr, err := netip.ParseAddrPort(listener.Address())
+		addresses := strings.Split(listener.Address(), ",")
+		addr, err := netip.ParseAddrPort(addresses[0])
 		if err != nil || addr.Addr() != netip.MustParseAddr("127.0.0.1") || addr.Port() == 0 {
 			t.Fatalf("%s expected a unique IPv4 loopback listener", label)
+		}
+		for _, address := range addresses[1:] {
+			if address != addr.String() {
+				t.Fatalf("%s expected TCP and UDP on the same loopback port", label)
+			}
 		}
 		fields["name"], fields["server"], fields["port"] = label, "127.0.0.1", int(addr.Port())
 		nodes = append(nodes, fields)
@@ -132,9 +164,36 @@ func TestImportedProtocols(t *testing.T) {
 	add("vless-tcp", vless, err, map[string]any{"type": "vless", "uuid": account, "udp": true, "packet-encoding": "xudp"}, true)
 	ss, err := inbound.NewShadowSocks(&inbound.ShadowSocksOption{BaseOption: base("ss"), Cipher: "aes-128-gcm", Password: password})
 	add("ss-aead", ss, err, map[string]any{"type": "ss", "cipher": "aes-128-gcm", "password": password}, false)
+	ssIdentityIndex := 0
+	for _, variant := range []struct {
+		label, cipher string
+		keyBytes      int
+		identity      bool
+	}{
+		{"ss2022-aes128", "2022-blake3-aes-128-gcm", 16, false},
+		{"ss2022-aes256", "2022-blake3-aes-256-gcm", 32, false},
+		{"ss2022-chacha20", "2022-blake3-chacha20-poly1305", 32, false},
+		{"ss2022-aes128-identity", "2022-blake3-aes-128-gcm", 16, true},
+		{"ss2022-aes256-identity", "2022-blake3-aes-256-gcm", 32, true},
+	} {
+		server := syntheticSSKey(variant.keyBytes, 0xFA)
+		password := server
+		option := &inbound.ShadowSocksOption{BaseOption: base("ss2022"), Cipher: variant.cipher, Password: server, UDP: true}
+		option.Port = sharedLoopbackPort(t)
+		if variant.identity {
+			user := syntheticSSKey(variant.keyBytes, 0xFB)
+			password += ":" + user
+			option.Users = map[string]string{"fixture": user}
+			ssIdentityIndex = len(nodes)
+		}
+		listener, err := inbound.NewShadowSocks(option)
+		add(variant.label, listener, err, map[string]any{"type": "ss", "cipher": variant.cipher, "password": password, "udp": true}, true)
+	}
+	trojanIndex := len(nodes)
 	trojan, err := inbound.NewTrojan(&inbound.TrojanOption{BaseOption: base("trojan"),
 		Certificate: cert, PrivateKey: private, Users: []inbound.TrojanUser{{Username: "fixture", Password: password}}})
 	add("trojan-tls", trojan, err, map[string]any{"type": "trojan", "password": password, "fingerprint": pin, "udp": true}, true)
+	hy2Index := len(nodes)
 	for _, obfs := range []string{"", "salamander", "gecko"} {
 		label := "hy2-quic"
 		out := map[string]any{"type": "hysteria2", "password": password, "fingerprint": pin}
@@ -194,10 +253,11 @@ func TestImportedProtocols(t *testing.T) {
 		label, key, value string
 		index             int
 	}{
-		{"trojan-untrusted-cert", "fingerprint", "", 3},
-		{"trojan-wrong-pin", "fingerprint", strings.Repeat("00", 32), 3},
-		{"trojan-wrong-password", "password", "different-fixture-password", 3},
-		{"hy2-wrong-pin", "fingerprint", strings.Repeat("00", 32), 4},
+		{"ss2022-wrong-user-key", "password", syntheticSSKey(32, 0xFA) + ":" + syntheticSSKey(32, 0xFC), ssIdentityIndex},
+		{"trojan-untrusted-cert", "fingerprint", "", trojanIndex},
+		{"trojan-wrong-pin", "fingerprint", strings.Repeat("00", 32), trojanIndex},
+		{"trojan-wrong-password", "password", "different-fixture-password", trojanIndex},
+		{"hy2-wrong-pin", "fingerprint", strings.Repeat("00", 32), hy2Index},
 		{"tuic-untrusted-cert", "fingerprint", "", tuicIndex},
 		{"tuic-wrong-pin", "fingerprint", strings.Repeat("00", 32), tuicIndex},
 		{"tuic-wrong-password", "password", "different-fixture-password", tuicIndex},
@@ -218,6 +278,28 @@ func TestImportedProtocols(t *testing.T) {
 			defer closePeer()
 			checkNoReply(t, peer, ctx)
 		})
+	}
+}
+
+func TestShadowsocksRejectsUnsafePrivateProfile(t *testing.T) {
+	key16 := syntheticSSKey(16, 0xFA)
+	key32 := syntheticSSKey(32, 0xFA)
+	for _, altered := range []map[string]any{
+		{"password": "ordinary-password"}, {"password": key32}, {"password": key16[:len(key16)-1]},
+		{"password": key16 + ":"}, {"password": strings.Repeat(key16+":", 32) + key16},
+		{"password": key16[:len(key16)-3] + "B=="}, {"password": "\n" + key16},
+		{"cipher": "2022-blake3-chacha20-poly1305", "password": key32 + ":" + key32},
+		{"cipher": "none"}, {"plugin": "obfs"}, {"skip-cert-verify": true},
+	} {
+		node := map[string]any{"name": "node-478733c8-afad-47f1-8ee0-cee758e7447f", "type": "ss",
+			"server": "127.0.0.1", "port": 443, "cipher": "2022-blake3-aes-128-gcm", "password": key16, "udp": true}
+		for field, value := range altered {
+			node[field] = value
+		}
+		data, _ := json.Marshal(profile{Proxies: []map[string]any{node}, Rules: []string{"MATCH,CLAY"}})
+		if _, _, err := decodeProfile(data); err == nil {
+			t.Fatal("invalid Shadowsocks profile passed the private ABI")
+		}
 	}
 }
 

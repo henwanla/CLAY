@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import shlex
 import subprocess
+from urllib.parse import quote
 import tempfile
 import uuid
 
@@ -88,6 +89,13 @@ def main():
                          f"trojan://{password}@{host}:443#{label}\r\nhttps://never-fetch.example.test/private\r\n").encode())
             assert run("inspect", nodes) == (b"nodes=4\nss/tcp/aead=1\ntrojan/tcp/tls=1\n"
                                               b"vless/tcp/tls=1\nvmess/tcp/tls=1\nskipped.unsupportedProtocol=1\n")
+            key = base64.b64encode(bytes([0xFC] * 16))
+            encoded = quote(key.decode("ascii"), safe="")
+            ss2022 = push("ss2022.txt", (f"ss://2022-blake3-aes-128-gcm:{encoded}@{host}:443#{label}\n"
+                                         f"ss://2022-blake3-aes-256-gcm:{encoded}@{host}:443#{label}\n").encode())
+            summary = run("inspect", ss2022, "--numbered")
+            assert key not in summary and encoded.encode() not in summary
+            assert summary == b"nodes=1\nnode=1 ss/tcp/aead-2022\nskipped.invalidAccount=1\n"
             yaml = push("Clash fixture.yaml", (f"proxy-providers:\n  ignored:\n    type: http\n"
                          f"    url: https://never-fetch.example.test/remote\nproxies:\n  - type: vless\n"
                          f"    server: {host}\n    port: 443\n    uuid: {node_id}\n    tls: true\n").encode())

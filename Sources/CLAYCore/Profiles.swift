@@ -84,10 +84,29 @@ public struct NodeProfile: Identifiable {
         let fallback: String
         switch mode {
         case .shadowsocks(let cipher):
-            guard ["aes-128-gcm", "aes-192-gcm", "aes-256-gcm", "chacha20-ietf-poly1305", "xchacha20-ietf-poly1305"].contains(cipher)
-            else { throw ImportError.unsupportedOption }
+            let keyBytes: Int
+            let maximumKeys: Int
+            switch cipher {
+            case "2022-blake3-aes-128-gcm": (keyBytes, maximumKeys) = (16, 32)
+            case "2022-blake3-aes-256-gcm": (keyBytes, maximumKeys) = (32, 32)
+            case "2022-blake3-chacha20-poly1305": (keyBytes, maximumKeys) = (32, 1)
+            case "aes-128-gcm", "aes-192-gcm", "aes-256-gcm", "chacha20-ietf-poly1305", "xchacha20-ietf-poly1305":
+                (keyBytes, maximumKeys) = (0, 0)
+            default: throw ImportError.unsupportedOption
+            }
+            if keyBytes > 0 {
+                // PSKs are already generated keys. Never hash, trim, or silently
+                // repair them. SIP023 identity headers apply only to the AES methods.
+                let encodedBytes = ((keyBytes + 2) / 3) * 4
+                guard password.utf8.count <= maximumKeys * (encodedBytes + 1) - 1,
+                      password.split(separator: ":", omittingEmptySubsequences: false).allSatisfy({ field in
+                          field.utf8.count == encodedBytes && Data(base64Encoded: String(field)).map {
+                              $0.count == keyBytes && $0.base64EncodedString() == field
+                          } == true
+                      }) else { throw ImportError.invalidAccount }
+            }
             self.protocolName = "ss"
-            self.security = "aead"
+            self.security = keyBytes > 0 ? "aead-2022" : "aead"
             self.transport = "tcp"
             fallback = "Shadowsocks"
             fields["cipher"] = cipher

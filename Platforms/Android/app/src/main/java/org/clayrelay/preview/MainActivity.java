@@ -277,6 +277,7 @@ public final class MainActivity extends Activity {
     private String securityLabel(String security) {
         switch (security) {
             case "aead": return "AEAD";
+            case "aead-2022": return "AEAD 2022";
             case "tls": return "TLS";
             case "reality": return "REALITY";
             case "none": return getString(R.string.security_none);

@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+from urllib.parse import quote
 
 
 BINARY = pathlib.Path(sys.argv[1]).resolve(strict=True)
@@ -19,6 +20,7 @@ NODE_HOST = "synthetic-node.example.test"
 SECRET = b"portable-fixture-token"
 NODE_PASSWORD = b"portable-fixture-password"
 OBFS_PASSWORD = b"portable-fixture-obfs-password"
+SS2022_KEY = base64.b64encode(bytes([0xFB] * 16))
 RESPONSE_PRIVATE = "DO_NOT_PRINT_CONTROLLER_CONNECTION"
 
 
@@ -32,6 +34,7 @@ def run(*args, data=None, code=0):
     assert SECRET not in combined, "secret in CLI output"
     assert NODE_PASSWORD not in combined, "node password in CLI output"
     assert OBFS_PASSWORD not in combined, "obfuscation password in CLI output"
+    assert SS2022_KEY.rstrip(b"=") not in combined, "Shadowsocks key in CLI output"
     assert not (code == 0 and result.stderr), "standard error on successful invocation"
     return result.stdout.replace(b"\r\n", b"\n")
 
@@ -99,6 +102,13 @@ proxies:
     assert run("inspect", yaml, "--numbered") == (b"nodes=5\nnode=1 vless/tcp/tls\nnode=2 ss/tcp/aead\n"
                                                   b"node=3 trojan/tcp/tls\nnode=4 hysteria2/quic/tls\nnode=5 tuic/quic/tls\n"
                                                   b"skipped.unsupportedProtocol=1\n")
+
+    ss2022 = directory / "ss2022.txt"
+    encoded = quote(SS2022_KEY.decode("ascii"), safe="")
+    ss2022.write_text(f"ss://2022-blake3-aes-128-gcm:{encoded}@{NODE_HOST}:443#{NODE_LABEL}\n"
+                     f"ss://2022-blake3-aes-256-gcm:{encoded}@{NODE_HOST}:443#{NODE_LABEL}\n",
+                     encoding="utf-8")
+    assert run("inspect", ss2022, "--numbered") == b"nodes=1\nnode=1 ss/tcp/aead-2022\nskipped.invalidAccount=1\n"
 
     # JSON numbers 0/1 do not stand in for true/false, or vice versa.
     json_file = directory / "typed-fields.json"

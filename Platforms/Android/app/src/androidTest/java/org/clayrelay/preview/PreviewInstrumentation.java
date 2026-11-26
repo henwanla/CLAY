@@ -6,11 +6,13 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.SystemClock;
+import android.util.Base64;
 import android.widget.Button;
 import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.TextView;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import org.json.JSONObject;
 
 /** Exercises the native Activity and Swift core using synthetic offline inputs. */
@@ -73,6 +75,25 @@ public final class PreviewInstrumentation extends Instrumentation {
         String nodes = await(activity, MainActivity.ID_NODE_RUN, MainActivity.ID_NODE_RESULT);
         require(nodes.contains("VLESS") && !nodes.contains(credential) && !nodes.contains("機密"),
                 "native Activity node preview and redaction");
+
+        byte[] fixtureKey = new byte[16];
+        Arrays.fill(fixtureKey, (byte) 0xFB);
+        String key = Base64.encodeToString(fixtureKey, Base64.NO_WRAP);
+        String encoded = key.replace("+", "%2B").replace("/", "%2F").replace("=", "%3D");
+        String shadowsocks = "ss://2022-blake3-aes-128-gcm:" + encoded + "@example.test:443#Private-SS-Test";
+        String shadowsocksPreview = NativePreview.run(0, shadowsocks, "", 0);
+        JSONObject ss = new JSONObject(shadowsocksPreview).getJSONArray("nodes").getJSONObject(0);
+        require("ss".equals(ss.getString("protocol")) && "aead-2022".equals(ss.getString("security")) &&
+                !shadowsocksPreview.contains(key) && !shadowsocksPreview.contains(encoded) &&
+                !shadowsocksPreview.contains("example.test") && !shadowsocksPreview.contains("Private-SS-Test"),
+                "Shadowsocks 2022 JNI classification and redaction");
+        runOnMainSync(() -> {
+            edit(activity, MainActivity.ID_NODE_INPUT).setText(shadowsocks);
+            button(activity, MainActivity.ID_NODE_RUN).performClick();
+        });
+        String ssSummary = await(activity, MainActivity.ID_NODE_RUN, MainActivity.ID_NODE_RESULT);
+        require(ssSummary.contains("AEAD 2022") && !ssSummary.contains(key) && !ssSummary.contains(encoded),
+                "Shadowsocks 2022 Activity preview and redaction");
 
         runOnMainSync(() -> {
             edit(activity, MainActivity.ID_PAC_RULES).setText("DOMAIN-SUFFIX,example.test,PROXY\nDOMAIN,host.example.test,DIRECT");

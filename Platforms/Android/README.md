@@ -30,6 +30,10 @@ ADB="$ANDROID_HOME/platform-tools/adb" bash Platforms/Android/smoke-apk.sh emula
 
 已在 Apple Silicon 上的无窗口 Android API 24 arm64 模拟器通过上述验收，返回 `CLAY_ANDROID_PREVIEW_PASS` 和 `INSTRUMENTATION_CODE: -1`。测试用了合成配置，覆盖 VLESS 节点预览、结果脱敏、PAC 首条命中、默认动作、本地绕过和无效规则提示。APK 构建也通过了签名、16 KiB 对齐和无权限声明检查。尚未在实体设备上验证。
 
+共享导入接受 Shadowsocks 2022 的 AES-128-GCM、AES-256-GCM 和 ChaCha20-Poly1305。Android 普通预览只显示「AEAD 2022」等分类，密钥不会出现在返回的摘要中。节点转发仍取决于所用 Relay 或 VPN 内核。
+
+The shared importer accepts Shadowsocks 2022 with AES-128-GCM, AES-256-GCM, or ChaCha20-Poly1305. Android’s preview displays only classifications such as “AEAD 2022”; its summary omits keys. Traffic is handled by the Relay or VPN engine.
+
 ### 本机代理预览 / Local relay preview
 
 Relay APK（`org.clayrelay.relay`）可与离线版并存。粘贴节点或选择已保存的订阅后，选择导入顺序中的节点编号和模式，点「启动本机代理」。在支持认证代理的 Android 应用手动填入 `127.0.0.1`、显示的端口和会话凭据。点「应用节点和模式」可保持监听地址不变；规则模式使用启动时填写的规则、默认动作和本地绕过设置，修改规则后须重启会话。全局将请求交给选中节点，节点失败会向客户端报错。直连会通过设备的普通网络发送请求。

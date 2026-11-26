@@ -4,6 +4,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -63,6 +64,10 @@ var tuicKeys = map[string]bool{
 	"udp-relay-mode": true, "congestion-controller": true,
 }
 
+var shadowsocksKeys = map[string]bool{
+	"name": true, "type": true, "server": true, "port": true, "password": true, "cipher": true, "udp": true,
+}
+
 type profile struct {
 	Proxies []map[string]any `json:"proxies"`
 	Rules   []string         `json:"rules"`
@@ -90,9 +95,15 @@ func decodeProfile(data []byte) (profile, []string, error) {
 	seen := make(map[string]bool, len(ids))
 	for index, proxy := range p.Proxies {
 		allowedKeys := nodeKeys
-		if proxy["type"] == "tuic" {
+		switch proxy["type"] {
+		case "tuic":
 			allowedKeys = tuicKeys
 			if !validTuic(proxy) {
+				return profile{}, nil, errProfile
+			}
+		case "ss":
+			allowedKeys = shadowsocksKeys
+			if !validShadowsocks(proxy) {
 				return profile{}, nil, errProfile
 			}
 		}
@@ -131,6 +142,40 @@ func decodeProfile(data []byte) (profile, []string, error) {
 		ids[index] = id
 	}
 	return p, ids, nil
+}
+
+func validShadowsocks(node map[string]any) bool {
+	password, ok := node["password"].(string)
+	if !ok || password == "" || strings.IndexFunc(password, func(c rune) bool { return c < 32 || c == 127 }) >= 0 {
+		return false
+	}
+	var keyBytes, maximumKeys int
+	switch node["cipher"] {
+	case "2022-blake3-aes-128-gcm":
+		keyBytes, maximumKeys = 16, 32
+	case "2022-blake3-aes-256-gcm":
+		keyBytes, maximumKeys = 32, 32
+	case "2022-blake3-chacha20-poly1305":
+		keyBytes, maximumKeys = 32, 1
+	case "aes-128-gcm", "aes-192-gcm", "aes-256-gcm", "chacha20-ietf-poly1305", "xchacha20-ietf-poly1305":
+		return true
+	default:
+		return false
+	}
+	encodedBytes := base64.StdEncoding.EncodedLen(keyBytes)
+	if len(password) > maximumKeys*(encodedBytes+1)-1 {
+		return false
+	}
+	for _, part := range strings.Split(password, ":") {
+		if len(part) != encodedBytes {
+			return false
+		}
+		decoded, err := base64.StdEncoding.Strict().DecodeString(part)
+		if err != nil || len(decoded) != keyBytes {
+			return false
+		}
+	}
+	return true
 }
 
 func validTuic(node map[string]any) bool {

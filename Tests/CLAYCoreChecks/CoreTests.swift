@@ -29,6 +29,7 @@ import Darwin
         try tests.testVlessRejectsSilentDowngradeOfUnsupportedOptions()
         try tests.testVlessRealityMappingRequiresExplicitKeyAndSNI()
         try tests.testPasswordShareLinks()
+        try tests.testShadowsocks2022ImportsExactKeys()
         try tests.testClashPasswordNodes()
         try tests.testTrojanCertificatePin()
         tests.testPasswordNodesRejectUnsupportedOrAmbiguousInput()
@@ -106,6 +107,49 @@ import Darwin
         XCTAssertEqual(options["skip-cert-verify"] as? Bool, false)
     }
 
+    func testShadowsocks2022ImportsExactKeys() throws {
+        let identity = Data(repeating: 0xFC, count: 16).base64EncodedString()
+        let user = Data(repeating: 0xFB, count: 16).base64EncodedString()
+        let pair = identity + ":" + user
+        let encoded = pair.addingPercentEncoding(withAllowedCharacters: .alphanumerics)!
+        let key32 = Data(repeating: 0xFE, count: 32).base64EncodedString()
+        let yaml = """
+        proxies:
+          - {type: ss, server: example.test, port: 443, cipher: 2022-blake3-aes-128-gcm, password: '\(pair)', udp: true}
+          - {type: ss, server: example.test, port: 444, cipher: 2022-blake3-aes-256-gcm, password: '\(key32)'}
+          - {type: ss, server: example.test, port: 445, cipher: 2022-blake3-chacha20-poly1305, password: '\(key32)'}
+        """
+        let link = "ss://2022-blake3-aes-128-gcm:\(encoded)@example.test:443#Synthetic"
+        let wrapped = Data(link.utf8).base64EncodedString()
+        let links = ProfileImporter.read(wrapped), clash = ProfileImporter.read(yaml)
+        XCTAssertTrue(links.issues.isEmpty && clash.issues.isEmpty)
+        XCTAssertEqual(clash.profiles.map(\.security), ["aead-2022", "aead-2022", "aead-2022"])
+        let fromLink = try XCTUnwrap(links.profiles.first)
+        XCTAssertTrue(fromLink.hasSameConnection(as: try XCTUnwrap(clash.profiles.first)))
+        let options = try fields(fromLink)
+        XCTAssertEqual(options["password"] as? String, pair)
+        XCTAssertEqual(options["cipher"] as? String, "2022-blake3-aes-128-gcm")
+        XCTAssertEqual(options["udp"] as? Bool, true)
+        XCTAssertEqual(try fields(XCTUnwrap(clash.profiles.last))["password"] as? String, key32)
+
+        let invalid: [(String, String)] = [
+            ("aes-128-gcm", "password"), ("aes-128-gcm", key32),
+            ("aes-128-gcm", identity.dropLast().description),
+            ("aes-128-gcm", identity.dropLast(3) + "B=="),
+            ("aes-128-gcm", identity + ":"),
+            ("aes-128-gcm", Array(repeating: identity, count: 33).joined(separator: ":")),
+            ("aes-128-gcm", identity + ":" + key32),
+            ("chacha20-poly1305", key32 + ":" + key32),
+            ("aes-256-gcm", "\n" + key32),
+        ]
+        for (cipher, password) in invalid {
+            let encoded = password.addingPercentEncoding(withAllowedCharacters: .alphanumerics)!
+            let rejected = ProfileImporter.read("ss://2022-blake3-\(cipher):\(encoded)@example.test:443")
+            XCTAssertTrue(rejected.profiles.isEmpty)
+            XCTAssertEqual(rejected.issues[.invalidAccount], 1)
+        }
+    }
+
     func testClashPasswordNodes() throws {
         let yaml = """
         proxies:
@@ -139,7 +183,6 @@ import Darwin
             ("trojan://#tag", .malformed),
             ("ss://aes-128-gcm:pw@127.0.0.1:443/?plugin=v2ray-plugin", .unsupportedOption),
             ("ss://aes-256-cfb:pw@127.0.0.1:443", .unsupportedOption),
-            ("ss://2022-blake3-aes-128-gcm:pw@127.0.0.1:443", .unsupportedOption),
             ("ss://aes-128-gcm:pw%XX@127.0.0.1:443", .malformed),
             ("ss://aes-128-gcm:pw@127.0.0.1:443/path", .invalidAccount),
             ("ss://aes-128-gcm:pw@[::::]:443", .invalidAccount),

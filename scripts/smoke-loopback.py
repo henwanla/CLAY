@@ -121,14 +121,15 @@ with tempfile.TemporaryDirectory(prefix='clay-fixtures-') as tmp, ExitStack() as
             try: server.wait(timeout=3)
             except subprocess.TimeoutExpired: server.kill(); server.wait()
 
-    # Hysteria2 and TUIC v5 use UDP/QUIC. A generated cert and its native Mihomo
-    # fingerprint keep the fixture off the system trust store.
+    # A generated cert and its native Mihomo fingerprint keep the QUIC
+    # fixture off the system trust store.
     fingerprint = hashlib.sha256(subprocess.check_output(
         ['/usr/bin/openssl', 'x509', '-outform', 'DER', '-in', cert], env=env)).hexdigest()
-    quic_config = {'log-level': 'info', 'mode': 'rule', 'ipv6': False, 'listeners': [], 'rules': [
+    local_config = {'log-level': 'info', 'mode': 'rule', 'ipv6': False, 'listeners': [], 'rules': [
         f'AND,((IP-CIDR,127.0.0.1/32),(DST-PORT,{origin.server_port})),DIRECT', 'MATCH,REJECT',
     ]}
     nodes = []
+    rejected = []
     with ExitStack() as pending:
         for obfs in (None, 'salamander', 'gecko'):
             udp = pending.enter_context(socket.socket(type=socket.SOCK_DGRAM)); udp.bind(('127.0.0.1', 0))
@@ -141,7 +142,7 @@ with tempfile.TemporaryDirectory(prefix='clay-fixtures-') as tmp, ExitStack() as
             if obfs:
                 fields = {'obfs': obfs, 'obfs-password': secrets.token_hex(24)}
                 node.update(fields); listener.update(fields)
-            nodes.append(node); quic_config['listeners'].append(listener)
+            nodes.append(node); local_config['listeners'].append(listener)
         for relay in ('native', 'quic'):
             udp = pending.enter_context(socket.socket(type=socket.SOCK_DGRAM)); udp.bind(('127.0.0.1', 0))
             port = udp.getsockname()[1]
@@ -149,27 +150,46 @@ with tempfile.TemporaryDirectory(prefix='clay-fixtures-') as tmp, ExitStack() as
             name = 'tuic-' + relay
             nodes.append({'name': name, 'type': 'tuic', 'server': '127.0.0.1', 'port': port, 'uuid': account,
                           'password': password, 'sni': 'clay.test', 'fingerprint': fingerprint, 'udp-relay-mode': relay})
-            quic_config['listeners'].append({'name': name, 'type': 'tuic', 'listen': '127.0.0.1', 'port': str(port),
+            local_config['listeners'].append({'name': name, 'type': 'tuic', 'listen': '127.0.0.1', 'port': str(port),
                                             'users': {account: password}, 'certificate': str(cert), 'private-key': str(key)})
 
-    quic_profiles = tmp / 'quic-profiles.json'; quic_profiles.write_text(json.dumps({'proxies': nodes})); quic_profiles.chmod(0o600)
-    quic_server = tmp / 'quic-server.json'; quic_server.write_text(json.dumps(quic_config)); quic_server.chmod(0o600)
-    subprocess.run([tool, 'verify-config', quic_profiles, engine], env=env, timeout=15, check=True)
-    quic_log = tmp / 'quic-server.log'
-    with quic_log.open('w') as log, subprocess.Popen([engine, '-d', tmp, '-f', quic_server], cwd=tmp, env=env, stdout=log, stderr=subprocess.STDOUT) as server:
+        rejected.extend({**node, 'fingerprint': secrets.token_hex(32)} for node in (nodes[0], nodes[-1]))
+        for method, key_bytes, identity in (('aes-128-gcm', 16, True), ('aes-256-gcm', 32, True),
+                                             ('chacha20-poly1305', 32, False)):
+            tcp = pending.enter_context(socket.socket()); tcp.bind(('127.0.0.1', 0))
+            port = tcp.getsockname()[1]
+            name, cipher = 'ss2022-' + method, '2022-blake3-' + method
+            server_key = base64.b64encode(secrets.token_bytes(key_bytes)).decode('ascii')
+            user_key = base64.b64encode(secrets.token_bytes(key_bytes)).decode('ascii')
+            password = server_key + ':' + user_key if identity else server_key
+            node = {'name': name, 'type': 'ss', 'server': '127.0.0.1', 'port': port, 'cipher': cipher, 'password': password}
+            listener = {'name': name, 'type': 'shadowsocks', 'listen': '127.0.0.1', 'port': str(port),
+                        'cipher': cipher, 'password': server_key}
+            if identity:
+                listener['users'] = {'fixture': user_key}
+            local_config['listeners'].append(listener)
+            nodes.append(node)
+            wrong_key = base64.b64encode(secrets.token_bytes(key_bytes)).decode('ascii')
+            rejected.append({**node, 'password': server_key + ':' + wrong_key if identity else wrong_key})
+
+    local_profiles = tmp / 'local-profiles.json'; local_profiles.write_text(json.dumps({'proxies': nodes})); local_profiles.chmod(0o600)
+    local_server = tmp / 'local-server.json'; local_server.write_text(json.dumps(local_config)); local_server.chmod(0o600)
+    subprocess.run([tool, 'verify-config', local_profiles, engine], env=env, timeout=15, check=True)
+    local_log = tmp / 'local-server.log'
+    with local_log.open('w') as log, subprocess.Popen([engine, '-d', tmp, '-f', local_server], cwd=tmp, env=env, stdout=log, stderr=subprocess.STDOUT) as server:
         try:
             for _ in range(100):
-                if server.poll() is not None: raise RuntimeError('Synthetic QUIC server failed')
-                output = quic_log.read_text()
+                if server.poll() is not None: raise RuntimeError('Synthetic Mihomo server failed')
+                output = local_log.read_text()
                 if all(f'[{node["name"]}] proxy listening' in output for node in nodes): break
                 time.sleep(.05)
-            else: raise RuntimeError('Synthetic QUIC server did not bind all listeners')
-            subprocess.run([tool, 'smoke', quic_profiles, engine, target, token], env=env, timeout=40, check=True)
-            for node in (nodes[0], nodes[-1]):
-                quic_profiles.write_text(json.dumps({'proxies': [{**node, 'fingerprint': secrets.token_hex(32)}]}))
-                failed = subprocess.run([tool, 'smoke', quic_profiles, engine, target, token], text=True, capture_output=True, env=env, timeout=20)
-                assert failed.returncode == 1 and 'FAIL probeFailed' in failed.stdout, 'Invalid QUIC certificate was not rejected'
-            print('PASS Hysteria2 and TUIC forwarding; invalid certificates refused')
+            else: raise RuntimeError('Synthetic Mihomo server did not bind all listeners')
+            subprocess.run([tool, 'smoke', local_profiles, engine, target, token], env=env, timeout=40, check=True)
+            for candidate in rejected:
+                local_profiles.write_text(json.dumps({'proxies': [candidate]}))
+                failed = subprocess.run([tool, 'smoke', local_profiles, engine, target, token], text=True, capture_output=True, env=env, timeout=20)
+                assert failed.returncode == 1 and 'FAIL probeFailed' in failed.stdout, 'Invalid upstream credentials were not rejected'
+            print('PASS Shadowsocks 2022, Hysteria2 and TUIC forwarding; invalid keys and certificates refused')
         finally:
             server.terminate()
             try: server.wait(timeout=3)

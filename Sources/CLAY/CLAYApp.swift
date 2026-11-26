@@ -2,7 +2,10 @@ import AppKit
 import CLAYCore
 import SwiftUI
 
-@main struct CLAYApp: App {
+#if !CLAY_DOCUMENTATION
+@main
+#endif
+struct CLAYApp: App {
     @NSApplicationDelegateAdaptor(ExitHandler.self) private var exitHandler
     @StateObject private var navigation = DashboardNavigation()
     private var model: Workspace { exitHandler.model }
@@ -166,6 +169,14 @@ private final class DashboardNavigation: ObservableObject {
     @Published var page: Page? = .overview
 }
 
+#if CLAY_DOCUMENTATION
+@MainActor func documentationDashboard(model: Workspace, connections: Bool) -> some View {
+    let navigation = DashboardNavigation()
+    navigation.page = connections ? .connections : .overview
+    return Dashboard(model: model, pac: model.pac, navigation: navigation).detailPane
+}
+#endif
+
 private struct Dashboard: View {
     @ObservedObject var model: Workspace
     @ObservedObject var pac: PACControl
@@ -193,33 +204,36 @@ private struct Dashboard: View {
                 Label(model.menuStatus, systemImage: connectionSymbol)
                     .font(.caption).foregroundStyle(connectionColor).padding(13)
             }.navigationSplitViewColumnWidth(min: 157, ideal: 186, max: 240)
-        } detail: {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    HStack { Text((page ?? .overview).rawValue).font(.largeTitle.bold()); Spacer(); controls }
-                    VStack(alignment: .leading, spacing: 4) {
-                        Label(model.menuStatus, systemImage: connectionSymbol)
-                            .font(.callout.weight(.semibold)).foregroundStyle(connectionColor)
-                        if model.status != model.menuStatus {
-                            Text(model.status).font(.callout).foregroundStyle(.secondary).accessibilityIdentifier("session-status")
-                        }
-                    }
-                    if page != .pac { pacNotice }
-                    if !model.running { setupActions }
-                    switch page ?? .overview {
-                    case .overview: overview
-                    case .connections: ConnectionDashboard(model: model)
-                    case .pac: PACDashboard(model: model, control: pac)
-                    case .nodes: nodes
-                    case .subscriptions: subscriptions
-                    case .diagnostics: diagnostics
-                    case .settings: settings
-                    }
-                }.padding(27).frame(maxWidth: 1050, alignment: .topLeading).frame(maxWidth: .infinity)
-            }.background(Color(nsColor: .windowBackgroundColor))
-        }.tint(clay)
+        } detail: { detailPane }
+            .tint(clay)
             .sheet(isPresented: $model.presentImport, onDismiss: { input = "" }) { importSheet }
             .sheet(isPresented: $model.presentSubscription, onDismiss: { subscriptionURL = ""; subscriptionName = "" }) { subscriptionSheet }
+    }
+
+    fileprivate var detailPane: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack { Text((page ?? .overview).rawValue).font(.largeTitle.bold()); Spacer(); controls }
+                VStack(alignment: .leading, spacing: 4) {
+                    Label(model.menuStatus, systemImage: connectionSymbol)
+                        .font(.callout.weight(.semibold)).foregroundStyle(connectionColor)
+                    if model.status != model.menuStatus {
+                        Text(model.status).font(.callout).foregroundStyle(.secondary).accessibilityIdentifier("session-status")
+                    }
+                }
+                if page != .pac { pacNotice }
+                if !model.running { setupActions }
+                switch page ?? .overview {
+                case .overview: overview
+                case .connections: ConnectionDashboard(model: model)
+                case .pac: PACDashboard(model: model, control: pac)
+                case .nodes: nodes
+                case .subscriptions: subscriptions
+                case .diagnostics: diagnostics
+                case .settings: settings
+                }
+            }.padding(27).frame(maxWidth: 1050, alignment: .topLeading).frame(maxWidth: .infinity)
+        }.background(Color(nsColor: .windowBackgroundColor)).tint(clay)
     }
     private var connectionSymbol: String {
         if pac.needsRecovery || pac.messageIsError { return "exclamationmark.triangle.fill" }

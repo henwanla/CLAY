@@ -4,6 +4,19 @@
 
 CLAY 是原生 macOS 代理客户端，把节点、订阅、菜单栏、PAC 分流和实时连接仪表放在同一个应用里。0.3.2 公开预览面向 Apple Silicon（macOS 13 起）。其他平台的预览和验证范围见文末。
 
+## 界面截图
+
+macOS「概览」中的流量走势、当前节点和模式切换。截图使用示例节点和合成流量。
+
+![CLAY macOS 概览：实时流量、当前节点和规则／全局／直连模式](docs/screenshots/macos-overview.png)
+
+<details>
+<summary>查看「连接」页</summary>
+
+![CLAY macOS 连接页：示例站点、命中规则与每条连接的流量](docs/screenshots/macos-connections.png)
+
+</details>
+
 ## 安装与开始使用
 
 1. **本机预览包（构建号 4 起）**：打开 `CLAY.app`，未选择其他内核时，CLAY 会使用 App 内附带且已固定指纹的 Mihomo。可在「设置 → 选择 Mihomo…」选其他可信版本；升级或替换外部内核后请校验来源并重新选择。

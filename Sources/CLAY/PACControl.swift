@@ -51,6 +51,15 @@ import SwiftUI
 
     var hasLiveOwnership: Bool { systemService != nil || uncertainOwnership }
     var needsRecovery: Bool { recoveryService != nil || uncertainOwnership }
+
+    #if CLAY_DOCUMENTATION
+    func showDocumentationSystemProxy() {
+        systemService = SystemPACService(id: "sample", name: "示例网络", isPrimary: true)
+        systemPACIsEffective = true
+        followsRoutingMode = true
+    }
+    #endif
+
     var modeLabel: String {
         if needsRecovery { return "PAC 待恢复" }
         if let systemService {

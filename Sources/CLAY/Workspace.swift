@@ -122,6 +122,15 @@ enum Probe {
     }
     var canUseManual: Bool { manualResults != nil && selectedSubscription != nil }
 
+    #if CLAY_DOCUMENTATION
+    func showDocumentationTraffic(_ snapshot: ProxyTelemetry, points: [TrafficPoint]) {
+        proxyAddress = "http://127.0.0.1:7890"
+        status = "演示会话 · 合成数据"
+        telemetry = snapshot
+        trafficHistory = points
+    }
+    #endif
+
     func monitorHealth() {
         guard healthTask == nil else { return }
         healthTask = Task { [weak self] in

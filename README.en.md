@@ -4,6 +4,19 @@
 
 CLAY is a native macOS proxy app with subscriptions, menu bar controls, PAC routing, live traffic, and a connection inspector. The 0.3.2 public preview targets Apple Silicon and macOS 13 or later. See the platform notes below for other previews and their test coverage.
 
+## Screenshots
+
+The macOS Overview shows traffic, the selected node, and the routing mode. The screenshots use synthetic traffic and an example node.
+
+![CLAY macOS Overview showing live traffic and Rule, Global, and Direct modes](docs/screenshots/macos-overview.png)
+
+<details>
+<summary>Show the Connections view</summary>
+
+![CLAY macOS Connections showing example hosts, matched rules, and traffic per connection](docs/screenshots/macos-connections.png)
+
+</details>
+
 ## Getting started
 
 1. **Local preview (build 4 and later):** Open `CLAY.app`. If you have not selected another core, CLAY uses the bundled Mihomo with a pinned fingerprint. To use a different trusted core, choose it in Settings (**设置**). Verify the source and select it again after replacing or upgrading an external core.

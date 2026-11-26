@@ -4,6 +4,9 @@ import java.nio.charset.StandardCharsets;
 
 final class NativePreview {
     static byte[] config(byte[] source, byte[] request) { return Library.config(source, request); }
+    static String describe(byte[] source) {
+        return new String(Library.call(0, source, new byte[0], 0), StandardCharsets.UTF_8);
+    }
 
     static String run(int operation, String source, String target, int options) {
         try {

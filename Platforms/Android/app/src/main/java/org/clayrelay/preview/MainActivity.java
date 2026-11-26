@@ -18,12 +18,14 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicReference;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -36,6 +38,9 @@ public final class MainActivity extends Activity {
     private final ExecutorService workers = Executors.newSingleThreadExecutor();
     private RelayPanel relay;
     private VpnPanel vpn;
+    private SubscriptionPanel subscription;
+    private NodeInput nodeSource;
+    private Action nodeAction, pacAction;
     private int ink, muted, accent;
 
     @Override public void onCreate(Bundle state) {
@@ -75,21 +80,25 @@ public final class MainActivity extends Activity {
 
         LinearLayout nodes = card(list, R.string.nodes_title);
         EditText nodeInput = input(nodes, ID_NODE_INPUT, R.string.nodes_label, R.string.nodes_hint, 4);
-        Action nodeAction = new Action(nodes, ID_NODE_RUN, R.string.nodes_run, ID_NODE_RESULT);
+        nodeSource = new NodeInput(nodeInput);
+        nodeAction = new Action(nodes, ID_NODE_RUN, R.string.nodes_run, ID_NODE_RESULT);
         nodeAction.run.setOnClickListener(v -> nodeAction.start(0, nodeInput, null, 0));
         nodeAction.clear.setOnClickListener(v -> { nodeInput.setText(""); nodeAction.reset(); });
+        if (BuildFlavor.RELAY || BuildFlavor.VPN) {
+            subscription = new SubscriptionPanel(this, card(list, R.string.subscription_title), nodeSource);
+        }
 
         LinearLayout pac = card(list, R.string.pac_title);
         EditText rules = input(pac, ID_PAC_RULES, R.string.pac_rules, R.string.pac_hint, 3);
         EditText target = input(pac, ID_PAC_TARGET, R.string.pac_target, R.string.pac_target_hint, 1);
         CheckBox direct = option(pac, ID_PAC_DIRECT, R.string.pac_direct, false);
         CheckBox bypass = option(pac, ID_PAC_BYPASS, R.string.pac_bypass, true);
-        Action pacAction = new Action(pac, ID_PAC_RUN, R.string.pac_run, ID_PAC_RESULT);
+        pacAction = new Action(pac, ID_PAC_RUN, R.string.pac_run, ID_PAC_RESULT);
         pacAction.run.setOnClickListener(v -> pacAction.start(1, rules, target,
                 (direct.isChecked() ? 1 : 0) | (bypass.isChecked() ? 2 : 0)));
         pacAction.clear.setOnClickListener(v -> { rules.setText(""); target.setText(""); pacAction.reset(); });
-        if (BuildFlavor.RELAY) relay = new RelayPanel(this, card(list, R.string.relay_title), nodeInput, rules, direct, bypass);
-        if (BuildFlavor.VPN) vpn = new VpnPanel(this, card(list, R.string.vpn_title), nodeInput, rules, direct, bypass);
+        if (BuildFlavor.RELAY) relay = new RelayPanel(this, card(list, R.string.relay_title), nodeSource, rules, direct, bypass);
+        if (BuildFlavor.VPN) vpn = new VpnPanel(this, card(list, R.string.vpn_title), nodeSource, rules, direct, bypass);
         list.requestFocus();
     }
 
@@ -111,6 +120,9 @@ public final class MainActivity extends Activity {
     @Override protected void onDestroy() {
         if (vpn != null) vpn.destroy();
         if (relay != null) relay.destroy();
+        if (subscription != null) subscription.destroy();
+        if (nodeAction != null) nodeAction.cancel();
+        if (pacAction != null) pacAction.cancel();
         workers.shutdownNow();
         super.onDestroy();
     }
@@ -119,6 +131,7 @@ public final class MainActivity extends Activity {
         final Button run, clear;
         final TextView result;
         private Future<?> task;
+        private AtomicReference<byte[]> pending;
         private int generation;
 
         Action(LinearLayout card, int runId, int runLabel, int resultId) {
@@ -145,9 +158,19 @@ public final class MainActivity extends Activity {
             add(card, result, 7);
         }
 
-        void reset() {
+        void cancel() {
             generation++;
             if (task != null) task.cancel(false);
+            if (pending != null) {
+                byte[] queued = pending.getAndSet(null);
+                if (queued != null) Arrays.fill(queued, (byte) 0);
+            }
+            task = null;
+            pending = null;
+        }
+
+        void reset() {
+            cancel();
             result.setText("");
             result.setVisibility(View.GONE);
             run.setEnabled(true);
@@ -156,28 +179,36 @@ public final class MainActivity extends Activity {
         void start(int operation, EditText sourceField, EditText targetField, int options) {
             final int id = ++generation;
             result.setVisibility(View.VISIBLE);
-            if (sourceField.length() > MAX_SOURCE || (targetField != null && targetField.length() > MAX_TARGET)) {
+            if (operation != 0 && (sourceField.length() > MAX_SOURCE || (targetField != null && targetField.length() > MAX_TARGET))) {
                 result.setText(R.string.input_too_large);
                 return;
             }
-            String source = sourceField.getText().toString();
+            final byte[] nodes = operation == 0 ? nodeSource.snapshot() : null;
+            if (operation == 0 && nodes == null) { result.setText(R.string.input_too_large); return; }
+            AtomicReference<byte[]> owned = new AtomicReference<>(nodes);
+            pending = owned;
+            String source = operation == 0 ? "" : sourceField.getText().toString();
             String target = targetField == null ? "" : targetField.getText().toString();
             result.setText(R.string.running);
             run.setEnabled(false);
             task = workers.submit(() -> {
+                byte[] material = owned.getAndSet(null);
+                if (operation == 0 && material == null) return;
                 String resultText;
                 try {
-                    JSONObject report = new JSONObject(NativePreview.run(operation, source, target, options));
+                    JSONObject report = new JSONObject(operation == 0 ? NativePreview.describe(material)
+                            : NativePreview.run(operation, source, target, options));
                     String error = report.optString("error");
                     if (!error.isEmpty()) resultText = errorText(error, report.optInt("line"));
                     else resultText = operation == 0 ? nodesText(report) : pacText(report);
                 } catch (JSONException | RuntimeException | LinkageError ignored) {
                     resultText = getString(R.string.failed);
-                }
+                } finally { if (material != null) Arrays.fill(material, (byte) 0); }
                 final String message = resultText;
                 runOnUiThread(() -> {
                     if (id != generation || isDestroyed()) return;
                     task = null;
+                    pending = null;
                     result.setText(message);
                     run.setEnabled(true);
                 });

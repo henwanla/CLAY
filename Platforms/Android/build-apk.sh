@@ -142,11 +142,15 @@ finish_apk() {
 }
 compile_java() {
   local path="$1" classpath="$2"
+  local -a dependencies=()
   shift 2
   mkdir -p "$path/classes"
   "$JAVA_HOME/bin/javac" --release 8 -encoding UTF-8 -classpath "$classpath" -d "$path/classes" "$@"
   "$JAVA_HOME/bin/jar" cf "$path/classes.jar" -C "$path/classes" .
-  "$bt/d8" --min-api "$min_api" --lib "$platform" --output "$path" "$path/classes.jar"
+  if [[ "$classpath" != "$platform" ]]; then
+    dependencies=(--classpath "${classpath#"$platform":}")
+  fi
+  "$bt/d8" --min-api "$min_api" --lib "$platform" "${dependencies[@]+"${dependencies[@]}"}" --output "$path" "$path/classes.jar"
   (cd "$path" && zip -q unsigned.apk classes.dex)
 }
 

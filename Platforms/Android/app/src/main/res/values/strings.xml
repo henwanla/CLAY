@@ -57,4 +57,27 @@
     <string name="relay_ready">Proxy 127.0.0.1:%1$d · Node %2$d · %3$s</string>
     <string name="relay_credentials">Username: %1$s\nPassword: %2$s</string>
     <string name="relay_show">Show session credentials</string>
+    <string name="subscription_title">Subscriptions</string>
+    <string name="subscription_intro">Choose the cached nodes for the next connection. Refresh does not change a running session.</string>
+    <string name="subscription_label">Subscription name</string>
+    <string name="subscription_url">HTTPS subscription URL</string>
+    <string name="subscription_add">Download and save</string>
+    <string name="subscription_empty">No saved subscriptions</string>
+    <string name="subscription_row">%1$s · %2$d nodes</string>
+    <string name="subscription_unreadable">Unreadable subscription</string>
+    <string name="subscription_refresh">Refresh selected subscription</string>
+    <string name="subscription_use">Use saved nodes for next connection</string>
+    <string name="subscription_remove">Remove subscription</string>
+    <string name="subscription_confirm_remove">Remove the selected subscription and its cache?</string>
+    <string name="subscription_manual">Use pasted nodes</string>
+    <string name="subscription_using_manual">Next connection: pasted nodes</string>
+    <string name="subscription_using_feed">Next connection: %1$s (saved nodes)</string>
+    <string name="subscription_downloading">Downloading subscription…</string>
+    <string name="subscription_saved">Saved. Select Use saved nodes to apply it to the next connection.</string>
+    <string name="subscription_removed">Subscription removed.</string>
+    <string name="subscription_invalid">Enter a name and a valid HTTPS subscription URL.</string>
+    <string name="subscription_redirect">The subscription redirects to another origin. Enter its trusted final HTTPS URL.</string>
+    <string name="subscription_size">The subscription exceeds 2 MiB.</string>
+    <string name="subscription_content">No compatible nodes were found in the downloaded text.</string>
+    <string name="subscription_failed">Could not read, download or save the subscription. You can still use a previously saved cache.</string>
 </resources>

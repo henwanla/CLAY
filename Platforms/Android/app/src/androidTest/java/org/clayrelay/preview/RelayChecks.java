@@ -2,6 +2,7 @@ package org.clayrelay.preview;
 
 import android.app.Activity;
 import android.app.Instrumentation;
+import android.content.Context;
 import android.os.SystemClock;
 import android.view.View;
 import android.widget.EditText;
@@ -28,11 +29,10 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 final class RelayChecks {
-    static void run(Instrumentation test, Activity activity) throws Exception {
+    static void run(Instrumentation test, Activity activity, ShadowsocksFixture fixture) throws Exception {
         InetAddress local = InetAddress.getByAddress(new byte[] {127, 0, 0, 1});
         String marker = UUID.randomUUID().toString();
-        try (ServerSocket origin = new ServerSocket(0, 2, local);
-             ShadowsocksFixture fixture = new ShadowsocksFixture(activity, local)) {
+        try (ServerSocket origin = new ServerSocket(0, 2, local)) {
             Thread server = new Thread(() -> {
                 while (!origin.isClosed()) {
                     try (Socket peer = origin.accept()) {
@@ -54,10 +54,12 @@ final class RelayChecks {
                 }
             });
             server.setDaemon(true); server.start();
-            String nodes = "ss://aes-128-gcm:" + fixture.password + "@127.0.0.1:" + fixture.port + "#Fixture-A\n" +
-                    "ss://aes-128-gcm:fixture-b@127.0.0.1:1#Fixture-B";
+            await(test, activity, SubscriptionPanel.ID_USE, SubscriptionPanel.ID_SOURCE, "saved subscription listed");
+            test.runOnMainSync(() -> activity.findViewById(SubscriptionPanel.ID_USE).performClick());
+            String selected = await(test, activity, SubscriptionPanel.ID_MANUAL, SubscriptionPanel.ID_SOURCE, "saved subscription selected");
+            require(!selected.equals(activity.getString(R.string.subscription_using_manual)), "UI reports subscription source");
             test.runOnMainSync(() -> {
-                ((EditText) activity.findViewById(MainActivity.ID_NODE_INPUT)).setText(nodes);
+                ((EditText) activity.findViewById(MainActivity.ID_NODE_INPUT)).setText("manual input must not be used yet");
                 ((EditText) activity.findViewById(MainActivity.ID_PAC_RULES)).setText("");
                 ((CompoundButton) activity.findViewById(MainActivity.ID_PAC_DIRECT)).setChecked(false);
                 ((CompoundButton) activity.findViewById(MainActivity.ID_PAC_BYPASS)).setChecked(false);
@@ -95,7 +97,7 @@ final class RelayChecks {
             require(status.contains("127.0.0.1:" + port) && status.contains("1 · " + activity.getString(R.string.relay_global)),
                     "live node selected on the same port");
             require(fetch(local, port, origin.getLocalPort(), password, "global Shadowsocks forwarding").contains(marker),
-                    "global traffic uses live Shadowsocks fixture");
+                    "global traffic uses live Shadowsocks fixture from saved subscription");
             select(test, activity, 2, 0);
             status = await(test, activity, RelayPanel.ID_APPLY, RelayPanel.ID_STATUS, "rule mode selection");
             require(status.contains("2 · " + activity.getString(R.string.relay_rule)), "rule mode and node confirmed");
@@ -110,6 +112,18 @@ final class RelayChecks {
                 attempt.connect(new InetSocketAddress(local, port), 700);
                 throw new AssertionError("proxy listener remained after stop");
             } catch (java.io.IOException closed) { /* Expected. */ }
+
+            test.runOnMainSync(() -> {
+                ((EditText) activity.findViewById(MainActivity.ID_NODE_INPUT)).setText(fixture.nodes());
+                ((EditText) activity.findViewById(RelayPanel.ID_NODE)).setText("1");
+                activity.findViewById(SubscriptionPanel.ID_MANUAL).performClick();
+                activity.findViewById(RelayPanel.ID_START).performClick();
+            });
+            require(await(test, activity, RelayPanel.ID_APPLY, RelayPanel.ID_STATUS, "manual relay ready")
+                    .contains("127.0.0.1:"), "manual node input still starts Relay");
+            test.runOnMainSync(() -> activity.findViewById(RelayPanel.ID_STOP).performClick());
+            require(await(test, activity, RelayPanel.ID_START, RelayPanel.ID_STATUS, "manual relay stopped")
+                    .equals(activity.getString(R.string.relay_stopped)), "manual session stopped cleanly");
         }
     }
 
@@ -122,15 +136,16 @@ final class RelayChecks {
     }
 
     /** An independent loopback Shadowsocks inbound with synthetic credentials. */
-    private static final class ShadowsocksFixture implements AutoCloseable {
+    static final class ShadowsocksFixture implements AutoCloseable {
         final String password = UUID.randomUUID().toString();
         final int port;
         final File directory;
         private Process core;
 
-        ShadowsocksFixture(Activity activity, InetAddress local) throws Exception {
+        ShadowsocksFixture(Context context) throws Exception {
+            InetAddress local = InetAddress.getByAddress(new byte[] {127, 0, 0, 1});
             try (ServerSocket reserved = new ServerSocket(0, 1, local)) { port = reserved.getLocalPort(); }
-            directory = new File(activity.getCacheDir(), "clay-test-ss-" + UUID.randomUUID());
+            directory = new File(context.getCacheDir(), "clay-test-ss-" + UUID.randomUUID());
             require(directory.mkdir(), "create Shadowsocks fixture directory");
             try {
                 File config = new File(directory, "fixture.json");
@@ -140,7 +155,7 @@ final class RelayChecks {
                     out.write(new JSONObject().put("mode", "direct").put("log-level", "silent").put("geo-auto-update", false)
                             .put("listeners", new JSONArray().put(listener)).toString().getBytes(StandardCharsets.UTF_8));
                 }
-                File lib = new File(activity.getApplicationInfo().nativeLibraryDir);
+                File lib = new File(context.getApplicationInfo().nativeLibraryDir);
                 core = new ProcessBuilder(new File(lib, "libclay_launcher.so").getPath(),
                         Integer.toString(android.os.Process.myPid()), new File(lib, "libclay_mihomo.so").getPath(),
                         "-d", directory.getPath(), "-f", config.getPath())
@@ -157,6 +172,11 @@ final class RelayChecks {
                 close();
                 throw failure;
             }
+        }
+
+        String nodes() {
+            return "ss://aes-128-gcm:" + password + "@127.0.0.1:" + port + "#Fixture-A\n" +
+                    "ss://aes-128-gcm:fixture-b@127.0.0.1:1#Fixture-B";
         }
 
         @Override public void close() throws IOException {

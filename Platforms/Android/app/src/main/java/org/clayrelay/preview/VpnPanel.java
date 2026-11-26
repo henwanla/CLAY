@@ -17,7 +17,6 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.Spinner;
 import android.widget.TextView;
-import java.nio.charset.StandardCharsets;
 
 final class VpnPanel {
     static final int CONSENT = 590, NOTICES = 592;
@@ -27,15 +26,17 @@ final class VpnPanel {
     private static final int[] MODE_TEXT = {R.string.relay_rule, R.string.relay_global, R.string.relay_direct};
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Activity activity;
-    private final EditText source, rules, index, dns;
+    private final EditText rules, index, dns;
+    private final NodeInput source;
     private final CheckBox direct, bypass;
     private final Spinner mode;
     private final Button start, apply, stop;
     private final TextView status;
     private ClayVpnService.Snapshot last;
     private boolean asks, askedNotifications;
+    private ClayVpnService.Draft pending;
 
-    VpnPanel(Activity activity, LinearLayout card, EditText source, EditText rules, CheckBox direct, CheckBox bypass) {
+    VpnPanel(Activity activity, LinearLayout card, NodeInput source, EditText rules, CheckBox direct, CheckBox bypass) {
         this.activity = activity; this.source = source; this.rules = rules; this.direct = direct; this.bypass = bypass;
         TextView prompt = new TextView(activity);
         prompt.setText(R.string.vpn_intro);
@@ -70,7 +71,7 @@ final class VpnPanel {
     private final Runnable tick = new Runnable() {
         @Override public void run() { render(); main.postDelayed(this, 250); }
     };
-    void destroy() { main.removeCallbacks(tick); }
+    void destroy() { main.removeCallbacks(tick); discard(); }
 
     private void render() {
         ClayVpnService.Snapshot next = ClayVpnService.state();
@@ -115,16 +116,24 @@ final class VpnPanel {
     }
 
     private void start() {
+        if (asks || pending != null) return;
         if (!validRequest()) { status.setText(R.string.vpn_invalid); return; }
+        byte[] material = source.snapshot();
+        if (material == null || material.length == 0) { status.setText(R.string.vpn_invalid); return; }
+        pending = new ClayVpnService.Draft(material, selected(), MODES[mode.getSelectedItemPosition()],
+                rules.getText().toString(), (direct.isChecked() ? 1 : 0) | (bypass.isChecked() ? 2 : 0),
+                dns.getText().toString().trim());
         if (Build.VERSION.SDK_INT >= 33 && !askedNotifications && activity.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
                 != PackageManager.PERMISSION_GRANTED) {
             asks = true; askedNotifications = true;
-            activity.requestPermissions(new String[] {Manifest.permission.POST_NOTIFICATIONS}, NOTICES);
+            try { activity.requestPermissions(new String[] {Manifest.permission.POST_NOTIFICATIONS}, NOTICES); }
+            catch (RuntimeException failure) { asks = false; discard(); status.setText(R.string.vpn_failed); }
             render();
         } else requestVpn();
     }
 
     void requestVpn() {
+        if (pending == null) return;
         asks = false;
         try {
             Intent approval = VpnService.prepare(activity);
@@ -133,18 +142,25 @@ final class VpnPanel {
                 asks = true;
                 activity.startActivityForResult(approval, CONSENT);
             }
-        } catch (RuntimeException failure) { asks = false; status.setText(R.string.vpn_failed); }
+        } catch (RuntimeException failure) { asks = false; discard(); status.setText(R.string.vpn_failed); }
         render();
     }
 
     void granted(boolean allowed) {
         asks = false;
-        if (!allowed) status.setText(R.string.vpn_denied);
-        else if (!validRequest()) status.setText(R.string.vpn_invalid);
-        else ClayVpnService.begin(activity, new ClayVpnService.Draft(source.getText().toString().getBytes(StandardCharsets.UTF_8),
-                selected(), MODES[mode.getSelectedItemPosition()], rules.getText().toString(),
-                (direct.isChecked() ? 1 : 0) | (bypass.isChecked() ? 2 : 0), dns.getText().toString().trim()));
+        if (!allowed) { discard(); status.setText(R.string.vpn_denied); }
+        else if (pending == null) status.setText(R.string.vpn_invalid);
+        else {
+            ClayVpnService.Draft request = pending;
+            pending = null;
+            ClayVpnService.begin(activity, request);
+        }
         render();
+    }
+
+    private void discard() {
+        if (pending != null) pending.wipe();
+        pending = null;
     }
 
     private boolean validRequest() {
@@ -154,6 +170,6 @@ final class VpnPanel {
         for (String part : parts) if (Integer.parseInt(part) > 255) return false;
         int first = Integer.parseInt(parts[0]);
         return first > 0 && first != 127 && first < 224 && !server.startsWith("198.18.0.") && selected() != 0
-                && source.length() > 0 && source.length() <= 2 * 1024 * 1024 && rules.length() <= 12_000;
+                && source.available() && rules.length() <= 12_000;
     }
 }

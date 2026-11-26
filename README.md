@@ -96,7 +96,7 @@ Linux 有 [GTK 桌面预览](Platforms/Linux/README.md)，支持手动和 GNOME 
 
 [Android 本机代理预览](Platforms/Android/README.md#本机代理预览--local-relay-preview)使用独立应用 ID。它可为支持认证 HTTP/SOCKS5 代理的应用提供手动回环接入、节点切换及规则／全局／直连。它只代理手动配置过的应用。
 
-[Android VPN 技术预览](Platforms/Android/README.md#vpn-技术预览--vpn-technical-preview)是独立的调试 APK，支持 IPv4 系统接管、前台服务、节点和模式切换。仍需验证真机、域名与 DNS 分流，暂未提供公开安装包或订阅下载。
+[Android VPN 技术预览](Platforms/Android/README.md#vpn-技术预览--vpn-technical-preview)是独立的调试 APK，支持 IPv4 系统接管、前台服务、节点和模式切换。本机代理和 VPN 都支持[手动刷新 HTTPS 订阅并加密缓存节点](Platforms/Android/README.md#订阅--subscriptions)。仍需验证真机、域名与 DNS 分流，暂未提供公开 VPN 安装包。
 
 [iOS / iPadOS](Platforms/iOS/README.md)提供离线节点检查和单独的 CLAY 隧道实验。实验只接管一个保留的测试地址，用于验证节点转发和 VPN 生命周期，尚待签名真机验证。
 

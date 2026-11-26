@@ -2,6 +2,7 @@ package org.clayrelay.preview;
 
 import android.app.Activity;
 import android.app.Instrumentation;
+import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.SystemClock;
@@ -9,6 +10,7 @@ import android.widget.Button;
 import android.widget.CompoundButton;
 import android.widget.EditText;
 import android.widget.TextView;
+import java.nio.charset.StandardCharsets;
 import org.json.JSONObject;
 
 /** Exercises the native Activity and Swift core using synthetic offline inputs. */
@@ -25,21 +27,31 @@ public final class PreviewInstrumentation extends Instrumentation {
         Bundle report = new Bundle();
         Activity activity = null;
         int result = Activity.RESULT_CANCELED;
-        try {
-            Intent intent = new Intent(Intent.ACTION_MAIN).setClassName(getTargetContext(), MainActivity.class.getName());
+        Context context = getTargetContext();
+        String feed = null;
+        try (RelayChecks.ShadowsocksFixture fixture = BuildFlavor.RELAY ? new RelayChecks.ShadowsocksFixture(context) : null) {
+            boolean online = BuildFlavor.RELAY || BuildFlavor.VPN;
+            if (online) SubscriptionChecks.run(context);
+            if (fixture != null) feed = SubscriptionChecks.seed(context, fixture.nodes().getBytes(StandardCharsets.UTF_8));
+            Intent intent = new Intent(Intent.ACTION_MAIN).setClassName(context, MainActivity.class.getName());
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             activity = startActivitySync(intent);
             exercise(activity);
-            if (BuildFlavor.RELAY) RelayChecks.run(this, activity);
+            require((activity.findViewById(SubscriptionPanel.ID_ADD) != null) == online, "subscription UI restricted to online flavors");
+            if (fixture != null) RelayChecks.run(this, activity, fixture);
             String vpnReport = BuildFlavor.VPN ? VpnChecks.run(this, activity, arguments) + "\n" : "";
             report.putString("stream", "\nCLAY_ANDROID_PREVIEW_PASS\n" + (BuildFlavor.RELAY ? "CLAY_ANDROID_RELAY_PASS\n" : "")
-                    + vpnReport);
+                    + (online ? "CLAY_ANDROID_SUBSCRIPTIONS_PASS\n" : "") + vpnReport);
             result = Activity.RESULT_OK;
         } catch (Exception | AssertionError e) {
             // The only data reported are test step labels, never runtime input.
             report.putString("stream", "\nCLAY_ANDROID_PREVIEW_FAIL: " +
                     (e instanceof AssertionError ? e.getMessage() : e.getClass().getSimpleName()) + "\n");
         } finally {
+            if (feed != null) {
+                try { new SubscriptionStore(context).remove(feed); }
+                catch (java.io.IOException e) { result = Activity.RESULT_CANCELED; }
+            }
             if (activity != null) runOnMainSync(activity::finish);
             finish(result, report);
         }

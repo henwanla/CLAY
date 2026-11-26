@@ -32,11 +32,11 @@ ADB="$ANDROID_HOME/platform-tools/adb" bash Platforms/Android/smoke-apk.sh emula
 
 ### 本机代理预览 / Local relay preview
 
-Relay APK（`org.clayrelay.relay`）可与离线版并存。粘贴节点后，选择导入顺序中的节点编号和模式，点「启动本机代理」。在支持认证代理的 Android 应用手动填入 `127.0.0.1`、显示的端口和会话凭据。点「应用节点和模式」可保持监听地址不变；规则模式使用启动时填写的规则、默认动作和本地绕过设置，修改规则后须重启会话。全局将请求交给选中节点，节点失败会向客户端报错。直连会通过设备的普通网络发送请求。
+Relay APK（`org.clayrelay.relay`）可与离线版并存。粘贴节点或选择已保存的订阅后，选择导入顺序中的节点编号和模式，点「启动本机代理」。在支持认证代理的 Android 应用手动填入 `127.0.0.1`、显示的端口和会话凭据。点「应用节点和模式」可保持监听地址不变；规则模式使用启动时填写的规则、默认动作和本地绕过设置，修改规则后须重启会话。全局将请求交给选中节点，节点失败会向客户端报错。直连会通过设备的普通网络发送请求。
 
-此包只申请联网权限。代理和控制器仅监听 IPv4 回环，各有独立的随机会话凭据。密码在界面上按需显示、离开界面时隐藏；运行配置文件启动成功后删除。没有全设备 VPN、后台常驻保证、联网订阅刷新或系统代理设置。Android 可在后台结束进程；用完建议点「停止代理」。
+此包只申请联网权限。代理和控制器仅监听 IPv4 回环，各有独立的随机会话凭据。密码在界面上按需显示、离开界面时隐藏；运行配置文件启动成功后删除。此变体不会修改系统代理设置。Android 可在后台结束进程；用完建议点「停止代理」。
 
-The optional relay APK can be installed alongside the offline app. Paste profiles, pick a node number and routing mode, and enter the displayed loopback address and session credentials in a client that supports authenticated HTTP or SOCKS5. Apply changes to the node and mode in place. Restart the session to change the rule list, fallback, or local bypass settings. An unavailable node in Global mode results in a proxy error; Direct mode sends traffic through the device's regular connection. The relay requests Internet access only and provides no VPN, guaranteed background service, subscription downloads, or system proxy configuration.
+The optional relay APK can be installed alongside the offline app. Paste profiles or select a saved subscription, pick a node number and routing mode, and enter the displayed loopback address and session credentials in a client that supports authenticated HTTP or SOCKS5. Apply changes to the node and mode in place. Restart the session to change the rule list, fallback, or local bypass settings. An unavailable node in Global mode results in a proxy error; Direct mode sends traffic through the device's regular connection. The relay requests Internet access only. It does not modify system proxy settings, and Android may stop it in the background.
 
 Build with the same toolchain as the offline preview and the pinned [Mihomo v1.19.34 Android arm64 archive](https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.34). The script checks both the archive and the executable during packaging, and the app rechecks the packaged executable at launch. Keep the debug package local; a public build that bundles Mihomo requires a separate review of the GPL notices and corresponding source distribution.
 
@@ -46,6 +46,20 @@ ADB="$ANDROID_HOME/platform-tools/adb" bash Platforms/Android/smoke-apk.sh --rel
   .build/android-apk/CLAY-Android-arm64-relay.apk \
   .build/android-apk/CLAY-Android-arm64-relay-test.apk
 ```
+
+### 订阅 / Subscriptions
+
+本机代理和 VPN 都可以在「订阅」中填写名称与 HTTPS 地址，点击下载并保存。选择「下次连接使用缓存节点」后，节点检查和下次启动使用该缓存；「使用粘贴的节点」切回粘贴的内容。手动刷新成功后，再点一次「下次连接使用缓存节点」选用新版本。已运行的会话不会因刷新、删除或切换输入而改变；若要使用新节点列表，先停止再启动。
+
+最多可保存 12 个订阅。CLAY 仅在点击下载或刷新后发出请求，使用设备信任的 HTTPS 证书，只跟随同源跳转。传输数据和解压后的正文都不能超过 2 MiB，且正文必须含至少一个可识别节点。刷新失败时保留上次缓存。名称、地址（包括令牌）和节点缓存在各 APK 自己的应用私有目录加密保存，由各自的 Android Keystore 密钥保护，不进入系统备份。离线版没有订阅界面或联网权限。
+
+In Relay or VPN, enter a name and an HTTPS URL under **Subscriptions**, then download and save it. **Use saved nodes for next connection** selects that snapshot for the node preview and the next session. **Use pasted nodes** returns to the pasted profiles. After a successful refresh, select **Use saved nodes for next connection** again to use the updated snapshot. Refreshing, removing, or selecting a different input does not alter a running session; stop and restart to use a new list.
+
+Each app can save up to 12 feeds. Downloads happen only on request, use the device's HTTPS trust, follow redirects only within the same origin, and cap the transfer and decompressed body at 2 MiB each. CLAY requires at least one recognizable node before saving; a failed refresh retains the previous cache. Names, URLs (including tokens), and cached nodes are encrypted in each app's private directory with its own Android Keystore key and are excluded from system backup. The offline app has no subscription panel and no network permission.
+
+订阅回归在独立 Android 模拟器验证 Keystore、篡改拒绝、刷新失败保留缓存和实际 Relay 转发。下载响应由测试夹具提供，没有向真实订阅地址发请求。
+
+The emulator checks exercise Android Keystore, tamper rejection, cache retention after a failed refresh, and real Relay traffic using a saved node. Download checks supply synthetic HTTP responses through a test transport; they do not contact a real subscription provider.
 
 ### 系统 VPN 实验 / System VPN experiment
 
@@ -86,13 +100,13 @@ python3 Platforms/Android/smoke-portable.py \
 
 ### VPN 技术预览 / VPN technical preview
 
-另一个 ARM64 调试 APK（Android 8.0+，包名 `org.clayrelay.vpn`）可和离线版及本机代理版共存。先粘贴节点和可选规则，再填写可信的 IPv4 DNS，选择节点与模式，点「启动 VPN」并确认 Android 系统提示。关闭界面后由前台服务继续运行，可在通知或应用内停止。节点和模式从内核读回，变更时会结束现有连接。规则更新需重新启动会话。
+另一个 ARM64 调试 APK（Android 8.0+，包名 `org.clayrelay.vpn`）可和离线版及本机代理版共存。先选择订阅缓存或粘贴节点，填入可选规则和可信的 IPv4 DNS，选择节点与模式，点「启动 VPN」并确认 Android 系统提示。关闭界面后由前台服务继续运行，可在通知或应用内停止。节点和模式从内核读回，变更时会结束现有连接。规则更新需重新启动会话。
 
-当前仅接管 IPv4，未启用 IPv6，也不支持始终开启或断网保护。停止、撤销或进程退出后，设备会恢复普通网络。设备发往所填 DNS 的流量按当前模式和规则转发；全局模式需要节点支持 UDP，节点域名的引导解析可能使用系统 DNS。现阶段只验证了 IP 规则，域名分流、Private DNS、加密 DNS、网络切换和真机仍需验证。预览版不下载订阅，也不打包在当前公开 Release。
+当前仅接管 IPv4，未启用 IPv6，也不支持始终开启或断网保护。停止、撤销或进程退出后，设备会恢复普通网络。设备发往所填 DNS 的流量按当前模式和规则转发；全局模式需要节点支持 UDP，节点域名的引导解析可能使用系统 DNS。现阶段只验证了 IP 规则，域名分流、Private DNS、加密 DNS、网络切换和真机仍需验证。当前公开 Release 没有 VPN 安装包。
 
-The separate Android 8.0+ ARM64 APK imports pasted profiles and optional rules. Enter a trusted IPv4 DNS server, choose a node and mode, then confirm Android's VPN prompt. The service can outlive the screen. Stop it in the app or from its notification. Node and mode changes are confirmed by the engine and close existing connections. Restart to change the rules.
+The separate Android 8.0+ ARM64 APK accepts saved subscriptions or pasted profiles, plus optional rules. Enter a trusted IPv4 DNS server, choose a node and mode, then confirm Android's VPN prompt. The service can outlive the screen. Stop it in the app or from its notification. Node and mode changes are confirmed by the engine and close existing connections. Restart to change the rules.
 
-This preview routes IPv4 only; it does not enable IPv6, always-on VPN, or a kill switch. Normal networking resumes after stop, revocation, or process exit. Traffic to the configured DNS follows the selected routing policy; Global mode requires a UDP-capable node, and node hostnames may still use system DNS for bootstrap. The emulator test checks IP rules. Domain rules, Private DNS, encrypted DNS, network changes, and physical devices still need testing. There is no subscription downloader or public VPN APK release yet.
+This preview routes IPv4 only; it does not enable IPv6, always-on VPN, or a kill switch. Normal networking resumes after stop, revocation, or process exit. Traffic to the configured DNS follows the selected routing policy; Global mode requires a UDP-capable node, and node hostnames may still use system DNS for bootstrap. The emulator test checks IP rules. Domain rules, Private DNS, encrypted DNS, network changes, and physical devices still need testing. There is no public VPN APK yet.
 
 The build verifies the exact [Mihomo v1.19.34 source archive](https://codeload.github.com/MetaCubeX/mihomo/tar.gz/refs/tags/v1.19.34) and uses Go 1.24.3, the NDK and the Swift tools above. Corresponding engine source consists of that archive, [the TUN patch](vpn-lab/external-tun.patch), [the socket hook](vpn-lab/protect_android.go), and the [build recipe](build-vpn-engine.sh). Any distributed APK must ship corresponding source and license materials for that build.
 

@@ -32,4 +32,7 @@ report=$("${adb[@]}" shell am instrument -w -r "$test_app/org.clayrelay.preview.
 printf '%s\n' "$report"
 grep -qx 'CLAY_ANDROID_PREVIEW_PASS' <<< "$report"
 grep -qx 'INSTRUMENTATION_CODE: -1' <<< "$report"
-if [[ "$flavor" == relay ]]; then grep -qx 'CLAY_ANDROID_RELAY_PASS' <<< "$report"; fi
+if [[ "$flavor" == relay ]]; then
+  grep -qx 'CLAY_ANDROID_RELAY_PASS' <<< "$report"
+  grep -qx 'CLAY_ANDROID_SUBSCRIPTIONS_PASS' <<< "$report"
+fi

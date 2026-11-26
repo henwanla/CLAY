@@ -13,7 +13,6 @@ import android.widget.LinearLayout;
 import android.widget.Spinner;
 import android.widget.TextView;
 import java.io.File;
-import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -28,7 +27,8 @@ final class RelayPanel {
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Activity activity;
-    private final EditText nodes, rules, index;
+    private final EditText rules, index;
+    private final NodeInput nodes;
     private final Spinner mode;
     private final CheckBox direct, bypass;
     private final Button start, apply, stop, show;
@@ -36,7 +36,7 @@ final class RelayPanel {
     private RelaySession.State ready;
     private boolean busy, hasSession, destroyed;
 
-    RelayPanel(Activity activity, LinearLayout card, EditText nodes, EditText rules, CheckBox direct, CheckBox bypass) {
+    RelayPanel(Activity activity, LinearLayout card, NodeInput nodes, EditText rules, CheckBox direct, CheckBox bypass) {
         this.activity = activity; this.nodes = nodes; this.rules = rules;
         this.direct = direct; this.bypass = bypass;
         TextView description = new TextView(activity);
@@ -122,17 +122,19 @@ final class RelayPanel {
     }
 
     private void change(boolean update) {
+        if (destroyed || busy) return;
         final int node;
         try { node = Integer.parseInt(index.getText().toString().trim()); }
         catch (NumberFormatException error) { status.setText(R.string.relay_invalid); return; }
-        if (node < 1 || node > 100 || (!update && (nodes.length() > 2 * 1024 * 1024 || rules.length() > 12_000))) {
+        if (node < 1 || node > 100 || (!update && (!nodes.available() || rules.length() > 12_000))) {
             status.setText(R.string.relay_invalid); return;
         }
         String requested = MODES[mode.getSelectedItemPosition()];
         if (update) {
             run(R.string.relay_starting, () -> session.change(node, requested));
         } else {
-            byte[] source = nodes.getText().toString().getBytes(StandardCharsets.UTF_8);
+            byte[] source = nodes.snapshot();
+            if (source == null) { status.setText(R.string.relay_invalid); return; }
             String policy = rules.getText().toString();
             int ruleOptions = (direct.isChecked() ? 1 : 0) | (bypass.isChecked() ? 2 : 0);
             run(R.string.relay_starting, () -> {

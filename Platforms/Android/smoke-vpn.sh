@@ -52,6 +52,7 @@ check_result() {
   report=$(tr -d '\r' < "$1")
   printf '%s\n' "$report"
   grep -qx "$2" <<< "$report"
+  grep -qx 'CLAY_ANDROID_SUBSCRIPTIONS_PASS' <<< "$report"
   grep -qx 'INSTRUMENTATION_CODE: -1' <<< "$report"
   current=$(route)
   if has_tun "$current"; then printf 'VPN route remains after %s.\n' "$2" >&2; exit 1; fi

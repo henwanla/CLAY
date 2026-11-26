@@ -53,4 +53,27 @@
     <string name="relay_ready">プロキシ 127.0.0.1:%1$d · ノード %2$d · %3$s</string>
     <string name="relay_credentials">ユーザー名：%1$s\nパスワード：%2$s</string>
     <string name="relay_show">セッション認証情報を表示</string>
+    <string name="subscription_title">サブスクリプション</string>
+    <string name="subscription_intro">次回の接続に使用する保存済みノードを選択します。更新しても実行中の接続は変わりません。</string>
+    <string name="subscription_label">サブスクリプション名</string>
+    <string name="subscription_url">HTTPS サブスクリプション URL</string>
+    <string name="subscription_add">ダウンロードして保存</string>
+    <string name="subscription_empty">保存されたサブスクリプションはありません</string>
+    <string name="subscription_row">%1$s · %2$d ノード</string>
+    <string name="subscription_unreadable">サブスクリプションを読み込めません</string>
+    <string name="subscription_refresh">選択したサブスクリプションを更新</string>
+    <string name="subscription_use">次回は保存済みノードを使用</string>
+    <string name="subscription_remove">サブスクリプションを削除</string>
+    <string name="subscription_confirm_remove">選択したサブスクリプションとキャッシュを削除しますか？</string>
+    <string name="subscription_manual">貼り付けたノードを使用</string>
+    <string name="subscription_using_manual">次回の接続：貼り付けたノード</string>
+    <string name="subscription_using_feed">次回の接続：%1$s（保存済みノード）</string>
+    <string name="subscription_downloading">サブスクリプションをダウンロード中…</string>
+    <string name="subscription_saved">保存しました。次回使用するには保存済みノードを選択してください。</string>
+    <string name="subscription_removed">サブスクリプションを削除しました。</string>
+    <string name="subscription_invalid">名前と有効な HTTPS URL を入力してください。</string>
+    <string name="subscription_redirect">別のオリジンにリダイレクトされました。信頼できる最終 HTTPS URL を指定してください。</string>
+    <string name="subscription_size">サブスクリプションが 2 MiB を超えています。</string>
+    <string name="subscription_content">ダウンロードしたテキストに対応ノードはありません。</string>
+    <string name="subscription_failed">サブスクリプションを読み込み、ダウンロード、または保存できませんでした。以前のキャッシュは使用できます。</string>
 </resources>

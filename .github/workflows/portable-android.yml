@@ -44,6 +44,12 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
+      - name: Install pinned Go toolchain for the VPN engine
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version: '1.24.3'
+          check-latest: false
+          cache: false
       - name: Download and verify the Swift and Android build tools
         shell: bash
         run: |
@@ -76,7 +82,7 @@ jobs:
       - name: Compile and verify the Android arm64 ELF
         shell: bash
         run: bash Platforms/Android/build-portable.sh
-      - name: Build and verify both APK flavors
+      - name: Build and verify all three APK flavors
         shell: bash
         run: |
           set -euo pipefail
@@ -86,6 +92,7 @@ jobs:
           "${curl[@]}" -o platform.zip 'https://dl.google.com/android/repository/platform-35_r02.zip'
           "${curl[@]}" -o tools.zip 'https://dl.google.com/android/repository/build-tools_r36_macosx.zip'
           "${curl[@]}" -o mihomo.gz 'https://github.com/MetaCubeX/mihomo/releases/download/v1.19.34/mihomo-android-arm64-v8-v1.19.34.gz'
+          "${curl[@]}" -o mihomo-source.tgz 'https://codeload.github.com/MetaCubeX/mihomo/tar.gz/refs/tags/v1.19.34'
           printf '%s  %s\n' \
             0988cacad01b38a18a47bac14a0695f246bc76c1b06c0eeb8eb0dc825ab0c8e0 platform.zip \
             04e7f3a72044de4926fa038fa0e251a37bba1e1c3fb8beab6f8401bfd9eb4bf3 tools.zip | shasum -a 256 -c
@@ -98,3 +105,4 @@ jobs:
           cd "$GITHUB_WORKSPACE"
           bash Platforms/Android/build-apk.sh --test
           bash Platforms/Android/build-apk.sh --test --relay "$root/mihomo.gz"
+          bash Platforms/Android/build-apk.sh --test --vpn "$root/mihomo-source.tgz"

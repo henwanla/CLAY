@@ -53,4 +53,27 @@
     <string name="relay_ready">代理 127.0.0.1:%1$d · 节点 %2$d · %3$s</string>
     <string name="relay_credentials">用户名：%1$s\n密码：%2$s</string>
     <string name="relay_show">显示会话凭据</string>
+    <string name="subscription_title">订阅</string>
+    <string name="subscription_intro">可为下一次连接选用缓存节点。刷新不会改变正在运行的会话。</string>
+    <string name="subscription_label">订阅名称</string>
+    <string name="subscription_url">HTTPS 订阅地址</string>
+    <string name="subscription_add">下载并保存</string>
+    <string name="subscription_empty">没有已保存的订阅</string>
+    <string name="subscription_row">%1$s · %2$d 个节点</string>
+    <string name="subscription_unreadable">无法读取的订阅</string>
+    <string name="subscription_refresh">刷新所选订阅</string>
+    <string name="subscription_use">下次连接使用缓存节点</string>
+    <string name="subscription_remove">移除订阅</string>
+    <string name="subscription_confirm_remove">移除所选订阅及其缓存？</string>
+    <string name="subscription_manual">使用粘贴的节点</string>
+    <string name="subscription_using_manual">下次连接：粘贴的节点</string>
+    <string name="subscription_using_feed">下次连接：%1$s（缓存节点）</string>
+    <string name="subscription_downloading">正在下载订阅…</string>
+    <string name="subscription_saved">已保存。点「下次连接使用缓存节点」即可选用。</string>
+    <string name="subscription_removed">已移除订阅。</string>
+    <string name="subscription_invalid">请输入名称和有效的 HTTPS 订阅地址。</string>
+    <string name="subscription_redirect">订阅跳转到了其他来源。请输入可信的最终 HTTPS 地址。</string>
+    <string name="subscription_size">订阅超过 2 MiB。</string>
+    <string name="subscription_content">下载的文本中没有兼容的节点。</string>
+    <string name="subscription_failed">未能读取、下载或保存订阅。仍可使用先前保存的缓存。</string>
 </resources>

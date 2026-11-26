@@ -101,6 +101,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Desktop session bridge failed: $LASTEXITCODE" }
           dotnet (Join-Path $desktop 'Clay.Windows.dll') --smoke-pac $binary
           if ($LASTEXITCODE -ne 0) { throw "Windows system PAC check failed: $LASTEXITCODE" }
+          dotnet (Join-Path $desktop 'Clay.Windows.dll') --smoke-subscriptions $binary $fixture
+          if ($LASTEXITCODE -ne 0) { throw "Windows subscription check failed: $LASTEXITCODE" }
           $packageDir = Join-Path $env:RUNNER_TEMP 'clay-windows-preview'
           $archive = ./scripts/package-windows.ps1 -DesktopBuild $desktop -PortableExe $binary -OutputDirectory $packageDir
           $unpacked = Join-Path $env:RUNNER_TEMP 'clay-windows-unpacked'

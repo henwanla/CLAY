@@ -46,6 +46,10 @@ def offline_checks(directory):
     assert run("inspect", links) == b"nodes=3\nhysteria2/quic/tls=1\nvless/tcp/tls=1\nvmess/tcp/tls=1\nskipped.unsupportedProtocol=1\n"
     assert run("inspect", links, "--numbered") == (b"nodes=3\nnode=1 vless/tcp/tls\nnode=2 vmess/tcp/tls\nnode=3 hysteria2/quic/tls\n"
                                                    b"skipped.unsupportedProtocol=1\n")
+    raw = links.read_bytes()
+    assert run("inspect", "--profile-stdin", "--numbered", data=len(raw).to_bytes(4, "big") + raw) == run("inspect", links, "--numbered")
+    for malformed in (b"", b"\0\0\x01", b"\0\0\0\0", b"\0\0\0\x02a", b"\0\0\0\x01\xff", (2_097_153).to_bytes(4, "big")):
+        run("inspect", "--profile-stdin", data=malformed, code=65)
     run("inspect", links, "--unknown", code=64)
     yaml = directory / "profile.yaml"
     yaml.write_text(f"""proxy-providers:

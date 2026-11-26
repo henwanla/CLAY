@@ -90,7 +90,7 @@ python3 scripts/smoke-subscriptions.py .build/release/CLAYCoreChecks
 
 Linux 有 [GTK 桌面预览](Platforms/Linux/README.md)，支持手动和 GNOME 系统 PAC 接入，也可从窗口或可选托盘切换节点与模式。托盘可用时，运行中关闭窗口会保留会话。
 
-[Windows 桌面预览](Platforms/Windows/README.md)支持手动接入，也可显式启用和恢复当前用户的 Windows PAC。关闭窗口后保留托盘入口，支持切换节点和规则／全局／直连。
+[Windows 桌面预览](Platforms/Windows/README.md)支持手动接入和 Windows PAC，也可手动刷新 HTTPS 订阅并加密保存节点。关闭窗口后保留托盘入口，支持切换节点和规则／全局／直连。
 
 [Android ARM64 离线预览](Platforms/Android/README.md)可检查节点和 PAC 规则，支持简体中文、英文和日文。它没有联网权限，也不提供 VPN；调试 APK 已在 Android API 24 ARM64 模拟器验收。
 

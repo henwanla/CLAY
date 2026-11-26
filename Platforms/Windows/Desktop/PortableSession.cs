@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
@@ -10,7 +11,7 @@ internal sealed record Node(int Number, string Kind)
     public override string ToString() => $"{Number} · {Kind}";
 }
 
-internal sealed record Inspection(string Path, byte[] Digest, IReadOnlyList<Node> Nodes);
+internal sealed record Inspection(string? Path, byte[] Digest, IReadOnlyList<Node> Nodes);
 internal sealed record Route(string Mode, int Node);
 internal sealed class ProfileChangedException : Exception { }
 internal sealed class SessionCleanupException : Exception { }
@@ -76,12 +77,25 @@ internal sealed class PortableSession : IAsyncDisposable
         path = Path.GetFullPath(path);
         using var snapshot = OpenProfile(path);
         var digest = await SHA256.HashDataAsync(snapshot);
-        using var process = StartProcess(executable, ["inspect", path, "--numbered"]);
+        return new Inspection(path, digest, await InspectAsync(executable, path, default));
+    }
+
+    internal static async Task<Inspection> InspectAsync(string executable, ReadOnlyMemory<byte> source)
+    {
+        var nodes = await InspectAsync(executable, null, source);
+        return new Inspection(null, SHA256.HashData(source.Span), nodes);
+    }
+
+    private static async Task<List<Node>> InspectAsync(string executable, string? path, ReadOnlyMemory<byte> source)
+    {
+        using var process = StartProcess(executable, ["inspect", path ?? "--profile-stdin", "--numbered"]);
         var discard = process.StandardError.BaseStream.CopyToAsync(Stream.Null);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var nodes = new List<Node>();
         try
         {
+            if (path is null) await SendFrameAsync(process, source, timeout.Token);
+            process.StandardInput.Close();
             while (await process.StandardOutput.ReadLineAsync(timeout.Token) is { } line)
             {
                 if (line.Length > 160) throw new IOException();
@@ -93,7 +107,7 @@ internal sealed class PortableSession : IAsyncDisposable
             }
             await process.WaitForExitAsync(timeout.Token);
             if (process.ExitCode != 0 || nodes.Count == 0) throw new BridgeException("inspect-result", process.ExitCode);
-            return new Inspection(path, digest, nodes);
+            return nodes;
         }
         finally
         {
@@ -103,20 +117,26 @@ internal sealed class PortableSession : IAsyncDisposable
     }
 
     internal static async Task<PortableSession> StartAsync(string executable, Inspection profile, string engine,
-        string sha256, string? rules, string mode, int node)
+        string sha256, string? rules, string mode, int node, ReadOnlyMemory<byte> source = default)
     {
         if (!Sha256.IsMatch(sha256) || mode is not ("rule" or "global" or "direct") ||
             profile.Nodes.All(item => item.Number != node)) throw new ArgumentException();
         // Hold the chosen profile read-only through startup, and refuse a changed file.
-        using var snapshot = OpenProfile(profile.Path);
-        if (!CryptographicOperations.FixedTimeEquals(await SHA256.HashDataAsync(snapshot), profile.Digest))
+        using var snapshot = profile.Path is null ? null : OpenProfile(profile.Path);
+        var actual = snapshot is null ? SHA256.HashData(source.Span) : await SHA256.HashDataAsync(snapshot);
+        if (!CryptographicOperations.FixedTimeEquals(actual, profile.Digest))
             throw new ProfileChangedException();
-        List<string> args = ["mihomo-run", profile.Path, node.ToString(), Path.GetFullPath(engine), sha256,
+        List<string> args = ["mihomo-run", profile.Path ?? "--profile-stdin", node.ToString(), Path.GetFullPath(engine), sha256,
                              "--all-nodes", "--interactive", "--mode", mode];
         if (rules is not null) args.AddRange(["--pac-rules", Path.GetFullPath(rules)]);
         var session = new PortableSession(StartProcess(executable, args), profile.Nodes);
         try
         {
+            if (snapshot is null)
+            {
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+                await SendFrameAsync(session.cli, source, timeout.Token);
+            }
             var match = Ready.Match(await session.ReadAsync(TimeSpan.FromSeconds(20)));
             if (!match.Success || !ushort.TryParse(match.Groups[1].Value, out var port) || port == 0) throw new BridgeException("ready-message");
             if (await session.RefreshAsync() != new Route(mode, node)) throw new BridgeException("initial-state");
@@ -128,6 +148,17 @@ internal sealed class PortableSession : IAsyncDisposable
             try { await session.DisposeAsync(); } catch { /* Preserve the original startup failure. */ }
             throw;
         }
+    }
+
+    private static async Task SendFrameAsync(Process process, ReadOnlyMemory<byte> source, CancellationToken cancel)
+    {
+        if (source.Length is <= 0 or > 2 * 1024 * 1024) throw new IOException();
+        byte[] header = new byte[4];
+        BinaryPrimitives.WriteInt32BigEndian(header, source.Length);
+        var pipe = process.StandardInput.BaseStream;
+        await pipe.WriteAsync(header, cancel);
+        await pipe.WriteAsync(source, cancel);
+        await pipe.FlushAsync(cancel);
     }
 
     internal async Task<Route> RefreshAsync()

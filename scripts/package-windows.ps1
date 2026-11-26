@@ -35,12 +35,12 @@ Source commit: $revision
 
 Requires the .NET 10 Desktop Runtime and the Swift runtime from the verified Swift toolchain.
 Extract the archive and run Clay.Windows.exe. It uses the adjacent clay-portable.exe.
-Load a local profile, select a trusted Mihomo executable, and enter its expected SHA-256.
+Load a local profile or choose saved nodes in Subscriptions. Select a trusted Mihomo executable and enter its expected SHA-256.
 Use Connect Windows to apply CLAY's PAC, or set the loopback address manually.
 Use the tray to switch or stop. Stop and Quit restore settings CLAY still owns.
 
 此预览需要 .NET 10 Desktop Runtime 和经验证的 Swift 工具链所带的 Swift 运行时。
-解压后运行 Clay.Windows.exe，选择本地节点、可信的 Mihomo 并填写其 SHA-256。
+解压后运行 Clay.Windows.exe，加载本地节点或选择订阅缓存，再选可信的 Mihomo 并填写其 SHA-256。
 可用「连接 Windows」应用系统 PAC，也可手动填写回环地址。
 可从托盘切换或停止代理。停止或退出会恢复仍由 CLAY 管理的设置。
 

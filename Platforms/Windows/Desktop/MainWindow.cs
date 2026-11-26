@@ -18,6 +18,7 @@ internal sealed class MainWindow : Form
     private readonly Label profileLabel = Label(), engineLabel = Label(), ruleLabel = Label(), state = Label(), address = Label();
     private readonly TextBox digest = new() { Dock = DockStyle.Fill, MaxLength = 64, AccessibleName = "SHA-256" };
     private readonly Button openProfile = Button(L("Load nodes…", "加载节点…", "ノードを読み込む…"));
+    private readonly Button subscriptions = Button(L("Subscriptions…", "订阅管理…", "購読の管理…"));
     private readonly Button openEngine = Button(L("Choose Mihomo…", "选择 Mihomo…", "Mihomo を選択…"));
     private readonly Button openRule = Button(L("Choose rules…", "选择规则…", "ルールを選択…"));
     private readonly Button clearRule = Button(L("Clear", "清除", "クリア"));
@@ -40,6 +41,7 @@ internal sealed class MainWindow : Form
         uncertainIcon = MakeIcon(Color.FromArgb(215, 138, 44));
 
     private Inspection? profile;
+    private SubscriptionManager.Selection? feed;
     private string? engine, rules;
     private PortableSession? session;
     private readonly WindowsPac? windowsPac;
@@ -81,7 +83,7 @@ internal sealed class MainWindow : Form
         inputs.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         inputs.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         inputs.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        inputs.Controls.Add(openProfile, 0, 0); inputs.Controls.Add(profileLabel, 1, 0); inputs.SetColumnSpan(profileLabel, 2);
+        inputs.Controls.Add(openProfile, 0, 0); inputs.Controls.Add(profileLabel, 1, 0); inputs.Controls.Add(subscriptions, 2, 0);
         inputs.Controls.Add(openEngine, 0, 1); inputs.Controls.Add(engineLabel, 1, 1); inputs.SetColumnSpan(engineLabel, 2);
         inputs.Controls.Add(Label("SHA-256"), 0, 2); inputs.Controls.Add(digest, 1, 2); inputs.SetColumnSpan(digest, 2);
         inputs.Controls.Add(openRule, 0, 3); inputs.Controls.Add(ruleLabel, 1, 3); inputs.Controls.Add(clearRule, 2, 3);
@@ -103,6 +105,7 @@ internal sealed class MainWindow : Form
         profileLabel.Text = None(); engineLabel.Text = None(); ruleLabel.Text = None();
         SetState(Stopped());
         openProfile.Click += async (_, _) => await LoadAsync();
+        subscriptions.Click += (_, _) => ManageSubscriptions();
         openEngine.Click += (_, _) => { if (Choose("Mihomo (*.exe)|*.exe") is { } path) { engine = path; engineLabel.Text = Path.GetFileName(path); digest.Clear(); UpdateControls(); } };
         openRule.Click += (_, _) => { if (Choose("Text files|*.txt;*.csv;*.list|All files|*.*") is { } path) { rules = path; ruleLabel.Text = Path.GetFileName(path); UpdateControls(); } };
         clearRule.Click += (_, _) => { rules = null; ruleLabel.Text = None(); UpdateControls(); };
@@ -159,12 +162,13 @@ internal sealed class MainWindow : Form
         {
             heartbeat.Dispose(); tray.Visible = false; tray.Dispose(); menu.Dispose();
             windowsPac?.Dispose();
+            feed?.Dispose();
             idleIcon.Dispose(); liveIcon.Dispose(); uncertainIcon.Dispose();
         };
         UpdateControls();
     }
 
-    private static string L(string en, string zh, string ja) => CultureInfo.CurrentUICulture.TwoLetterISOLanguageName switch
+    internal static string L(string en, string zh, string ja) => CultureInfo.CurrentUICulture.TwoLetterISOLanguageName switch
     {
         "zh" => zh, "ja" => ja, _ => en
     };
@@ -180,13 +184,43 @@ internal sealed class MainWindow : Form
         if (Choose("Profiles|*.txt;*.yaml;*.yml;*.json|All files|*.*") is not { } path) return;
         await WorkAsync(async () =>
         {
-            profile = null; node.Items.Clear(); profileLabel.Text = None();
             SetState(L("Reading local profile…", "正在读取本地配置…", "設定ファイルを読み込み中…"));
-            profile = await PortableSession.InspectAsync(cli, path);
-            profileLabel.Text = L($"{profile.Nodes.Count} supported nodes", $"{profile.Nodes.Count} 个兼容节点", $"対応ノード {profile.Nodes.Count} 件");
-            node.Items.AddRange(profile.Nodes.ToArray()); node.SelectedIndex = 0;
+            var local = await PortableSession.InspectAsync(cli, path);
+            SetProfile(local, null);
             SetState(Stopped());
         });
+    }
+
+    private void ManageSubscriptions()
+    {
+        if (busy || session is not null) return;
+        busy = true; UpdateControls();
+        try
+        {
+            using var dialog = new SubscriptionDialog(cli, SubscriptionStore.Open(), feed?.Entry.Id);
+            var result = dialog.ShowDialog(this);
+            if (result == DialogResult.OK && dialog.TakeSelection() is { } picked)
+            {
+                SetProfile(picked.Inspection, picked);
+                SetState(Stopped());
+            }
+            else if (feed is not null && dialog.WasRemoved(feed.Entry.Id)) SetProfile(null, null);
+        }
+        catch { SetState(L("Could not open subscriptions.", "无法打开订阅管理。", "購読の管理を開けませんでした。")); }
+        finally { busy = false; UpdateControls(); }
+    }
+
+    private void SetProfile(Inspection? inspected, SubscriptionManager.Selection? saved)
+    {
+        feed?.Dispose(); feed = saved;
+        profile = inspected;
+        node.Items.Clear();
+        if (inspected is null) { profileLabel.Text = None(); return; }
+        int count = inspected.Nodes.Count;
+        profileLabel.Text = saved is null
+            ? L($"Local file · {count} nodes", $"本地文件 · {count} 个节点", $"ローカルファイル · {count} 件")
+            : L($"{saved.Entry.Name} · {count} cached nodes", $"{saved.Entry.Name} · {count} 个缓存节点", $"{saved.Entry.Name} · 保存済み {count} 件");
+        node.Items.AddRange(inspected.Nodes.ToArray()); node.SelectedIndex = 0;
     }
 
     private async Task StartAsync(bool connectWindows = false)
@@ -195,7 +229,8 @@ internal sealed class MainWindow : Form
         await WorkAsync(async () =>
         {
             SetState(L("Verifying engine and starting…", "正在校验内核并启动…", "コアを検証して起動中…"));
-            session = await PortableSession.StartAsync(cli, profile, engine, digest.Text.Trim(), rules, selected.Value, n.Number);
+            session = await PortableSession.StartAsync(cli, profile, engine, digest.Text.Trim(), rules, selected.Value, n.Number,
+                feed is null ? default : feed.Source);
             exitDetected = false;
             SetConfirmed(new Route(selected.Value, n.Number));
             if (connectWindows) await EnableWindowsAsync();
@@ -306,7 +341,7 @@ internal sealed class MainWindow : Form
     private void UpdateControls()
     {
         var idle = !busy && session is null;
-        openProfile.Enabled = openEngine.Enabled = openRule.Enabled = digest.Enabled = idle;
+        openProfile.Enabled = subscriptions.Enabled = openEngine.Enabled = openRule.Enabled = digest.Enabled = idle;
         clearRule.Enabled = idle && rules is not null;
         start.Enabled = idle && profile is not null && engine is not null && digest.Text.Trim().Length == 64;
         var running = !busy && session is not null;

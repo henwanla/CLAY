@@ -1,5 +1,3 @@
-using System.ComponentModel;
-using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -98,7 +96,7 @@ internal sealed class WindowsPac : IDisposable
     {
         var size = new FileInfo(journal).Length;
         if (size is <= 0 or > 262144) throw new IOException();
-        byte[] bytes = Dpapi.Transform(File.ReadAllBytes(journal), protect: false);
+        byte[] bytes = UserProtection.Transform(File.ReadAllBytes(journal), protect: false, limit: 262144);
         try
         {
             var recovery = JsonSerializer.Deserialize<Recovery>(bytes);
@@ -116,7 +114,7 @@ internal sealed class WindowsPac : IDisposable
         var temporary = Path.Combine(Path.GetDirectoryName(journal)!, $".recovery-{Guid.NewGuid():N}");
         try
         {
-            var encrypted = Dpapi.Transform(clear, protect: true);
+            var encrypted = UserProtection.Transform(clear, protect: true, limit: 262144);
             using (var writer = File.Open(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
                 writer.Write(encrypted);
@@ -134,46 +132,4 @@ internal sealed class WindowsPac : IDisposable
     private void CloseListener() { listener?.Dispose(); listener = null; }
 
     public void Dispose() { CloseListener(); ownership.Dispose(); }
-
-    private static class Dpapi
-    {
-        internal static byte[] Transform(byte[] input, bool protect)
-        {
-            var pin = GCHandle.Alloc(input, GCHandleType.Pinned);
-            Blob output = default;
-            try
-            {
-                var source = new Blob { Size = input.Length, Data = pin.AddrOfPinnedObject() };
-                const uint noUi = 1; // CRYPTPROTECT_UI_FORBIDDEN; no machine scope.
-                var success = protect ? CryptProtectData(ref source, 0, 0, 0, 0, noUi, out output)
-                    : CryptUnprotectData(ref source, 0, 0, 0, 0, noUi, out output);
-                if (!success) throw new Win32Exception(Marshal.GetLastWin32Error());
-                if (output.Size is <= 0 or > 262144) throw new IOException();
-                var bytes = new byte[output.Size];
-                Marshal.Copy(output.Data, bytes, 0, bytes.Length);
-                return bytes;
-            }
-            finally
-            {
-                if (output.Data != 0)
-                {
-                    if (!protect && output.Size is > 0 and <= 262144)
-                        Marshal.Copy(new byte[output.Size], 0, output.Data, output.Size);
-                    LocalFree(output.Data);
-                }
-                pin.Free();
-            }
-        }
-
-        [StructLayout(LayoutKind.Sequential)]
-        private struct Blob { internal int Size; internal nint Data; }
-        [DllImport("crypt32.dll", ExactSpelling = true, SetLastError = true)]
-        private static extern bool CryptProtectData(ref Blob input, nint description, nint entropy, nint reserved,
-            nint prompt, uint flags, out Blob output);
-        [DllImport("crypt32.dll", ExactSpelling = true, SetLastError = true)]
-        private static extern bool CryptUnprotectData(ref Blob input, nint description, nint entropy, nint reserved,
-            nint prompt, uint flags, out Blob output);
-        [DllImport("kernel32.dll", ExactSpelling = true)]
-        private static extern nint LocalFree(nint pointer);
-    }
 }

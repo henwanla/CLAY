@@ -11,7 +11,7 @@ import ucrt
 #endif
 
 private enum CommandError: Error {
-    case usage, file, noNodes, invalidPolicy, missingSecret, controller
+    case usage, file, profilePipe, noNodes, invalidPolicy, missingSecret, controller
 }
 
 private struct PortableCLI {
@@ -21,6 +21,7 @@ private struct PortableCLI {
         do { try run(arguments) }
         catch CommandError.usage { quit(usage, code: 64) }
         catch CommandError.file { quit("Unable to read a UTF-8 input file of up to 2 MiB.", code: 65) }
+        catch CommandError.profilePipe { quit("Unable to read a UTF-8 profile from the private input pipe.", code: 65) }
         catch CommandError.noNodes { quit("No supported nodes.", code: 65) }
         catch CommandError.invalidPolicy { quit("Invalid PAC rules, decision, or target.", code: 65) }
         catch PACError.invalidRuleLine(let line, _) { quit("Invalid PAC rule at line \(line).", code: 65) }
@@ -37,7 +38,7 @@ private struct PortableCLI {
 
     private static var usage: String {
         let common = """
-        clay-portable inspect FILE [--numbered]
+        clay-portable inspect FILE|--profile-stdin [--numbered]
         clay-portable pac-check RULES [HOST] [--default-direct] [--no-local-bypass]
         clay-portable pac-script RULES PORT [--default-direct] [--no-local-bypass]
         clay-portable mihomo-status PORT < SECRET_FILE  (Linux/macOS, requires /usr/bin/curl)
@@ -57,7 +58,7 @@ private struct PortableCLI {
         case "inspect":
             let numbered = arguments.count == 3 && arguments[2] == "--numbered"
             guard arguments.count == 2 || numbered else { throw CommandError.usage }
-            let report = ProfileImporter.read(try readText(arguments[1]))
+            let report = ProfileImporter.read(try readProfile(arguments[1]))
             guard !report.profiles.isEmpty else { throw CommandError.noNodes }
             let groups = Dictionary(grouping: report.profiles) { "\($0.protocolName)/\($0.transport)/\($0.security)" }
             print("nodes=\(report.profiles.count)")
@@ -109,7 +110,7 @@ private struct PortableCLI {
         #if os(Linux)
         case "mihomo-run":
             guard let options = LinuxRunOptions(arguments) else { throw CommandError.usage }
-            let profiles = ProfileImporter.read(try readText(options.source)).profiles
+            let profiles = ProfileImporter.read(try readProfile(options.source)).profiles
             let policy = try options.rules.map {
                 try PACPolicy(rules: PACPolicy.importRules(readText($0)), defaultDecision: .proxy, bypassLocal: true)
             }
@@ -118,7 +119,7 @@ private struct PortableCLI {
         #elseif os(Windows)
         case "mihomo-run":
             guard let options = WindowsRunOptions(arguments) else { throw CommandError.usage }
-            let profiles = ProfileImporter.read(try readText(options.source)).profiles
+            let profiles = ProfileImporter.read(try readProfile(options.source)).profiles
             let policy = try options.rules.map {
                 try PACPolicy(rules: PACPolicy.importRules(readText($0)), defaultDecision: .proxy, bypassLocal: true)
             }
@@ -135,6 +136,42 @@ private struct PortableCLI {
         return port
     }
 
+    private static func readProfile(_ source: String) throws -> String {
+        guard source == "--profile-stdin" else { return try readText(source) }
+        // A four-byte big-endian length followed by exactly that many UTF-8
+        // bytes. Do not consume control lines that follow the profile frame.
+        do {
+            #if os(Windows)
+            guard _isatty(0) == 0 else { throw CommandError.profilePipe }
+            #else
+            guard isatty(STDIN_FILENO) == 0 else { throw CommandError.profilePipe }
+            #endif
+            let handle = FileHandle.standardInput
+            let header = try readExactly(4, from: handle)
+            let size = header.reduce(0) { ($0 << 8) | Int($1) }
+            guard (1...ProfileImporter.maxBytes).contains(size),
+                  let value = String(data: try readExactly(size, from: handle), encoding: .utf8) else {
+                throw CommandError.profilePipe
+            }
+            return withoutBOM(value)
+        } catch { throw CommandError.profilePipe }
+    }
+
+    private static func readExactly(_ count: Int, from handle: FileHandle) throws -> Data {
+        var data = Data()
+        data.reserveCapacity(count)
+        while data.count < count {
+            guard let next = try handle.read(upToCount: min(65_536, count - data.count)), !next.isEmpty
+            else { throw CommandError.profilePipe }
+            data.append(next)
+        }
+        return data
+    }
+
+    private static func withoutBOM(_ value: String) -> String {
+        value.hasPrefix("\u{FEFF}") ? String(value.dropFirst()) : value
+    }
+
     private static func readText(_ path: String) throws -> String {
         let url = URL(fileURLWithPath: path)
         do {
@@ -144,7 +181,7 @@ private struct PortableCLI {
             defer { try? handle.close() }
             let bytes = try read(handle, maxBytes: ProfileImporter.maxBytes)
             guard let value = String(data: bytes, encoding: .utf8) else { throw CommandError.file }
-            return value.hasPrefix("\u{FEFF}") ? String(value.dropFirst()) : value
+            return withoutBOM(value)
         } catch { throw CommandError.file }
     }
 

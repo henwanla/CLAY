@@ -5,7 +5,7 @@ import Foundation
 
 struct WindowsRunOptions {
     static let usage = """
-    clay-portable mihomo-run FILE NODE_NUMBER MIHOMO_EXE SHA256 [--proxy-port PORT] [--control-port PORT]
+    clay-portable mihomo-run FILE|--profile-stdin NODE_NUMBER MIHOMO_EXE SHA256 [--proxy-port PORT] [--control-port PORT]
       [--all-nodes] [--mode rule|global|direct] [--pac-rules FILE] [--interactive]
     """
 

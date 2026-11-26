@@ -14,7 +14,7 @@ private func pollFD(_ descriptor: inout pollfd, _ timeout: Int32) -> Int32 { pol
 
 struct LinuxRunOptions {
     static let usage = """
-    clay-portable mihomo-run FILE NODE_NUMBER MIHOMO SHA256 [--proxy-port PORT] [--control-port PORT]
+    clay-portable mihomo-run FILE|--profile-stdin NODE_NUMBER MIHOMO SHA256 [--proxy-port PORT] [--control-port PORT]
       [--all-nodes] [--mode rule|global|direct] [--pac-rules FILE] [--interactive]
     """
 

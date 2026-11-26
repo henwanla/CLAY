@@ -20,23 +20,37 @@ Choose **Connect Windows** to start the session and temporarily apply CLAY's PAC
 
 选择 **连接 Windows** 会启动会话，并为当前用户的默认网络临时应用 CLAY 的 PAC。已启动手动代理时，可从窗口或托盘选择 **应用到 Windows**。遵循系统代理的应用会把非本地请求交给 Mihomo；回环、本地域名和私有字面 IP 仍直连。规则／全局／直连可以在线切换，无须写入新的 PAC 地址。使用独立代理配置的应用仍可手动接入。
 
-**Restore Windows proxy** restores the prior settings and leaves the manual listener running. Stop and Quit restore the settings before closing the session. If CLAY is terminated abruptly, reopen it to recover. If Windows settings were changed separately, CLAY preserves those edits. If the current setup script still points to CLAY but the settings no longer match, remove CLAY’s script address in Windows Proxy settings and retry restoration or stop. The prior settings are encrypted locally with Windows DPAPI. The app does not save profile paths, node credentials, or traffic history.
+**Restore Windows proxy** restores the prior settings and leaves the manual listener running. Stop and Quit restore the settings before closing the session. If CLAY is terminated abruptly, reopen it to recover. If Windows settings were changed separately, CLAY preserves those edits. If the current setup script still points to CLAY but the settings no longer match, remove CLAY’s script address in Windows Proxy settings and retry restoration or stop. The prior settings are encrypted locally with Windows DPAPI. CLAY does not remember local profile paths or keep traffic history.
 
-**恢复 Windows 代理设置** 会恢复原设置，保留手动代理端口。停止和退出会先恢复设置，再关闭会话。异常退出后可重新打开 CLAY 恢复；其他应用或用户后来修改的设置会保留。若当前脚本仍指向 CLAY，但其他设置已改变，请在 Windows「代理」里移除 CLAY 的脚本地址，再重试恢复或停止。原设置用 Windows DPAPI 加密保存在本机；不保存配置路径、节点凭据或流量历史。
+**恢复 Windows 代理设置** 会恢复原设置，保留手动代理端口。停止和退出会先恢复设置，再关闭会话。异常退出后可重新打开 CLAY 恢复；其他应用或用户后来修改的设置会保留。若当前脚本仍指向 CLAY，但其他设置已改变，请在 Windows「代理」里移除 CLAY 的脚本地址，再重试恢复或停止。原设置用 Windows DPAPI 加密保存在本机；CLAY 不记住本地配置文件路径，也不保存流量历史。
 
-CI tests the native Windows PAC and restoration in the runner’s disposable user profile, including the native PAC evaluator, encrypted recovery, and the session bridge with a synthetic local controller. Explorer tray appearance, real browser traffic and settings managed by an organization need separate validation. This preview does not provide TUN, login startup, or remote subscription downloads.
+CI tests the native Windows PAC and restoration in the runner’s disposable user profile, including the native PAC evaluator, encrypted recovery, and the session bridge with a synthetic local controller. Explorer tray appearance, real browser traffic and settings managed by an organization need separate validation. This preview does not provide TUN or login startup.
 
-CI 在临时 Windows 用户配置中验收系统 PAC、原生 PAC 决策、加密恢复与合成会话桥接。Explorer 托盘外观、真实浏览器流量和组织管理的代理策略需另行验收。此预览不提供 TUN、开机启动或在线订阅下载。
+CI 在临时 Windows 用户配置中验收系统 PAC、原生 PAC 决策、加密恢复与合成会话桥接。Explorer 托盘外观、真实浏览器流量和组织管理的代理策略需另行验收。此预览不提供 TUN 或开机启动。
 
 The [Windows GitHub Actions workflow](https://github.com/henwanla/CLAY/actions/workflows/portable-windows.yml) packages successful branch builds as the **CLAY-Windows-x64-preview** artifact for 14 days. Extract the ZIP, compare its SHA-256 against the accompanying file, and follow `START-HERE.txt`. The package is unsigned and requires the .NET 10 Desktop Runtime, Swift runtime and a separately verified Mihomo. It is a preview artifact, separate from the public macOS Release.
 
 [Windows 构建记录](https://github.com/henwanla/CLAY/actions/workflows/portable-windows.yml)会为通过验证的分支提供 **CLAY-Windows-x64-preview**，保留 14 天。核对 ZIP 的 SHA-256 后按 `START-HERE.txt` 解压试用。预览包未签名，需准备 .NET 10 Desktop Runtime、Swift 运行时和已核验的 Mihomo。正式 Release 仍是 macOS 版。
 
+## Subscriptions / 订阅管理
+
+With the proxy stopped, open **Subscriptions…**, enter a name and HTTPS address, and choose **Download and save**. Pick a saved feed and choose **Use saved nodes** to load its cache for the next session. Refresh only replaces the saved copy; use the refreshed nodes explicitly to switch snapshots. A failed download or import leaves the last working cache available. **Load nodes…** switches back to a local profile. Removing the current feed also clears its selected snapshot.
+
+停止代理后，打开「订阅管理…」，输入名称和 HTTPS 地址，点击「下载并保存」。在列表选择订阅后点「使用缓存节点」，下次会话就用这份节点。刷新只更新已保存的缓存；要换成新缓存，再点一次「使用缓存节点」。下载或解析失败仍可使用上次缓存。「加载节点…」可切回本地文件。移除当前订阅也会清掉已选择的快照。
+
+CLAY uses Windows TLS trust, follows redirects only within the same HTTPS origin and accepts at most 2 MiB before and after decompression. It downloads only on request; the connection to the subscription server does not use the Windows system proxy. The name, URL, and nodes of up to 12 feeds are encrypted with the current Windows user's DPAPI in local app data. A profile goes to the CLI over a private pipe instead of a separate profile file. The engine still uses a per-session configuration in its current-user-only runtime directory; normal stop removes it.
+
+CLAY 使用 Windows 的 TLS 信任，只允许同源 HTTPS 跳转，下载正文和解压后正文均限制在 2 MiB。只在手动下载或刷新时联网，订阅请求不使用 Windows 系统代理。最多保存 12 份订阅，名称、地址和节点均通过当前 Windows 用户的 DPAPI 加密保存在本地应用数据目录中。订阅正文通过私有进程管道交给 CLI；内核仍使用当前用户私有运行目录中的会话配置，正常停止会清理。
+
+Native Windows CI tests downloaded-body limits and redirects with synthetic responses. It uses real DPAPI and the portable CLI to verify failed-refresh recovery, unreadable and copied records, and actual loopback traffic from a cached-node session. It does not contact real subscription providers or exercise the visible Windows desktop.
+
+Windows 原生 CI 使用合成响应测试下载大小和跳转，再用实际 DPAPI 和 CLI 验证坏缓存、刷新留旧、节点切换与从缓存发起的回环流量。测试不访问真实订阅服务，也不操作实际 Windows 桌面。
+
 ## Portable CLI / 便携命令行
 
-Windows 10/11 runtime preview. Build with Swift for Windows and provide a native Mihomo executable and its expected SHA-256 from a trusted source. CLAY does not download the executable or import remote subscriptions on Windows.
+Windows 10/11 runtime preview. Build with Swift for Windows and provide a native Mihomo executable and its expected SHA-256 from a trusted source. The CLI does not download the executable or fetch remote subscriptions itself.
 
-这是 Windows 10/11 的运行预览。使用 Windows 版 Swift 编译，准备适用于本机处理器的 Mihomo 可执行文件，并从可信来源取得该文件的预期 SHA-256。CLAY 不会在 Windows 上下载内核或导入远程订阅。
+这是 Windows 10/11 的运行预览。使用 Windows 版 Swift 编译，准备适用于本机处理器的 Mihomo 可执行文件，并从可信来源取得该文件的预期 SHA-256。CLI 本身不会下载内核或拉取订阅。
 
 ```
 swift build -c release --product clay-portable

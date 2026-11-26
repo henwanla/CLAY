@@ -1,5 +1,9 @@
 using System.Globalization;
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using System.Security.Cryptography;
+using System.Text;
 
 namespace Clay.Windows;
 
@@ -54,7 +58,10 @@ internal static class Program
             Console.WriteLine("Windows desktop check: profile inspection passed");
             using var engine = File.OpenRead(fixture);
             var digest = Convert.ToHexString(await SHA256.HashDataAsync(engine));
+            var localData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            var before = Directory.EnumerateDirectories(localData, "clay-win-*").ToHashSet(StringComparer.OrdinalIgnoreCase);
             string address;
+            int port;
             await using (var session = await PortableSession.StartAsync(cli, inspection, fixture, digest, rule, "global", 1))
             {
                 Console.WriteLine("Windows desktop check: no-console session started");
@@ -62,12 +69,23 @@ internal static class Program
                 if (await session.ApplyAsync(new Route("rule", 2)) != new Route("rule", 2) || session.Address != address)
                     throw new IOException();
                 Console.WriteLine("Windows desktop check: combined switch confirmed");
+                port = int.Parse(address[(address.LastIndexOf(':') + 1)..]);
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                using var probe = new TcpClient();
+                await probe.ConnectAsync(IPAddress.Loopback, port, timeout.Token);
+                using var stream = probe.GetStream();
+                await stream.WriteAsync("GET http://example.invalid/ HTTP/1.1\r\nHost: example.invalid\r\n\r\n"u8.ToArray(), timeout.Token);
+                using var response = new StreamReader(stream, Encoding.ASCII);
+                if (!(await response.ReadToEndAsync(timeout.Token)).EndsWith("\r\n\r\nfixture", StringComparison.Ordinal))
+                    throw new BridgeException("loopback-response");
             }
-            using var probe = new System.Net.Sockets.TcpClient();
-            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-            var port = int.Parse(address[(address.LastIndexOf(':') + 1)..]);
-            try { await probe.ConnectAsync(System.Net.IPAddress.Loopback, port, timeout.Token); throw new IOException(); }
-            catch (System.Net.Sockets.SocketException error) when (error.SocketErrorCode == System.Net.Sockets.SocketError.ConnectionRefused) { }
+            // Windows may silently time out instead of rejecting a connect to a
+            // closed port. Check the OS listen table and the private state directly.
+            if (IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners().Any(listener => listener.Port == port))
+                throw new BridgeException("listener-still-present");
+            if (!before.SetEquals(Directory.EnumerateDirectories(localData, "clay-win-*")))
+                throw new BridgeException("private-directory-still-present");
+            Console.WriteLine("Windows desktop check: listener and private directory removed");
             await File.AppendAllTextAsync(profile, "# locally changed\n");
             try
             {

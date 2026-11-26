@@ -17,17 +17,47 @@ concurrency:
 jobs:
   linux-portable:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Check out source
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
-      - name: Build portable CLI with the Swift runtime linked in
+      - name: Install the verified swift.org toolchain
+        shell: bash
         run: |
-          swift --version
-          [[ $(swift --version) == 'Swift version 6.4.3 (swift-6.4.3-RELEASE)'$'\nTarget: x86_64-unknown-linux-gnu' ]]
-          swift build -c release --static-swift-stdlib --product clay-portable
+          set -euo pipefail
+          root=$(mktemp -d "$RUNNER_TEMP/clay-swift.XXXXXXXX")
+          trap 'rm -rf -- "$root"' EXIT
+          export GNUPGHOME="$root/gnupg"
+          install -d -m 700 "$GNUPGHOME"
+          # Swift 6.x Release Signing Key: https://www.swift.org/keys/active/
+          signer=52BB7E3DE28A71BE22EC05FFEF80A866B47A981F
+          archive=swift-6.4.3-RELEASE-ubuntu24.04.tar.gz
+          url="https://download.swift.org/swift-6.4.3-release/ubuntu2404/swift-6.4.3-RELEASE/$archive"
+          fetch=(curl --disable --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --retry 2 --connect-timeout 15)
+          "${fetch[@]}" --max-time 60 -o "$root/swift-key.asc" https://swift.org/keys/release-key-swift-6.x.asc
+          "${fetch[@]}" --max-time 60 -o "$root/$archive.sig" "$url.sig"
+          "${fetch[@]}" --max-time 360 -o "$root/$archive" "$url"
+          gpg --no-options --batch --no-tty --import "$root/swift-key.asc"
+          gpg --no-options --batch --no-tty --no-auto-key-retrieve --status-fd 1 \
+            --verify "$root/$archive.sig" "$root/$archive" > "$root/signature-status"
+          awk -v signer="$signer" '
+            $1 == "[GNUPG:]" && $2 == "VALIDSIG" && $3 == signer { valid=1 }
+            END { exit !valid }
+          ' "$root/signature-status"
+          toolchain="$RUNNER_TEMP/clay-swift-6.4.3"
+          mkdir "$toolchain"
+          tar -xzf "$root/$archive" -C "$toolchain" --strip-components=1 --no-same-owner --no-same-permissions
+      - name: Build portable CLI with the Swift runtime linked in
+        shell: bash
+        run: |
+          set -euo pipefail
+          swift="$RUNNER_TEMP/clay-swift-6.4.3/usr/bin/swift"
+          installed=$("$swift" --version)
+          printf '%s\n' "$installed"
+          [[ $installed == 'Swift version 6.4.3 (swift-6.4.3-RELEASE)'$'\nTarget: x86_64-unknown-linux-gnu' ]]
+          "$swift" build -c release --static-swift-stdlib --product clay-portable
       - name: Install GTK and KDE test dependencies
         run: |
           sudo apt-get update

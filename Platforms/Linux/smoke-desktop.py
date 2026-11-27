@@ -371,6 +371,8 @@ def window_checks(binary, directory, profile, gnome=False, plasma=False):
         directory_name, pid, proxy, _ = json.loads(report.read_text(encoding="utf-8"))
         assert window.address.get_text() == f"127.0.0.1:{proxy}"
         assert window.nodes.get_active_id() == "2" and "Global mode" in window.status.get_text()
+        click(window.refresh)
+        assert window.traffic.get_text() == "Session traffic at last refresh · Up 17 B · Down 23 B"
         if gnome:
             assert gsettings("get", "mode") == "'manual'"
             assert gsettings("get", "autoconfig-url") == repr(old_url)

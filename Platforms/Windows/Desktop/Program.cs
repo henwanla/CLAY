@@ -102,6 +102,10 @@ internal static class Program
             {
                 Console.WriteLine("Windows desktop check: no-console session started");
                 address = session.Address;
+                // This synthetic engine has no /traffic route. Missing optional
+                // counters must not prevent status, switching or data transfer.
+                if (await session.SampleTrafficAsync() is not null || await session.RefreshAsync() != new Route("global", 1))
+                    throw new BridgeException("missing-traffic-sample");
                 if (await session.ApplyAsync(new Route("rule", 2)) != new Route("rule", 2) || session.Address != address)
                     throw new IOException();
                 Console.WriteLine("Windows desktop check: combined switch confirmed");

@@ -15,6 +15,7 @@ internal sealed record Node(int Number, string Kind, string Label)
 
 internal sealed record Inspection(string? Path, byte[] Digest, IReadOnlyList<Node> Nodes);
 internal sealed record Route(string Mode, int Node);
+internal sealed record Traffic(long Upload, long Download);
 internal sealed record RulePreview(string Kind, int Number = 0, bool Direct = false);
 internal sealed class ProfileChangedException : Exception { }
 internal sealed class SessionCleanupException : Exception { }
@@ -32,6 +33,7 @@ internal sealed class PortableSession : IAsyncDisposable
     private static readonly Encoding StrictUtf8 = new UTF8Encoding(false, true);
     private static readonly Regex Ready = new(@"\Amihomo=ready proxy=127\.0\.0\.1:([0-9]{1,5}) controller=127\.0\.0\.1:[0-9]{1,5}\z");
     private static readonly Regex Status = new(@"\Amode=(rule|global|direct) node=([1-9][0-9]{0,2})\z");
+    private static readonly Regex Sample = new(@"\Atraffic=up:([0-9]{1,19}) down:([0-9]{1,19})\z");
     private static readonly Regex PreviewCount = new(@"\Avalid_pac_rules=([0-9]{1,7})\z");
     private static readonly Regex PreviewLine = new(@"\Aerror=rule-line:([1-9][0-9]{0,6})\z");
     private static readonly Regex PreviewDecision = new(@"\Adecision=(DIRECT|PROXY) source=(loopback|local|default|rule:([1-9][0-9]{0,6}))\z");
@@ -233,6 +235,14 @@ internal sealed class PortableSession : IAsyncDisposable
         var match = Status.Match(await ExchangeAsync("status"));
         if (!match.Success || !int.TryParse(match.Groups[2].Value, out var node) || !nodes.Contains(node)) throw new BridgeException("status-message");
         return new Route(match.Groups[1].Value, node);
+    }
+
+    internal async Task<Traffic?> SampleTrafficAsync()
+    {
+        var match = Sample.Match(await ExchangeAsync("traffic"));
+        return match.Success && long.TryParse(match.Groups[1].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var upload) &&
+            long.TryParse(match.Groups[2].Value, NumberStyles.None, CultureInfo.InvariantCulture, out var download)
+            ? new(upload, download) : null;
     }
 
     internal async Task<Route> ApplyAsync(Route desired)

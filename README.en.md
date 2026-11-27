@@ -103,6 +103,8 @@ Windows and Linux development builds add **Preview rules** before connecting. Ch
 
 Windows and Linux development builds also recognize the extracted upstream Mihomo v1.19.34 x64 compatible executable and fill in its expected SHA-256. Other builds still need manual verification.
 
+After connecting, make a request in an app that uses the proxy and choose **Refresh status** to see how many bytes this Mihomo session counted. Requests that bypass CLAY via system PAC are excluded. Refreshing does not run a probe, read connection records, or upload data.
+
 The [Android ARM64 offline preview](Platforms/Android/README.md) checks profiles and PAC rules in Simplified Chinese, English, and Japanese. The debug APK passed tests on an Android API 24 ARM64 emulator. It has no network permission or VPN support.
 
 The [Android local relay preview](Platforms/Android/README.md#本机代理预览--local-relay-preview) uses a separate app ID. Clients that accept authenticated HTTP or SOCKS5 proxies can connect manually over loopback. The app can switch nodes and Rule, Global, or Direct mode. Only clients configured with the manual proxy are affected.

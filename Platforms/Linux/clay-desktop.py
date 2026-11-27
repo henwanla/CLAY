@@ -137,6 +137,8 @@ class Window(Gtk.Window):
         root.pack_start(self.system_status, False, False, 0)
         self.address = Gtk.Entry(editable=False, can_focus=True, placeholder_text="No confirmed local proxy address")
         root.pack_start(self.address, False, False, 0)
+        self.traffic = Gtk.Label(xalign=0, wrap=True)
+        root.pack_start(self.traffic, False, False, 0)
         note = Gtk.Label(label="Use the loopback address for manual HTTP or SOCKS5. The desktop PAC applies only "
                                "to apps that use these proxy settings.", xalign=0, wrap=True)
         root.pack_start(note, False, False, 0)
@@ -274,6 +276,7 @@ class Window(Gtk.Window):
         if not system_only:
             self.status.set_text(message)
             self.address.set_text("")
+            self.traffic.set_text("")
         self.sync_controls()
         if system_only:
             self.system_status.set_text(message)
@@ -497,13 +500,29 @@ class Window(Gtk.Window):
 
     def refresh_session(self, *_):
         if self.refresh.get_sensitive():
-            self.task("Checking the session…", self.session.refresh, self.display_state)
+            def sample():
+                return self.session.refresh(), self.session.sample_traffic()
+
+            def display(result):
+                state, counts = result
+                self.display_state(state)
+                if counts is None:
+                    message = "Traffic counters unavailable. You can refresh again."
+                elif counts == (0, 0):
+                    message = "No traffic counted yet. Try an app that uses this proxy, then refresh."
+                else:
+                    up, down = counts
+                    message = f"Session traffic at last refresh · Up {up:,} B · Down {down:,} B"
+                self.traffic.set_text(message)
+
+            self.task("Checking the session and reading local traffic counters…", sample, display)
 
     def display_state(self, state):
         self.nodes.set_active_id(str(state.node))
         self.modes.set_active_id(state.mode)
         self.status.set_text(f"Local proxy ready · {state.mode.title()} mode · Node {state.node}")
         self.address.set_text(f"127.0.0.1:{state.port}")
+        self.traffic.set_text("Refresh status to see session traffic.")
 
     def watch_child(self):
         child = self.session.process

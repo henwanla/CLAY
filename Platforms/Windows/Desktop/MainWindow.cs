@@ -33,6 +33,7 @@ internal sealed class MainWindow : Form
     private readonly Button copy = Button(L("Copy address", "复制地址", "アドレスをコピー"));
     private readonly Button system = Button("");
     private readonly Label systemState = Label();
+    private readonly Label traffic = Label();
 
     private readonly NotifyIcon tray = new();
     private readonly ContextMenuStrip menu = new();
@@ -115,6 +116,8 @@ internal sealed class MainWindow : Form
         state.AccessibleName = L("Session status", "会话状态", "接続状態");
         state.Font = new Font(Font, FontStyle.Bold);
         pane.Controls.Add(state); pane.Controls.Add(systemState); pane.Controls.Add(Row(address, copy));
+        traffic.AccessibleName = L("Traffic in this session", "本次会话流量", "今回の通信量");
+        pane.Controls.Add(traffic);
         live.Controls.Add(pane); layout.Controls.Add(live);
 
         profileLabel.Text = None(); engineLabel.Text = None(); ruleLabel.Text = None();
@@ -129,7 +132,13 @@ internal sealed class MainWindow : Form
         start.Click += async (_, _) => await StartAsync();
         system.Click += async (_, _) => await ToggleWindowsAsync();
         apply.Click += async (_, _) => { if (node.SelectedItem is Node n && mode.SelectedItem is Mode m) await ChangeAsync(new(m.Value, n.Number)); };
-        refresh.Click += async (_, _) => await WorkAsync(async () => SetConfirmed(await session!.RefreshAsync()));
+        refresh.Click += async (_, _) => await WorkAsync(async () =>
+        {
+            var active = session!;
+            SetConfirmed(await active.RefreshAsync());
+            traffic.Text = L("Reading local traffic counters…", "正在读取本机流量…", "ローカルの通信量を取得中…");
+            ShowTraffic(await active.SampleTrafficAsync());
+        });
         stop.Click += async (_, _) => await WorkAsync(StopAsync);
         copy.Click += (_, _) => { if (session is not null && confirmed is not null) { try { Clipboard.SetText(session.Address); } catch (ExternalException) { } } };
 
@@ -385,6 +394,8 @@ internal sealed class MainWindow : Form
         mode.SelectedItem = selected;
         state.Text = L("Local proxy ready", "本机代理已就绪", "ローカルプロキシを利用できます");
         address.Text = session!.Address;
+        if (traffic.Text.Length == 0) traffic.Text = L("Refresh status to see session traffic.",
+            "点「刷新状态」查看本次会话流量。", "「状態を更新」で今回の通信量を確認できます。");
         trayStatus.Text = $"{selected.Caption} · #{route.Node}";
         tray.Text = $"CLAY · {trayStatus.Text}";
         tray.Icon = liveIcon;
@@ -392,10 +403,23 @@ internal sealed class MainWindow : Form
 
     private void SetState(string message)
     {
-        confirmed = null; state.Text = message; address.Text = "";
+        confirmed = null; state.Text = message; address.Text = ""; traffic.Text = "";
         trayStatus.Text = session is null ? Stopped() : L("Status unconfirmed", "状态未确认", "状態未確認");
         tray.Text = $"CLAY · {trayStatus.Text}";
         tray.Icon = session is null ? idleIcon : uncertainIcon;
+    }
+
+    private void ShowTraffic(Traffic? sample)
+    {
+        traffic.Text = sample switch
+        {
+            null => L("Traffic counters unavailable. You can refresh again.", "暂时读不到流量，可以再次刷新。", "通信量を取得できません。もう一度更新できます。"),
+            { Upload: 0, Download: 0 } => L("No traffic counted yet. Try an app that uses this proxy, then refresh.",
+                "还没有流量。请在使用此代理的应用中发起请求后刷新。", "まだ通信量がありません。このプロキシを使用するアプリで通信してから更新してください。"),
+            { } totals => L($"Session traffic at last refresh · Up {totals.Upload:N0} B · Down {totals.Download:N0} B",
+                $"上次刷新时的会话流量 · 上传 {totals.Upload:N0} B · 下载 {totals.Download:N0} B",
+                $"前回更新時のセッション通信量 · 送信 {totals.Upload:N0} B · 受信 {totals.Download:N0} B")
+        };
     }
 
     private void UpdateControls()

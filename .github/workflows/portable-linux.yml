@@ -114,6 +114,8 @@ jobs:
           env -u LD_LIBRARY_PATH -u LD_PRELOAD PATH=/usr/bin:/bin PYTHONSAFEPATH=1 PYTHONPATH="$CLAY_LINUX_BUNDLE/lib" \
             CLAY_OFFICIAL_ENGINE_FIXTURE="$engine" CLAY_LINUX_SMOKE_MODULES="$CLAY_LINUX_BUNDLE/lib" \
             bash Platforms/Linux/smoke-gnome.sh "$CLAY_LINUX_BUNDLE/bin/clay-portable"
+          env -u LD_LIBRARY_PATH -u LD_PRELOAD PATH=/usr/bin:/bin python3 scripts/smoke-desktop-traffic.py \
+            "$CLAY_LINUX_BUNDLE/bin/clay-portable" "$engine" 5b6644c487e5dffae86b0e0e9bb5cec445579a3a9d03977c09576fee2aeefc01
       - name: Exercise KDE's packaged proxy resolver and tray integration
         run: |
           env -u LD_LIBRARY_PATH -u LD_PRELOAD PATH=/usr/bin:/bin PYTHONSAFEPATH=1 PYTHONPATH="$CLAY_LINUX_BUNDLE/lib" \

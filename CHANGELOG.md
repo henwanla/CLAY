@@ -14,6 +14,8 @@
 - Windows and Linux development builds check local rule files and preview a domain, IP address, or URL offline before connecting.
 - Windows 和 Linux 开发版按文件内容识别指定的官方 Mihomo，自动填写预期 SHA-256；选错文件时会说明处理方式。
 - Windows and Linux development builds recognize the pinned upstream Mihomo by content and fill in its expected SHA-256. Errors explain how to correct the selection.
+- Windows 和 Linux 的「刷新状态」可查看本次会话的流量总量，便于确认应用是否正在使用 CLAY。数据只留在本机内存。
+- On Windows and Linux, Refresh status shows local session totals, so you can check whether an app is using CLAY. The counts are kept only in memory.
 
 ## 0.3.4 · 桌面预览 / Desktop preview
 

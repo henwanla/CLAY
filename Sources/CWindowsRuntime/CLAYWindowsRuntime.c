@@ -425,18 +425,20 @@ int32_t clay_win_control(clay_win_session *s, int32_t operation, const char *sec
     *count = 0;
     int32_t status = control_health(s);
     if (status != CLAY_WIN_OK) return status;
-    static const WCHAR *verbs[] = {L"GET", L"GET", L"PATCH", L"PUT", L"DELETE"};
-    static const WCHAR *paths[] = {L"/configs", L"/proxies/CLAY", L"/configs", L"/proxies/CLAY", L"/connections"};
-    if (operation < CLAY_CTL_GET_MODE || operation > CLAY_CTL_CLOSE_CONNECTIONS || !capacity ||
+    static const WCHAR *verbs[] = {L"GET", L"GET", L"PATCH", L"PUT", L"DELETE", L"GET"};
+    static const WCHAR *paths[] = {L"/configs", L"/proxies/CLAY", L"/configs", L"/proxies/CLAY", L"/connections", L"/traffic"};
+    if (operation < CLAY_CTL_GET_MODE || operation > CLAY_CTL_TRAFFIC || !capacity ||
         strlen(secret) != 64 || strspn(secret, "0123456789abcdef") != 64) return CLAY_WIN_CONTROLLER;
     BOOL has_body = operation == CLAY_CTL_SET_MODE || operation == CLAY_CTL_SET_NODE;
-    BOOL change = operation >= CLAY_CTL_SET_MODE;
+    BOOL change = has_body || operation == CLAY_CTL_CLOSE_CONNECTIONS;
+    BOOL sample = operation == CLAY_CTL_TRAFFIC;
     size_t length = body ? strlen(body) : 0;
     if ((has_body && (!length || length > 256)) || (!has_body && length)) return CLAY_WIN_CONTROLLER;
     status = CLAY_WIN_CONTROLLER;
     HINTERNET session = WinHttpOpen(L"CLAY", WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_NO_PROXY_NAME,
                                     WINHTTP_NO_PROXY_BYPASS, 0), connection = NULL, request = NULL;
-    if (!session || !WinHttpSetTimeouts(session, 500, 600, 600, 600)) goto done;
+    // /traffic starts streaming after the engine's one-second tick.
+    if (!session || !WinHttpSetTimeouts(session, 500, 600, 600, sample ? 2200 : 600)) goto done;
     connection = WinHttpConnect(session, L"127.0.0.1", s->control_port, 0);
     if (!connection) goto done;
     request = WinHttpOpenRequest(connection, verbs[operation], paths[operation], NULL,
@@ -455,12 +457,22 @@ int32_t clay_win_control(clay_win_session *s, int32_t operation, const char *sec
     if ((operation == CLAY_CTL_CLOSE_CONNECTIONS && http != 204) ||
         (has_body && http != 204 && http != 200) || (!change && http != 200)) goto done;
     if (!change) {
-        ULONGLONG deadline = GetTickCount64() + 1600;
+        ULONGLONG deadline = GetTickCount64() + (sample ? 2500 : 1600);
         for (;;) {
             DWORD read = 0;
-            if (stopped() || GetTickCount64() >= deadline || *count >= capacity ||
-                !WinHttpReadData(request, response + *count, capacity - *count, &read)) goto done;
-            if (!read) break;
+            if (stopped() || GetTickCount64() >= deadline || *count >= capacity) goto done;
+            DWORD wanted = capacity - *count;
+            if (sample) {
+                DWORD available = 0;
+                if (!WinHttpQueryDataAvailable(request, &available) || !available) goto done;
+                if (available < wanted) wanted = available;
+            }
+            if (!WinHttpReadData(request, response + *count, wanted, &read)) goto done;
+            if (!read) { if (sample) goto done; break; }
+            if (sample) {
+                const uint8_t *newline = memchr(response + *count, '\n', read);
+                if (newline) { *count = (uint32_t)(newline - response); break; }
+            }
             *count += read;
         }
     }

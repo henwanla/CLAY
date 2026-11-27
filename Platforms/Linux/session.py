@@ -27,6 +27,7 @@ ENGINE_SHA256 = re.compile(r"[0-9a-fA-F]{64}")
 CHILD_ENV = {"LANG": "C"}
 READY = re.compile(rb"mihomo=ready proxy=127\.0\.0\.1:([1-9][0-9]{0,4}) controller=127\.0\.0\.1:([1-9][0-9]{0,4})")
 STATUS = re.compile(rb"mode=(rule|global|direct) node=([1-9][0-9]{0,2})")
+TRAFFIC = re.compile(rb"traffic=up:([0-9]{1,19}) down:([0-9]{1,19})")
 NODE = re.compile(rb"node=([1-9][0-9]{0,2}) ([a-z0-9-]{1,24}/[a-z0-9-]{1,16}/[a-z0-9-]{1,16}) ([A-Za-z0-9+/=]{1,344}|-)")
 
 
@@ -375,6 +376,14 @@ class Session:
             raise DesktopError("Mihomo could not confirm the active routing mode and node.")
         self.state = State(data[1].decode("ascii"), int(data[2]), self.port)
         return self.state
+
+    def sample_traffic(self):
+        match = TRAFFIC.fullmatch(self.request(b"traffic"))
+        if match:
+            upload, download = map(int, match.groups())
+            if max(upload, download) <= 2**63 - 1:
+                return upload, download
+        return None
 
     def change(self, *, node=None, mode=None):
         previous = self.state

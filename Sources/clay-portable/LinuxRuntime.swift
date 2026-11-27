@@ -209,7 +209,10 @@ enum LinuxMihomoRuntime {
                     switch fields.first {
                     case "quit" where fields.count == 1: return 0
                     case "help" where fields.count == 1:
-                        reply = "commands: status | mode rule|global|direct | node N | quit"
+                        reply = "commands: status | traffic | mode rule|global|direct | node N | quit"
+                    case "traffic" where fields.count == 1:
+                        if let row = try? controller.traffic() { reply = TrafficSample.reply(row) }
+                        else { reply = "traffic=unavailable" }
                     case "status" where fields.count == 1:
                         try controller.finishRoutingChange()
                         let mode = try controller.mode()
@@ -415,6 +418,10 @@ private struct LinuxSessionController {
         return response.now
     }
 
+    func traffic() throws -> Data {
+        try request(path: "/traffic", expectedStatus: 200, firstLine: true)
+    }
+
     mutating func setMode(_ mode: CoreRoutingMode) throws {
         if try self.mode() != mode {
             drainPending = true
@@ -439,17 +446,18 @@ private struct LinuxSessionController {
         drainPending = false
     }
 
-    private func request(path: String, expectedStatus: Int, method: String = "GET", body: [String: String]? = nil) throws -> Data {
+    private func request(path: String, expectedStatus: Int, method: String = "GET", body: [String: String]? = nil,
+                         firstLine: Bool = false) throws -> Data {
         try signals.check()
         guard ownsController() else { throw LinuxControllerError.unconfirmed }
         let input = try ControllerPipe(), output = try ControllerPipe()
-        let command = try launchRequest(path: path, method: method, body: body, input: input, output: output)
+        let command = try launchRequest(path: path, method: method, body: body, firstLine: firstLine, input: input, output: output)
         defer { command.stop() }
         input.closeRead()
         output.closeWrite()
         let deadline = DispatchTime.now() + .seconds(4)
         var response = Data(), bytes = [UInt8](repeating: 0, count: 8_192)
-        let limit = 131_072 + 4
+        let limit = firstLine ? 8192 : 131_072 + 4
         while true {
             try signals.check()
             guard DispatchTime.now() < deadline else { throw LinuxControllerError.unconfirmed }
@@ -462,7 +470,17 @@ private struct LinuxSessionController {
             guard length >= 0, length <= limit - response.count else { throw LinuxControllerError.unconfirmed }
             if length == 0 { break }
             response.append(contentsOf: bytes.prefix(length))
+            if firstLine, let headers = response.range(of: Data("\r\n\r\n".utf8)),
+               let end = response[headers.upperBound...].firstIndex(of: 10) {
+                let status = response.prefix { $0 != 13 }.split(separator: 32)
+                guard status.count >= 2, [Data("HTTP/1.1".utf8), Data("HTTP/1.0".utf8)].contains(status[0]),
+                      status[1] == Data("200".utf8), end - headers.upperBound <= 512, ownsController() else {
+                    throw LinuxControllerError.unconfirmed
+                }
+                return response[headers.upperBound..<end]
+            }
         }
+        guard !firstLine else { throw LinuxControllerError.unconfirmed }
         while command.isAlive() {
             if let code = signals.poll(timeout: 20) { throw LinuxInterruption(code: code) }
             guard DispatchTime.now() < deadline else { throw LinuxControllerError.unconfirmed }
@@ -473,7 +491,7 @@ private struct LinuxSessionController {
         return response.dropLast(4)
     }
 
-    private func launchRequest(path: String, method: String, body: [String: String]?, input: ControllerPipe,
+    private func launchRequest(path: String, method: String, body: [String: String]?, firstLine: Bool, input: ControllerPipe,
                                output: ControllerPipe) throws -> Child {
         do {
             // Put the credential into a pipe before spawning; it never appears
@@ -483,8 +501,9 @@ private struct LinuxSessionController {
             }
             input.closeWrite()
             var arguments = ["-q", "--silent", "--no-location", "--noproxy", "*", "--proto", "=http", "--connect-timeout", "1",
-                             "--max-time", "3", "--max-filesize", "131072", "--write-out", "\n%{http_code}",
-                             "--header", "@-", "--request", method]
+                             "--max-time", "3", "--header", "@-", "--request", method]
+            arguments += firstLine ? ["--http1.1", "--include", "--no-buffer", "--fail"]
+                                   : ["--max-filesize", "131072", "--write-out", "\n%{http_code}"]
             if let body {
                 let data = try JSONEncoder().encode(body)
                 arguments += ["--header", "Content-Type: application/json", "--data-binary", String(decoding: data, as: UTF8.self)]

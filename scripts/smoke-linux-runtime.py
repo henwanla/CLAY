@@ -74,6 +74,11 @@ if MODE == "control":
                 elif self.path == "/proxies/CLAY":
                     state["readback"] |= state["pending"] == "node"
                     self.send(200, {"now": state["now"]})
+                elif self.path == "/traffic":
+                    self.send_response(200)
+                    self.send_header("Connection", "close")
+                    self.end_headers()
+                    self.wfile.write(b'{"upTotal":17,"downTotal":23}\n')
                 else:
                     self.send(404)
 

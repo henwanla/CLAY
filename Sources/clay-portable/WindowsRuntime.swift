@@ -151,7 +151,9 @@ enum WindowsMihomoRuntime {
                     switch fields.first {
                     case "quit" where fields.count == 1: return Int32(CLAY_WIN_OK)
                     case "help" where fields.count == 1:
-                        reply = "commands: status | mode rule|global|direct | node N | quit"
+                        reply = "commands: status | traffic | mode rule|global|direct | node N | quit"
+                    case "traffic" where fields.count == 1:
+                        reply = try controller.traffic()
                     case "status" where fields.count == 1:
                         try controller.finishRoutingChange()
                         let mode = try controller.mode(), active = try controller.node()
@@ -207,13 +209,18 @@ private struct WindowsSessionController {
 
     func mode() throws -> CoreRoutingMode {
         guard let value = try request(Int32(CLAY_CTL_GET_MODE))["mode"] as? String,
-              let mode = CoreRoutingMode(rawValue: value) else { throw WindowsControlError.unconfirmed }
+              let mode = CoreRoutingMode(rawValue: value.lowercased()) else { throw WindowsControlError.unconfirmed }
         return mode
     }
 
     func node() throws -> String {
         guard let active = try request(Int32(CLAY_CTL_GET_NODE))["now"] as? String else { throw WindowsControlError.unconfirmed }
         return active
+    }
+
+    func traffic() throws -> String {
+        do { return TrafficSample.reply(try requestData(Int32(CLAY_CTL_TRAFFIC), capacity: 513)) }
+        catch WindowsControlError.unconfirmed { return "traffic=unavailable" }
     }
 
     mutating func changeMode(_ mode: CoreRoutingMode) throws {
@@ -244,7 +251,16 @@ private struct WindowsSessionController {
     }
 
     private func request(_ operation: Int32, body: String? = nil) throws -> [String: Any] {
-        var response = [UInt8](repeating: 0, count: 64 * 1024), count: UInt32 = 0
+        let data = try requestData(operation, body: body)
+        if body != nil || operation == Int32(CLAY_CTL_CLOSE_CONNECTIONS) { return [:] }
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw WindowsControlError.unconfirmed
+        }
+        return object
+    }
+
+    private func requestData(_ operation: Int32, body: String? = nil, capacity: Int = 64 * 1024) throws -> Data {
+        var response = [UInt8](repeating: 0, count: capacity), count: UInt32 = 0
         let status = secret.withCString { secret in
             response.withUnsafeMutableBufferPointer { buffer in
                 if let body {
@@ -257,11 +273,7 @@ private struct WindowsSessionController {
         }
         if status == Int32(CLAY_WIN_CONTROLLER) { throw WindowsControlError.unconfirmed }
         guard status == Int32(CLAY_WIN_OK) else { throw WindowsControlError.sessionEnded(status) }
-        if body != nil || operation == Int32(CLAY_CTL_CLOSE_CONNECTIONS) { return [:] }
-        guard let object = try? JSONSerialization.jsonObject(with: Data(response.prefix(Int(count)))) as? [String: Any] else {
-            throw WindowsControlError.unconfirmed
-        }
-        return object
+        return Data(response.prefix(Int(count)))
     }
 }
 

@@ -118,6 +118,8 @@ jobs:
           Expand-Archive -LiteralPath $archive -DestinationPath $unpacked
           dotnet (Join-Path $unpacked 'Clay.Windows.dll') --smoke (Join-Path $unpacked 'clay-portable.exe') $fixture
           if ($LASTEXITCODE -ne 0) { throw "Extracted Windows package failed: $LASTEXITCODE" }
+          python scripts/smoke-desktop-traffic.py (Join-Path $unpacked 'clay-portable.exe') $env:CLAY_OFFICIAL_ENGINE_FIXTURE 5a0231811a80b27477ebdee15684b41946d01afbd2114534e9a4b256125ca147
+          if ($LASTEXITCODE -ne 0) { throw "Official Mihomo loopback traffic check failed: $LASTEXITCODE" }
       - name: Upload the verified Windows preview
         if: github.event_name == 'push'
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0

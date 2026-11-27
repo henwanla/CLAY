@@ -35,7 +35,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 if [[ "$flavor" == relay ]]; then
   work=$(mktemp -d)
-  (cd "$work" && exec python3 "$base/app/src/androidTest/relay-fixture.py") &
+  (cd "$work" && exec python3 -B "$base/app/src/androidTest/relay-fixture.py") &
   fixture_pid=$!
   for _ in {1..100}; do
     if [[ -s "$work/fixture-ready" ]] || ! kill -0 "$fixture_pid" 2>/dev/null; then break; fi

@@ -13,9 +13,14 @@ import sys
 from subprocess import DEVNULL, run
 from threading import Event, Thread
 
+from dns_fixture import reply_tcp_dns, test_name
+
 
 proof, user, password = (token_hex(12) for _ in range(3))
 auth = b"Basic " + b64encode(f"{user}:{password}".encode("ascii"))
+# The VPN check uses a documentation address. Only its synthetic nodes answer.
+dns_tcp_target = "198.51.100.53"
+dns_tcp_octets = bytes(map(int, dns_tcp_target.split(".")))
 
 
 def headers(stream):
@@ -35,13 +40,17 @@ def headers(stream):
 def connect_http(stream, peer, target, target_port):
     line, fields = headers(stream)
     port_pattern = str(target_port).encode("ascii") if target_port else rb"[0-9]{1,5}"
-    if not re.fullmatch(rb"CONNECT " + re.escape(target.encode("ascii")) + b":" + port_pattern + rb" HTTP/1\.[01]\r\n", line):
+    if target_port and re.fullmatch(rb"CONNECT " + re.escape(dns_tcp_target.encode("ascii")) + rb":53 HTTP/1\.[01]\r\n", line):
+        route = "dns"
+    elif re.fullmatch(rb"CONNECT " + re.escape(target.encode("ascii")) + b":" + port_pattern + rb" HTTP/1\.[01]\r\n", line):
+        route = "web"
+    else:
         return False
     if fields.get(b"proxy-authorization") != auth:
         peer.sendall(b"HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 0\r\n\r\n")
         return False
     peer.sendall(b"HTTP/1.1 200 Connection Established\r\n\r\n")
-    return True
+    return route
 
 
 def connect_socks(stream, peer, target, target_port):
@@ -63,10 +72,15 @@ def connect_socks(stream, peer, target, target_port):
     peer.sendall(b"\x01\x00")
     address = b"\x05\x01\x00\x01" + bytes(map(int, target.split(".")))
     request = stream.read(10)
-    if len(request) != 10 or request[:8] != address or (target_port and int.from_bytes(request[8:], "big") != target_port):
+    if target_port and request == b"\x05\x01\x00\x01" + dns_tcp_octets + b"\x00\x35":
+        route = "dns"
+    elif len(request) == 10 and request[:8] == address and (not target_port or int.from_bytes(request[8:], "big") == target_port):
+        route = "web"
+    else:
         return False
     peer.sendall(b"\x05\x00\x00\x01\x7f\x00\x00\x01\x00\x00")
-    return True
+    return route
+
 
 
 class Fixture(socketserver.BaseRequestHandler):
@@ -78,7 +92,12 @@ class Fixture(socketserver.BaseRequestHandler):
                 if self.server.tls:
                     peer = stack.enter_context(self.server.tls.wrap_socket(peer, server_side=True))
                 stream = stack.enter_context(peer.makefile("rb"))
-                if not self.server.handshake(stream, peer, self.server.target, self.server.target_port):
+                route = self.server.handshake(stream, peer, self.server.target, self.server.target_port)
+                if not route:
+                    return
+                if route == "dns":
+                    variant = self.server.variant
+                    reply_tcp_dns(stream, peer.sendall, {test_name(f"tcp-{proof}-{variant}"): 90 + variant})
                     return
                 line, fields = headers(stream)
                 if line not in (b"GET /test HTTP/1.1\r\n", b"GET /test HTTP/1.0\r\n") or b"proxy-authorization" in fields:

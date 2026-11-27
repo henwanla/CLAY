@@ -123,6 +123,12 @@ final class VpnChecks {
             require(fetch("10.0.2.2", direct).endsWith(proof + "-A"), "TCP still uses the selected node without UDP");
             require(udpProbe(IPV6_FIXTURE, udp6, "direct-" + proof), "explicit IPv6 DIRECT still forwards UDP");
             require(!udpProbe("10.0.2.2", udp4, "blocked-" + proof), "proxied UDP must not fall through to DIRECT");
+            step = "DNS over TCP in Rule mode";
+            checkTcpDns(resolver, proof, "rule");
+            step = "DNS over TCP in Global mode";
+            select(test, activity, 3, 1);
+            await(test, R.string.vpn_ready, 3, "global", "selected TCP-only node in Global mode");
+            checkTcpDns(resolver, proof, "global");
             step = "Direct mode";
             select(test, activity, 2, 2);
             await(test, R.string.vpn_ready, 2, "direct", "confirmed direct mode");
@@ -213,6 +219,13 @@ final class VpnChecks {
                 }
                 require(working ? response.endsWith(fixture.proof(node)) : response.isEmpty(),
                         working ? "system TCP uses selected upstream " + node : "VPN refuses invalid authentication or pin " + node);
+                if (working) {
+                    try {
+                        requireDnsAnswer("tcp-" + fixture.proof(node) + ".test", 90 + node);
+                    } catch (java.net.UnknownHostException failure) {
+                        throw new AssertionError("system DNS over TCP through authenticated upstream " + node);
+                    }
+                }
             }
             selectForwarding(test, activity, fixture, 1);
             require(fetchForwarding(origin).endsWith(fixture.proof(1)), "same VPN recovers after switching to working upstream");
@@ -330,6 +343,16 @@ final class VpnChecks {
 
     private static String fixtureName(String action, String resolver, String proof) {
         return action + "-" + resolver + "-" + proof + ".test";
+    }
+
+    private static void checkTcpDns(String resolver, String proof, String mode) throws Exception {
+        requireDnsAnswer(fixtureName("tcp-" + mode, resolver, proof), 83);
+    }
+
+    private static void requireDnsAnswer(String name, int lastOctet) throws java.net.UnknownHostException {
+        InetAddress[] answers = InetAddress.getAllByName(name);
+        require(answers.length == 1 && answers[0].getHostAddress().equals("203.0.113." + lastOctet),
+                "Android retries the configured DNS resolver over TCP through the selected node");
     }
 
     private static void start(Instrumentation test, Activity activity, int first, int second, String proof, String resolver) {

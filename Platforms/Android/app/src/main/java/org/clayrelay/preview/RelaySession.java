@@ -120,7 +120,10 @@ final class RelaySession implements AutoCloseable {
             Map<String, String> env = process.environment();
             env.clear();
             // The already-established Android TUN carries IPv6 even on an IPv4-only uplink.
-            if (vpn) env.put("SKIP_SYSTEM_IPV6_CHECK", "true");
+            if (transport != null) {
+                env.put("SKIP_SYSTEM_IPV6_CHECK", "true");
+                env.put("CLAY_VPN_RESOLVER", transport.resolverAddress());
+            }
             env.put("HOME", directory.getPath()); env.put("TMPDIR", directory.getPath()); env.put("PATH", "/system/bin");
             child = process.directory(directory).redirectErrorStream(true).redirectOutput(new File("/dev/null")).start();
             child.getOutputStream().close();

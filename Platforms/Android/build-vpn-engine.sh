@@ -24,5 +24,6 @@ cd "$work"
 tar -xzf "$archive" --strip-components=1
 git apply --unidiff-zero "$lab/external-tun.patch"
 cp "$lab/protect_android.go" clay_protect_android.go
+cp "$lab/dns_tcp_retry.go" tunnel/clay_dns_tcp_retry.go
 "$go_bin" build -mod=readonly -tags with_gvisor -trimpath \
   -ldflags '-w -s -buildid= -X main.clayRequireProtection=1' -o "$out" .

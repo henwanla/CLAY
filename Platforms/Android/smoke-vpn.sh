@@ -32,7 +32,7 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-(cd "$work" && exec python3 "$base/app/src/androidTest/vpn-fixture.py") &
+(cd "$work" && exec python3 -B "$base/app/src/androidTest/vpn-fixture.py") &
 fixture=$!
 for _ in {1..100}; do
   if [[ -s "$work/fixture-result" ]] || ! kill -0 "$fixture" 2>/dev/null; then break; fi
@@ -103,7 +103,7 @@ watch_pid=
 check_result "$work/revoke" CLAY_ANDROID_VPN_REVOKE_PASS
 
 # The upstreams accept only the exact QEMU alias and synthetic origin port, and never dial out.
-(cd "$work" && exec python3 "$base/app/src/androidTest/relay-fixture.py" --vpn "$direct") &
+(cd "$work" && exec python3 -B "$base/app/src/androidTest/relay-fixture.py" --vpn "$direct") &
 upstream_pid=$!
 for _ in {1..100}; do
   if [[ -s "$work/fixture-ready" ]] || ! kill -0 "$upstream_pid" 2>/dev/null; then break; fi

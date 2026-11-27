@@ -9,11 +9,16 @@
 +	}
 --- a/tunnel/tunnel.go
 +++ b/tunnel/tunnel.go
-@@ -527 +527,2 @@
+@@ -432,0 +433,4 @@ func handleUDPConn(packet C.PacketAdapter) {
++	if clayRetryDNSOverTCP(packet, metadata) {
++		packet.Drop()
++		return
++	}
+@@ -527 +531,2 @@
 -	if sniffingEnable && snifferDispatcher.Enable() {
 +	// CLAY only needs HTTP/TLS names when routing device traffic by rules.
 +	if mode == Rule && metadata.Type == C.TUN && sniffingEnable && snifferDispatcher.Enable() {
-@@ -684,0 +686,5 @@
+@@ -684,0 +690,5 @@
 +					// A matched VPN rule must not fall through to a different route
 +					// (including DIRECT) when its selected node cannot carry UDP.
 +					if metadata.Type == C.TUN {

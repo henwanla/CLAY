@@ -3,7 +3,7 @@
     <string name="vpn_title">CLAY VPN Preview</string>
     <string name="vpn_eyebrow">Android VPN preview</string>
     <string name="vpn_intro_top">Paste nodes, test rules, and start the IPv4 and IPv6 tunnel when ready.</string>
-    <string name="vpn_intro">This preview routes IPv4 and IPv6 while connected. Enter the IPv4 or IPv6 address of a DNS server you trust. Choose a node with UDP support for DNS in Global mode. Node hostnames may need system DNS to connect. Stopping or losing the VPN restores normal networking. With domain rules configured, Rule mode matches visible HTTP or TLS names on supported ports.</string>
+    <string name="vpn_intro">This preview routes IPv4 and IPv6 while connected. Enter a trusted DNS address. For a TCP-only node, the DNS server must accept TCP on port 53. Node hostnames may still need system DNS to connect. Stopping or losing the VPN restores normal networking. With domain rules configured, Rule mode matches visible HTTP or TLS names on supported ports.</string>
     <string name="vpn_dns">Trusted DNS address (IPv4 or IPv6)</string>
     <string name="vpn_start">Start VPN</string>
     <string name="vpn_stop">Stop VPN</string>

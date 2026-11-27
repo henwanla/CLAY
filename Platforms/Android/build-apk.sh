@@ -122,7 +122,7 @@ fi
 
 if [[ "$flavor" == vpn ]]; then
   tar -xOf "$vpn_archive" mihomo-1.19.34/LICENSE > "$licenses/Mihomo-LICENSE.txt"
-  printf '%s\n' 'Mihomo v1.19.34 with CLAY Android TUN and socket protection changes.' \
+  printf '%s\n' 'Mihomo v1.19.34 with CLAY Android TUN, socket protection and DNS retry changes.' \
     'Corresponding source, patches and build recipe: Platforms/Android in the source checkout used to build this APK.' > "$licenses/Mihomo.txt"
 fi
 

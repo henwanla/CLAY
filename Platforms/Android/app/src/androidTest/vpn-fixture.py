@@ -11,6 +11,8 @@ from subprocess import DEVNULL, run
 from threading import Event, Thread
 from uuid import UUID
 
+from dns_fixture import reply_tcp_dns, test_name
+
 proof = token_hex(12)
 uuid = UUID("56dc6c3e-8793-4d37-a363-f9f19db29c6d").bytes
 # Synthetic XUDP port 53 in each documentation range; no real DNS upstream.
@@ -22,6 +24,10 @@ labels_by_target = {target: tuple(f"{action}-{family}-{proof}" for action in ("p
                     for target, family in zip(dns_targets, ("v4", "v6"))}
 names_by_target = {target: tuple(bytes([len(name)]) + name.encode("ascii") + b"\x04test\x00" for name in labels)
                    for target, labels in labels_by_target.items()}
+tcp_names_by_target = {
+    target[1:]: tuple(test_name(f"tcp-{mode}-{family}-{proof}") for mode in ("global", "rule"))
+    for target, family in zip(dns_targets, ("v4", "v6"))
+}
 
 
 def tls_context():
@@ -125,6 +131,11 @@ class Request(StreamRequestHandler):
                 if len(address_head) != 3 or address_head[2] not in (1, 3):
                     return
                 target = address_head + self.read_header(4 if address_head[2] == 1 else 16)
+                if target in tcp_names_by_target:
+                    self.wfile.write(b"\x00\x00")
+                    reply_tcp_dns(self.rfile, self.wfile.write,
+                                  dict.fromkeys(tcp_names_by_target[target], 83 if self.server.kind == "A" else 84))
+                    return
                 tls = target == self.server.tls_target
                 if not tls and target not in self.server.http_targets:
                     return

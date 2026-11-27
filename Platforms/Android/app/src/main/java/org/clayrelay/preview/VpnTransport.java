@@ -31,6 +31,8 @@ final class VpnTransport implements AutoCloseable {
 
     VpnTransport(ClayVpnService service, InetAddress dns) { this.service = service; this.dns = dns; }
 
+    String resolverAddress() { return dns.getHostAddress(); }
+
     static InetAddress parseDns(String literal) {
         // Numeric-only parsing: no DNS requests, interface zones, brackets, or host:port.
         if (literal.length() > 45 || !literal.matches("[0-9a-fA-F:.]+")) return null;

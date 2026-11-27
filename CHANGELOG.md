@@ -2,6 +2,9 @@
 
 ## 开发中 / Unreleased
 
+- Android VPN 使用 TCP 专用节点时，系统可对设定的 IPv4 或 IPv6 DNS 改用 TCP，继续遵守规则和全局模式。不改变其他 UDP 流量的路由。
+- Android VPN can retry DNS over TCP at the configured IPv4 or IPv6 resolver when using a TCP-only node. The query follows Rule or Global mode, and other UDP traffic keeps its existing routing.
+
 ## 0.3.5 · 桌面预览 / Desktop preview
 
 - 可从 Clash 内联配置导入 HTTP CONNECT 和 SOCKS5 TCP 上游，支持身份认证和 TLS，也可粘贴普通 SOCKS5 链接。

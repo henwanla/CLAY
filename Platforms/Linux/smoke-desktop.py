@@ -329,7 +329,20 @@ def window_checks(binary, directory, profile, gnome=False, plasma=False):
         assert "Skipped 1" in window.status.get_text()
         window.nodes.set_active_id("2")
         assert "second" in window.nodes.get_active_text()
+        if pinned := os.environ.get("CLAY_OFFICIAL_ENGINE_FIXTURE"):
+            assert window.engine.set_filename(pinned)
+            until(lambda: window.engine.get_filename() == pinned)
+            window.engine.emit("file-set")
+            until(lambda: not window.busy)
+            assert window.engine_verified and not window.fingerprint.get_editable() and window.start.get_sensitive()
+            assert window.fingerprint.get_text() == hashlib.sha256(Path(pinned).read_bytes()).hexdigest()
+            assert "Verified" in window.engine_note.get_text()
+            print("PASS GTK recognized the official extracted engine without launching it")
         assert window.engine.set_filename(str(engine))
+        until(lambda: window.engine.get_filename() == str(engine))
+        window.engine.emit("file-set")
+        until(lambda: not window.busy)
+        assert not window.engine_verified and not window.fingerprint.get_text() and not window.start.get_sensitive()
         window.use_rules.set_active(True)
         assert window.rules.set_filename(str(rules))
         until(lambda: window.engine.get_filename() == str(engine) and window.rules.get_filename() == str(rules))
@@ -350,6 +363,7 @@ def window_checks(binary, directory, profile, gnome=False, plasma=False):
         click(window.start)
         assert not window.address.get_text() and not report.exists()
         assert window.session.process is None
+        assert "does not match" in window.engine_note.get_text()
 
         window.fingerprint.set_text(fingerprint)
         click(window.start)

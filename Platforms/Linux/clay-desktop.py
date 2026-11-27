@@ -14,7 +14,8 @@ from gi.repository import GLib, Gtk, Pango
 from desktop_pac import ReleaseError
 from gnome_pac import GnomePac
 from kde_pac import KdePac, plasma6_session
-from session import DesktopError, MODES, Session, default_pac, inspect, preview_rules
+from session import (DesktopError, EngineInputError, ENGINE_SHA256, MODES, OFFICIAL_ENGINE_SHA256, Session,
+                     default_pac, inspect, preview_rules, recognized_engine)
 from subscription_dialog import SubscriptionDialog
 from subscriptions import Manager, Store, wipe
 from tray import create_tray
@@ -47,6 +48,7 @@ class Window(Gtk.Window):
         self.selected_subscription = None
         self.subscription_dialog = None
         self.rule_dialog = None
+        self.engine_verified = False
         self.busy = False
         self.closing = False
         self.destroyed = False
@@ -77,9 +79,16 @@ class Window(Gtk.Window):
         self.source_label = Gtk.Label(label="Local file", xalign=0, wrap=True)
         grid.attach(self.source_label, 2, 1, 1, 1)
         self.engine = self.chooser("Choose an extracted Mihomo executable")
-        row(2, "Mihomo", self.engine)
+        self.engine.connect("file-set", self.engine_changed)
+        official = Gtk.LinkButton.new_with_label("https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.34",
+                                                  "Official v1.19.34")
+        row(2, "Mihomo", self.engine, official)
         self.fingerprint = Gtk.Entry(max_length=64, placeholder_text="Expected hash for this executable")
+        self.fingerprint.connect("changed", lambda *_: self.sync_controls())
         row(3, "SHA-256", self.fingerprint)
+        self.engine_note = Gtk.Label(label="Extract the Linux amd64-compatible build, then select the executable.",
+                                     xalign=0, wrap=True)
+        grid.attach(self.engine_note, 1, 4, 2, 1)
 
         self.use_rules = Gtk.CheckButton(label="Use rules file")
         self.use_rules.connect("toggled", lambda *_: self.sync_controls())
@@ -87,9 +96,9 @@ class Window(Gtk.Window):
         self.rules.connect("file-set", lambda *_: self.sync_controls())
         self.rule_preview = Gtk.Button(label="Preview rules…")
         self.rule_preview.connect("clicked", self.open_rule_preview)
-        grid.attach(self.use_rules, 0, 4, 1, 1)
-        grid.attach(self.rules, 1, 4, 1, 1)
-        grid.attach(self.rule_preview, 2, 4, 1, 1)
+        grid.attach(self.use_rules, 0, 5, 1, 1)
+        grid.attach(self.rules, 1, 5, 1, 1)
+        grid.attach(self.rule_preview, 2, 5, 1, 1)
 
         self.nodes = Gtk.ComboBoxText()
         for cell in self.nodes.get_cells():
@@ -97,14 +106,14 @@ class Window(Gtk.Window):
             cell.set_property("max-width-chars", 40)
         self.set_node = Gtk.Button(label="Apply node")
         self.set_node.connect("clicked", self.change_node)
-        row(5, "Node", self.nodes, self.set_node)
+        row(6, "Node", self.nodes, self.set_node)
         self.modes = Gtk.ComboBoxText()
         for mode in MODES:
             self.modes.append(mode, mode.title())
         self.modes.set_active_id("rule")
         self.set_mode = Gtk.Button(label="Apply mode")
         self.set_mode.connect("clicked", self.change_mode)
-        row(6, "Routing mode", self.modes, self.set_mode)
+        row(7, "Routing mode", self.modes, self.set_mode)
 
         actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         root.pack_start(actions, False, False, 0)
@@ -155,13 +164,15 @@ class Window(Gtk.Window):
         editable = not active and not running
         for widget in (self.profile, self.load, self.subscriptions, self.engine, self.fingerprint, self.use_rules):
             widget.set_sensitive(editable)
+        self.fingerprint.set_editable(not self.engine_verified)
         self.rules.set_sensitive(editable and self.use_rules.get_active())
         self.rule_preview.set_sensitive(self.rules.get_sensitive() and bool(self.rules.get_filename()))
         self.nodes.set_sensitive(confirmed or (editable and self.preview is not None))
         self.modes.set_sensitive(confirmed or editable)
         self.set_node.set_sensitive(confirmed)
         self.set_mode.set_sensitive(confirmed)
-        self.start.set_sensitive(editable and self.preview is not None)
+        self.start.set_sensitive(editable and self.preview is not None and bool(self.engine.get_filename()) and
+                                 bool(ENGINE_SHA256.fullmatch(self.fingerprint.get_text().strip())))
         self.stop.set_sensitive(running or self.busy)
         self.refresh.set_sensitive(running and not active)
         if self.tray is not None:
@@ -268,21 +279,30 @@ class Window(Gtk.Window):
             self.system_status.set_text(message)
 
         def run():
-            result, message, recovery = None, None, False
+            result, message, recovery, invalid_engine = None, None, False, False
             try:
                 result = action()
             except ReleaseError as error:
                 message, recovery = str(error), True
+            except EngineInputError as error:
+                message, invalid_engine = str(error), True
             except DesktopError as error:
                 message = str(error)
             except Exception:
                 # Filesystem/process exceptions may contain private paths.
                 message = "CLAY could not finish the local operation."
-            GLib.idle_add(finish, result, message, recovery)
+            GLib.idle_add(finish, result, message, recovery, invalid_engine)
 
-        def finish(result, error, recovery):
+        def finish(result, error, recovery, invalid_engine):
             self.busy = False
+            if self.destroyed:
+                return GLib.SOURCE_REMOVE
             if error is not None:
+                if invalid_engine:
+                    if self.engine_verified:
+                        self.engine_verified = False
+                        self.fingerprint.set_text("")
+                    self.engine_note.set_text(error)
                 if system_only or recovery:
                     self.pac_notice = error
                 if not system_only:
@@ -301,6 +321,24 @@ class Window(Gtk.Window):
             return GLib.SOURCE_REMOVE
 
         threading.Thread(target=run).start()
+
+    def engine_changed(self, *_):
+        self.engine_verified = False
+        self.fingerprint.set_text("")
+        path = self.engine.get_filename()
+        if not path:
+            self.sync_controls()
+            return
+        self.engine_note.set_text("For another build, enter the SHA-256 obtained from a trusted source.")
+
+        def show(official):
+            self.engine_verified = official
+            if official:
+                self.fingerprint.set_text(OFFICIAL_ENGINE_SHA256)
+                self.engine_note.set_text("Official Mihomo v1.19.34 · Linux x64 · Verified")
+            self.status.set_text("Choose a node and start when ready." if self.preview else "Load nodes to continue.")
+
+        self.task("Checking the selected executable…", lambda: recognized_engine(path, self.cancel), show)
 
     def open_rule_preview(self, *_):
         path = self.rules.get_filename()

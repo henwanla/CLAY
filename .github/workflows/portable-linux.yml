@@ -102,8 +102,18 @@ jobs:
           env -u LD_LIBRARY_PATH -u LD_PRELOAD PATH=/usr/bin:/bin python3 scripts/smoke-linux-runtime.py "$CLAY_LINUX_BUNDLE/bin/clay-portable"
       - name: Exercise GTK, the tray, GNOME proxy and subscriptions from the package
         run: |
+          set -euo pipefail
+          name=mihomo-linux-amd64-compatible-v1.19.34.gz
+          archive="$RUNNER_TEMP/$name"
+          engine="$RUNNER_TEMP/clay-official-mihomo"
+          curl --proto '=https' --proto-redir '=https' --fail --silent --show-error --location --retry 2 --max-time 90 \
+            -o "$archive" "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.34/$name"
+          printf '%s  %s\n' '2763f5b414527f7baf6dc57e3f82f3ab561eedf34bfd7c2f2cde1f7e592efe06' "$archive" | sha256sum -c
+          gzip -dc "$archive" > "$engine"
+          chmod 700 "$engine"
           env -u LD_LIBRARY_PATH -u LD_PRELOAD PATH=/usr/bin:/bin PYTHONSAFEPATH=1 PYTHONPATH="$CLAY_LINUX_BUNDLE/lib" \
-            CLAY_LINUX_SMOKE_MODULES="$CLAY_LINUX_BUNDLE/lib" bash Platforms/Linux/smoke-gnome.sh "$CLAY_LINUX_BUNDLE/bin/clay-portable"
+            CLAY_OFFICIAL_ENGINE_FIXTURE="$engine" CLAY_LINUX_SMOKE_MODULES="$CLAY_LINUX_BUNDLE/lib" \
+            bash Platforms/Linux/smoke-gnome.sh "$CLAY_LINUX_BUNDLE/bin/clay-portable"
       - name: Exercise KDE's packaged proxy resolver and tray integration
         run: |
           env -u LD_LIBRARY_PATH -u LD_PRELOAD PATH=/usr/bin:/bin PYTHONSAFEPATH=1 PYTHONPATH="$CLAY_LINUX_BUNDLE/lib" \

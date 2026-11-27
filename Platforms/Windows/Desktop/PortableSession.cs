@@ -32,7 +32,6 @@ internal sealed class PortableSession : IAsyncDisposable
     private static readonly Encoding StrictUtf8 = new UTF8Encoding(false, true);
     private static readonly Regex Ready = new(@"\Amihomo=ready proxy=127\.0\.0\.1:([0-9]{1,5}) controller=127\.0\.0\.1:[0-9]{1,5}\z");
     private static readonly Regex Status = new(@"\Amode=(rule|global|direct) node=([1-9][0-9]{0,2})\z");
-    private static readonly Regex Sha256 = new(@"\A[0-9a-fA-F]{64}\z");
     private static readonly Regex PreviewCount = new(@"\Avalid_pac_rules=([0-9]{1,7})\z");
     private static readonly Regex PreviewLine = new(@"\Aerror=rule-line:([1-9][0-9]{0,6})\z");
     private static readonly Regex PreviewDecision = new(@"\Adecision=(DIRECT|PROXY) source=(loopback|local|default|rule:([1-9][0-9]{0,6}))\z");
@@ -185,8 +184,10 @@ internal sealed class PortableSession : IAsyncDisposable
     internal static async Task<PortableSession> StartAsync(string executable, Inspection profile, string engine,
         string sha256, string? rules, string mode, int node, ReadOnlyMemory<byte> source = default)
     {
-        if (!Sha256.IsMatch(sha256) || mode is not ("rule" or "global" or "direct") ||
+        if (!EngineIdentity.HasFingerprint(sha256) || mode is not ("rule" or "global" or "direct") ||
             profile.Nodes.All(item => item.Number != node)) throw new ArgumentException();
+        // Give immediate feedback before startup. The native runtime also verifies its own staged copy.
+        await EngineIdentity.VerifyAsync(engine, sha256);
         // Hold the chosen profile read-only through startup, and refuse a changed file.
         using var snapshot = profile.Path is null ? null : OpenProfile(profile.Path);
         var actual = snapshot is null ? SHA256.HashData(source.Span) : await SHA256.HashDataAsync(snapshot);

@@ -4,8 +4,10 @@ from contextlib import contextmanager, nullcontext
 from base64 import b64decode
 from dataclasses import dataclass
 import hashlib
+import hmac
 import os
 from pathlib import Path
+import platform
 import re
 import selectors
 import stat
@@ -18,6 +20,10 @@ import unicodedata
 MODES = ("rule", "global", "direct")
 MAX_PROFILES = 100
 MAX_PROFILE_BYTES = 2 * 1024 * 1024
+MAX_ENGINE_BYTES = 512 * 1024 * 1024
+# Extracted from the verified upstream amd64-compatible gzip. See docs/RELEASING.md.
+OFFICIAL_ENGINE_SHA256 = "5b6644c487e5dffae86b0e0e9bb5cec445579a3a9d03977c09576fee2aeefc01"
+ENGINE_SHA256 = re.compile(r"[0-9a-fA-F]{64}")
 CHILD_ENV = {"LANG": "C"}
 READY = re.compile(rb"mihomo=ready proxy=127\.0\.0\.1:([1-9][0-9]{0,4}) controller=127\.0\.0\.1:([1-9][0-9]{0,4})")
 STATUS = re.compile(rb"mode=(rule|global|direct) node=([1-9][0-9]{0,2})")
@@ -26,6 +32,10 @@ NODE = re.compile(rb"node=([1-9][0-9]{0,2}) ([a-z0-9-]{1,24}/[a-z0-9-]{1,16}/[a-
 
 class DesktopError(Exception):
     """Only fixed messages are safe to display."""
+
+
+class EngineInputError(DesktopError):
+    """The selected executable needs attention before startup."""
 
 
 @dataclass(frozen=True)
@@ -49,6 +59,38 @@ class State:
     mode: str
     node: int
     port: int
+
+
+def engine_digest(path, cancel=None):
+    try:
+        if Path(path).suffix.lower() in (".gz", ".zip", ".xz", ".tgz", ".tar"):
+            raise EngineInputError("Extract the archive and select the Mihomo executable inside it.")
+        with os.fdopen(os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW), "rb") as source:
+            info = os.fstat(source.fileno())
+            if not stat.S_ISREG(info.st_mode) or not 0 < info.st_size <= MAX_ENGINE_BYTES:
+                raise OSError
+            if not info.st_mode & 0o111:
+                raise EngineInputError("Allow execution on the extracted Mihomo file, then select it again.")
+            digest = hashlib.sha256()
+            remaining = info.st_size
+            while remaining:
+                if cancel is not None and cancel.is_set():
+                    raise DesktopError("Operation stopped.")
+                data = source.read(min(remaining, 1024 * 1024))
+                if not data:
+                    raise OSError
+                digest.update(data)
+                remaining -= len(data)
+            if source.read(1):
+                raise OSError
+            return digest.hexdigest()
+    except OSError:
+        raise EngineInputError("Choose a readable, extracted Mihomo executable, not a link or an archive.") from None
+
+
+def recognized_engine(path, cancel=None):
+    return (hmac.compare_digest(engine_digest(path, cancel), OFFICIAL_ENGINE_SHA256)
+            and platform.machine().lower() in ("x86_64", "amd64"))
 
 
 def read_profile(path):
@@ -278,10 +320,13 @@ class Session:
             raise DesktopError("Stop the current session first.")
         if mode not in MODES or not 1 <= node <= len(preview.nodes):
             raise DesktopError("Choose a node and routing mode first.")
-        if not re.fullmatch(r"[0-9a-fA-F]{64}", digest):
+        if not ENGINE_SHA256.fullmatch(digest):
             raise DesktopError("Enter the expected SHA-256 as 64 hexadecimal characters.")
         if not engine or not Path(engine).is_absolute():
             raise DesktopError("Choose a local Mihomo executable.")
+        if not hmac.compare_digest(engine_digest(engine, self.cancel), digest.lower()):
+            raise EngineInputError("Mihomo does not match the expected SHA-256. Extract a fresh copy or reselect a verified executable.")
+        # The runtime also verifies its own staged copy before it executes it.
         self.count = len(preview.nodes)
         try:
             with source_args(path, source, preview.digest) as (profile, _):

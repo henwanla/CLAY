@@ -1,6 +1,7 @@
 using System.Drawing.Drawing2D;
 using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Diagnostics;
 
 namespace Clay.Windows;
 
@@ -17,6 +18,8 @@ internal sealed class MainWindow : Form
     private readonly ComboBox node = Picker(), mode = Picker();
     private readonly Label profileLabel = Label(), engineLabel = Label(), ruleLabel = Label(), state = Label(), address = Label();
     private readonly TextBox digest = new() { Dock = DockStyle.Fill, MaxLength = 64, AccessibleName = "SHA-256" };
+    private readonly Label engineNote = Label(L("Extract the Windows amd64-compatible package and select the .exe.",
+        "解压 Windows amd64-compatible 包，再选择里面的 .exe。", "Windows amd64-compatible パッケージを展開して .exe を選んでください。"));
     private readonly Button openProfile = Button(L("Load nodes…", "加载节点…", "ノードを読み込む…"));
     private readonly Button subscriptions = Button(L("Subscriptions…", "订阅管理…", "購読の管理…"));
     private readonly Button openEngine = Button(L("Choose Mihomo…", "选择 Mihomo…", "Mihomo を選択…"));
@@ -85,9 +88,17 @@ internal sealed class MainWindow : Form
         inputs.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         inputs.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         inputs.Controls.Add(openProfile, 0, 0); inputs.Controls.Add(profileLabel, 1, 0); inputs.Controls.Add(subscriptions, 2, 0);
-        inputs.Controls.Add(openEngine, 0, 1); inputs.Controls.Add(engineLabel, 1, 1); inputs.SetColumnSpan(engineLabel, 2);
+        var official = new LinkLabel { Text = L("Official v1.19.34", "官方 v1.19.34", "公式 v1.19.34"), AutoSize = true };
+        official.LinkClicked += (_, _) =>
+        {
+            try { Process.Start(new ProcessStartInfo("https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.34") { UseShellExecute = true })?.Dispose(); }
+            catch { engineNote.Text = L("Could not open the release page. See the Windows README.", "无法打开发布页，请查看 Windows README。",
+                    "リリースページを開けませんでした。Windows README を確認してください。"); }
+        };
+        inputs.Controls.Add(openEngine, 0, 1); inputs.Controls.Add(engineLabel, 1, 1); inputs.Controls.Add(official, 2, 1);
         inputs.Controls.Add(Label("SHA-256"), 0, 2); inputs.Controls.Add(digest, 1, 2); inputs.SetColumnSpan(digest, 2);
-        inputs.Controls.Add(openRule, 0, 3); inputs.Controls.Add(ruleLabel, 1, 3); inputs.Controls.Add(Row(previewRule, clearRule), 2, 3);
+        inputs.Controls.Add(engineNote, 1, 3); inputs.SetColumnSpan(engineNote, 2);
+        inputs.Controls.Add(openRule, 0, 4); inputs.Controls.Add(ruleLabel, 1, 4); inputs.Controls.Add(Row(previewRule, clearRule), 2, 4);
         files.Controls.Add(inputs); layout.Controls.Add(files);
 
         var live = Group(L("Session", "当前会话", "セッション"));
@@ -110,7 +121,7 @@ internal sealed class MainWindow : Form
         SetState(Stopped());
         openProfile.Click += async (_, _) => await LoadAsync();
         subscriptions.Click += (_, _) => ManageSubscriptions();
-        openEngine.Click += (_, _) => { if (Choose("Mihomo (*.exe)|*.exe") is { } path) { engine = path; engineLabel.Text = Path.GetFileName(path); digest.Clear(); UpdateControls(); } };
+        openEngine.Click += async (_, _) => { if (Choose("Mihomo (*.exe)|*.exe") is { } path) await SelectEngineAsync(path); };
         openRule.Click += (_, _) => { if (Choose("Text files|*.txt;*.csv;*.list|All files|*.*") is { } path) { rules = path; ruleLabel.Text = Path.GetFileName(path); UpdateControls(); } };
         clearRule.Click += (_, _) => { rules = null; ruleLabel.Text = None(); UpdateControls(); };
         previewRule.Click += (_, _) => { if (rules is { } path) RulePreviewDialog.Show(this, cli, path); };
@@ -228,6 +239,28 @@ internal sealed class MainWindow : Form
         node.Items.AddRange(inspected.Nodes.ToArray()); node.SelectedIndex = 0;
     }
 
+    private async Task SelectEngineAsync(string path)
+    {
+        await WorkAsync(async () =>
+        {
+            engine = path;
+            engineLabel.Text = Path.GetFileName(path);
+            digest.ReadOnly = false;
+            digest.Clear();
+            engineNote.Text = L("Checking the selected executable…", "正在检查所选可执行文件…", "選択したファイルを確認中…");
+            if (await EngineIdentity.RecognizesAsync(path))
+            {
+                digest.ReadOnly = true;
+                digest.Text = EngineIdentity.OfficialSha256;
+                engineNote.Text = L("Official Mihomo v1.19.34 · Windows x64 · Verified", "官方 Mihomo v1.19.34 · Windows x64 · 已校验",
+                    "公式 Mihomo v1.19.34 · Windows x64 · 検証済み");
+            }
+            else engineNote.Text = L("For another build, enter the SHA-256 obtained from a trusted source.",
+                "如使用其他构建，请填写从可信来源取得的 SHA-256。", "別のビルドには信頼できる提供元の SHA-256 を入力してください。");
+            SetState(Stopped());
+        });
+    }
+
     private async Task StartAsync(bool connectWindows = false)
     {
         if (profile is null || engine is null || node.SelectedItem is not Node n || mode.SelectedItem is not Mode selected) return;
@@ -299,6 +332,21 @@ internal sealed class MainWindow : Form
         if (busy) return;
         busy = true; UpdateControls();
         try { await action(); }
+        catch (EngineMismatchException)
+        {
+            ResetVerifiedEngine();
+            engineNote.Text = L("Mihomo does not match the expected SHA-256. Extract a fresh copy or choose a verified executable.",
+                "Mihomo 的 SHA-256 与预期不符。请重新解压，或选择另一份已核验的可执行文件。",
+                "Mihomo の SHA-256 が一致しません。再展開するか、確認済みの実行ファイルを選んでください。");
+            SetState(engineNote.Text);
+        }
+        catch (EngineReadException)
+        {
+            ResetVerifiedEngine();
+            engineNote.Text = L("Choose a readable, extracted Mihomo .exe.", "请选择可读取的、已解压的 Mihomo .exe。",
+                "読み取り可能な展開済みの Mihomo .exe を選んでください。");
+            SetState(engineNote.Text);
+        }
         catch (ProfileChangedException) { SetState(L("Profile changed. Load nodes again.", "配置已变更，请重新加载节点。", "設定が変更されました。ノードを再読み込みしてください。")); }
         catch (PacRecoveryException) { systemNotice = RecoveryNeeded(); if (!Visible) Reveal(); }
         catch (SessionCleanupException) { ShowUnconfirmedCleanup(); }
@@ -321,6 +369,13 @@ internal sealed class MainWindow : Form
     }
 
     private void ShowUnconfirmedCleanup() => SetState(L("Session cleanup was not confirmed.", "未能确认会话已清理。", "セッションの後処理を確認できませんでした。"));
+
+    private void ResetVerifiedEngine()
+    {
+        if (!digest.ReadOnly) return;
+        digest.ReadOnly = false;
+        digest.Clear();
+    }
 
     private void SetConfirmed(Route route)
     {
@@ -348,7 +403,7 @@ internal sealed class MainWindow : Form
         var idle = !busy && session is null;
         openProfile.Enabled = subscriptions.Enabled = openEngine.Enabled = openRule.Enabled = digest.Enabled = idle;
         clearRule.Enabled = previewRule.Enabled = idle && rules is not null;
-        start.Enabled = idle && profile is not null && engine is not null && digest.Text.Trim().Length == 64;
+        start.Enabled = idle && profile is not null && engine is not null && EngineIdentity.HasFingerprint(digest.Text.Trim());
         var running = !busy && session is not null;
         node.Enabled = mode.Enabled = !busy && profile is not null;
         apply.Enabled = running; refresh.Enabled = stop.Enabled = trayStop.Enabled = running;

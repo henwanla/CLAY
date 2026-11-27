@@ -101,6 +101,8 @@ The [Windows x64 desktop preview](Platforms/Windows/README.md#download-for-windo
 
 Windows and Linux development builds add **Preview rules** before connecting. Check a local rules file or enter a domain, IP address, or URL to see its first match offline.
 
+Windows and Linux development builds also recognize the extracted upstream Mihomo v1.19.34 x64 compatible executable and fill in its expected SHA-256. Other builds still need manual verification.
+
 The [Android ARM64 offline preview](Platforms/Android/README.md) checks profiles and PAC rules in Simplified Chinese, English, and Japanese. The debug APK passed tests on an Android API 24 ARM64 emulator. It has no network permission or VPN support.
 
 The [Android local relay preview](Platforms/Android/README.md#本机代理预览--local-relay-preview) uses a separate app ID. Clients that accept authenticated HTTP or SOCKS5 proxies can connect manually over loopback. The app can switch nodes and Rule, Global, or Direct mode. Only clients configured with the manual proxy are affected.

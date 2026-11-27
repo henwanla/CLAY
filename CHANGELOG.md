@@ -12,6 +12,8 @@
 - The iOS Tunnel Lab can use an IPv4 or IPv6 TCP endpoint. Host loopback tests cover IPv6 forwarding and live VLESS node switching; signed device testing is still pending.
 - Windows 和 Linux 开发版可在连接前检查规则文件，输入域名、IP 或 URL 可离线预览命中的规则。
 - Windows and Linux development builds check local rule files and preview a domain, IP address, or URL offline before connecting.
+- Windows 和 Linux 开发版按文件内容识别指定的官方 Mihomo，自动填写预期 SHA-256；选错文件时会说明处理方式。
+- Windows and Linux development builds recognize the pinned upstream Mihomo by content and fill in its expected SHA-256. Errors explain how to correct the selection.
 
 ## 0.3.4 · 桌面预览 / Desktop preview
 

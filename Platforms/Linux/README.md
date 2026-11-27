@@ -70,6 +70,12 @@ Linux 桌面预览可以读取本地节点配置、启动通过 SHA-256 校验�
 
 **Plasma 6** 可按上面的命令构建 KConfig 辅助程序，再使用 **Connect Plasma**、**Apply to Plasma** 或 **Restore Plasma proxy**。CLAY 只临时改代理模式和脚本地址，原有手动代理字段和例外列表仍保留。需要应用支持读取 Plasma 代理设置，例如使用带 KDE 后端和 PAC 支持的 libproxy；部分已打开的应用可能需要重启。使用独立代理设置的应用可填手动地址。Plasma 5 和受管理或非标准配置不在本次预览范围。
 
+## Engine setup in development builds / 开发版内核准备
+
+Use **Official v1.19.34** in CLAY or open the [fixed upstream release](https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.34). From the official release, download **mihomo-linux-amd64-compatible-v1.19.34.gz**. Extract it, allow the executable to run (for example, `chmod u+x mihomo-linux-amd64-compatible-v1.19.34`), and select the extracted file. CLAY fills in the expected SHA-256 after the file matches its built-in fingerprint, regardless of the file name. For another build, supply the expected SHA-256 from a trusted source. After you select a different file, CLAY clears the previous value. Startup checks the digest again before running the private copy.
+
+可点 CLAY 里的「官方 v1.19.34」，或打开[上游固定版本](https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.34)。在官方发布页下载 **mihomo-linux-amd64-compatible-v1.19.34.gz**。解压后给可执行文件添加执行权限（如 `chmod u+x mihomo-linux-amd64-compatible-v1.19.34`），再选解压后的文件。 CLAY 按内容校验并自动填入预期 SHA-256，文件名不影响识别。选择其他版本需填写从可信来源核实的 SHA-256；换文件会清空旧值。启动前会再次校验要运行的私有副本。
+
 ## Offline rule preview / 离线规则预览
 
 In development builds, enable **Use rules file** while stopped, select a local file, then choose **Preview rules…**. Leave the target blank to verify the file or enter a domain, IP address, or full URL and click **Check**. The first matching rule wins. Match numbers count rules only; errors show the actual line in the file. The preview describes the selected file in Rule mode. Global and Direct ignore the file; system PAC can bypass the proxy for local requests before the engine sees them. CLAY never looks up the preview target, opens it, or saves it.

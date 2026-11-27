@@ -101,6 +101,8 @@ Linux 有可下载的 [Ubuntu 24.04 x86-64 GTK 桌面预览](Platforms/Linux/REA
 
 Windows 和 Linux 的开发版可在连接前点「预览规则」，离线检查规则文件，或查看指定域名、IP 或 URL 命中的规则。
 
+Windows 和 Linux 开发版还会识别已解压的官方 Mihomo v1.19.34 x64 compatible 构建，匹配后自动填入 SHA-256。其他版本仍需要手动核验。
+
 [Android ARM64 离线预览](Platforms/Android/README.md)可检查节点和 PAC 规则，支持简体中文、英文和日文。它没有联网权限，也不提供 VPN；调试 APK 已在 Android API 24 ARM64 模拟器验收。
 
 [Android 本机代理预览](Platforms/Android/README.md#本机代理预览--local-relay-preview)使用独立应用 ID。它可为支持认证 HTTP/SOCKS5 代理的应用提供手动回环接入、节点切换及规则／全局／直连。它只代理手动配置过的应用。

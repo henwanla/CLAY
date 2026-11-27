@@ -21,6 +21,17 @@
 3. 新建 `v<VERSION>` 标签，核对远端标签指向已验证的 `main` 提交。创建 GitHub 预发布草稿，上传三个包及各自的校验文件。回读草稿的资产清单与摘要，通过才公开；同时检查最终发布为不可变及旧发布仍在。变更已发资产时创建新版本。
 4. 写明系统和依赖：macOS 需 Apple Silicon，App 只有临时签名；Windows 需 .NET 10 Desktop Runtime 和 Swift 运行时，Linux 则无需安装 Swift；三个包均需单独准备已校验的 Mihomo。Windows 和 Linux 是未签名预览；Android 和 iOS 仅在其发行验收完成后单独发布。
 
+## Windows 与 Linux · 官方内核指纹
+
+开发版按**已解压可执行文件**的 SHA-256 识别固定版本。只支持表中两个 amd64-compatible 构建，不按文件名授权。校验记录来自 [MetaCubeX 官方 v1.19.34 Release](https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.34)。维护变更时，先核对官方 Release API 的压缩包 digest，再计算指定成员的摘要与检查架构，两者都要复验。
+
+| 官方资产 | 压缩包 SHA-256 | 解压后的 SHA-256 |
+| --- | --- | --- |
+| `mihomo-linux-amd64-compatible-v1.19.34.gz` | `2763f5b414527f7baf6dc57e3f82f3ab561eedf34bfd7c2f2cde1f7e592efe06` | `5b6644c487e5dffae86b0e0e9bb5cec445579a3a9d03977c09576fee2aeefc01` |
+| `mihomo-windows-amd64-compatible-v1.19.34.zip` → `mihomo-windows-amd64-compatible.exe` | `cd6738d4648cc1a5f48049a1343b697ab510889d648f045c5c780fc1ab443a79` | `5a0231811a80b27477ebdee15684b41946d01afbd2114534e9a4b256125ca147` |
+
+GitHub CI 用对应的官方压缩包复验识别，先验证压缩包，再解压到 runner 临时目录。此检查不执行下载的官方文件；会话启停使用项目内合成夹具。新启用的识别逻辑不把 Mihomo 或压缩包放进发布资产。
+
 ## 本机构建 macOS 公开包（无内核）
 
 ```sh

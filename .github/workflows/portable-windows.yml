@@ -95,6 +95,15 @@ jobs:
           $binary = Join-Path $buildDir 'clay-portable.exe'
           $fixture = Join-Path $env:RUNNER_TEMP 'clay-windows-fixture.exe'
           $desktop = Join-Path $env:RUNNER_TEMP 'clay-desktop-build'
+          $name = 'mihomo-windows-amd64-compatible-v1.19.34.zip'
+          $engineArchive = Join-Path $env:RUNNER_TEMP $name
+          $engineDirectory = Join-Path $env:RUNNER_TEMP 'clay-official-engine'
+          curl.exe --proto '=https' --proto-redir '=https' --fail --silent --show-error --location --retry 2 --max-time 90 --output $engineArchive "https://github.com/MetaCubeX/mihomo/releases/download/v1.19.34/$name"
+          if ($LASTEXITCODE -ne 0 -or (Get-FileHash -Algorithm SHA256 -LiteralPath $engineArchive).Hash -ne 'cd6738d4648cc1a5f48049a1343b697ab510889d648f045c5c780fc1ab443a79') {
+            throw 'Pinned Mihomo archive failed verification'
+          }
+          Expand-Archive -LiteralPath $engineArchive -DestinationPath $engineDirectory
+          $env:CLAY_OFFICIAL_ENGINE_FIXTURE = Join-Path $engineDirectory 'mihomo-windows-amd64-compatible.exe'
           dotnet build Platforms/Windows/Desktop/Clay.Windows.csproj -c Release -o $desktop
           if ($LASTEXITCODE -ne 0) { throw "Desktop build failed: $LASTEXITCODE" }
           dotnet (Join-Path $desktop 'Clay.Windows.dll') --smoke $binary $fixture

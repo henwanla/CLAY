@@ -38,6 +38,12 @@ Download the Windows x64 ZIP and its matching SHA-256 file from the [0.3.4 previ
 
 从 [0.3.4 预览版](https://github.com/henwanla/CLAY/releases/tag/v0.3.4) 下载 Windows x64 的 ZIP 和校验文件。用上述 PowerShell 命令核对 ZIP 的 SHA-256 后再解压，按 `START-HERE.txt` 试用。预览包未签名，需准备 .NET 10 Desktop Runtime、Swift 运行时和已核验的 Mihomo。
 
+## Engine setup in development builds / 开发版内核准备
+
+Use **Official v1.19.34** in CLAY or open the [fixed upstream release](https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.34). From the official release, download **mihomo-windows-amd64-compatible-v1.19.34.zip** and extract it. Select **mihomo-windows-amd64-compatible.exe** inside. CLAY fills in the expected SHA-256 after the file matches its built-in fingerprint, regardless of the file name. For another build, supply the expected SHA-256 from a trusted source. After you select a different file, CLAY clears the previous value. Startup checks the digest again before running the private copy.
+
+可点 CLAY 里的「官方 v1.19.34」，或打开[上游固定版本](https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.34)。在官方发布页下载 **mihomo-windows-amd64-compatible-v1.19.34.zip** 并解压，选择里面的 **mihomo-windows-amd64-compatible.exe**。 CLAY 按内容校验并自动填入预期 SHA-256，文件名不影响识别。选择其他版本需填写从可信来源核实的 SHA-256；换文件会清空旧值。启动前会再次校验要运行的私有副本。
+
 ## Offline rule preview / 离线规则预览
 
 In development builds, select a local rule file while stopped, then choose **Preview rules…**. Leave the target blank to verify the file or enter a domain, IP address, or full URL and click **Check**. The first matching rule wins. Match numbers count rules only; errors show the actual line in the file. The preview describes the selected file in Rule mode. Global and Direct ignore the file; system PAC can bypass the proxy for local requests before the engine sees them. CLAY never looks up the preview target, opens it, or saves it.

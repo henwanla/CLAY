@@ -81,6 +81,19 @@ internal static class Program
             Console.WriteLine("Windows desktop check: profile inspection passed");
             using var engine = File.OpenRead(fixture);
             var digest = Convert.ToHexString(await SHA256.HashDataAsync(engine));
+            if (Environment.GetEnvironmentVariable("CLAY_OFFICIAL_ENGINE_FIXTURE") is { } official)
+            {
+                if (!await EngineIdentity.RecognizesAsync(official) || await EngineIdentity.RecognizesAsync(fixture))
+                    throw new BridgeException("engine-recognition");
+                await EngineIdentity.VerifyAsync(official, EngineIdentity.OfficialSha256);
+                Console.WriteLine("Windows desktop check: pinned release recognized, custom executable not trusted automatically");
+            }
+            try
+            {
+                await using var incompatible = await PortableSession.StartAsync(cli, inspection, fixture, new string('0', 64), rule, "global", 1);
+                throw new BridgeException("accepted-wrong-engine-digest");
+            }
+            catch (EngineMismatchException) { }
             var localData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             var before = Directory.EnumerateDirectories(localData, "clay-win-*").ToHashSet(StringComparer.OrdinalIgnoreCase);
             string address;

@@ -78,7 +78,7 @@ if MODE == "control":
                     self.send_response(200)
                     self.send_header("Connection", "close")
                     self.end_headers()
-                    self.wfile.write(b'{"upTotal":17,"downTotal":23}\n')
+                    self.wfile.write(b'{"upTotal":17,"downTotal":23}' + bytes([10]))
                 else:
                     self.send(404)
 

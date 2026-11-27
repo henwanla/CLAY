@@ -48,9 +48,11 @@ patch -f -F 0 -p1 -i "$engine/tuic-v5-packet-close.patch"
 mkdir clay_packet_engine
 cp "$engine"/*.go clay_packet_engine/
 if [[ "$target" == host-test ]]; then
-  "$compiler" test -mod=readonly -tags with_gvisor -count=1 -timeout=30s -v ./clay_packet_engine
+  # Protocol round trips run in sequence. Give slower CI runners a suite
+  # budget separate from the short deadlines on individual test connections.
+  "$compiler" test -mod=readonly -tags with_gvisor -count=1 -timeout=120s -v ./clay_packet_engine
 elif [[ "$target" == host-race ]]; then
-  "$compiler" test -mod=readonly -tags with_gvisor -race -count=2 -timeout=90s -v \
+  "$compiler" test -mod=readonly -tags with_gvisor -race -count=2 -timeout=240s -v \
     -run '^(TestLab(IPv6)?SwitchClosesActiveTCP|TestLabSwitchClosesActiveUDP|TestLabTuicPacketLifetime|TestImportedProtocols)$/^(lab-live-(switch|udp)-across-protocols|203\.0\.113\.37|2001:db8::37)$' ./clay_packet_engine
 else
   "$compiler" build -mod=readonly -tags with_gvisor -trimpath -buildmode=c-archive \

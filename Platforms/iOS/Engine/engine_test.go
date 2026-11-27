@@ -233,7 +233,11 @@ func fetchTarget(t *testing.T, peer *stack.Stack, ctx context.Context, target ne
 		t.Fatalf("dial synthetic TCP target port %d: %v", target.Port(), err)
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+	// This peer has completed its in-memory TCP handshake. A successful
+	// response may still need an upstream TLS handshake and relay writes,
+	// both of which take longer on the CI race-detector runner. The marker
+	// is a routing assertion, not a performance budget.
+	_ = conn.SetDeadline(time.Now().Add(syntheticTCPReplyBudget))
 	if _, err := io.WriteString(conn, "synthetic-packet"); err != nil {
 		t.Fatal(err)
 	}

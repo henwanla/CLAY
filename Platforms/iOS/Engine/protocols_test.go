@@ -32,6 +32,8 @@ var demoEndpoint = netip.MustParseAddrPort("198.51.100.42:18080")
 var tcpTarget = demoEndpoint.Addr().As4()
 var udpTarget = netip.MustParseAddr("198.51.100.53")
 
+const syntheticTCPReplyBudget = 8 * time.Second
+
 // These authenticated upstream listeners never dial any target. They answer
 // only the fixed test payloads at the two reserved addresses.
 type protocolEcho struct {
@@ -46,7 +48,7 @@ func (e *protocolEcho) HandleTCPConn(conn net.Conn, target *C.Metadata) {
 	if target.DstIP.Unmap() != netip.AddrFrom4(tcpTarget) || target.DstPort != 18080 || target.Host != "" {
 		return
 	}
-	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(syntheticTCPReplyBudget))
 	payload := make([]byte, len("synthetic-packet"))
 	if _, err := io.ReadFull(conn, payload); err == nil && string(payload) == "synthetic-packet" {
 		_, _ = io.WriteString(conn, e.label)

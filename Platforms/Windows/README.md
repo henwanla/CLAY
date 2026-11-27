@@ -50,6 +50,12 @@ In development builds, select a local rule file while stopped, then choose **Pre
 
 开发版在会话停止时选好本地规则文件，点「预览规则…」。留空可检查文件，填入域名、IP 或完整 URL 后可以看命中的第一条规则。命中编号跳过注释及空行，语法错误显示实际文件行号。结果对应规则模式；全局和直连模式不使用该文件，系统 PAC 也可能先让本地请求直连。CLAY 不查询、不打开，也不保存测试地址。
 
+## Session traffic / 会话流量
+
+While the window is visible and the session is confirmed, CLAY samples the local core about every two seconds. It shows session totals and estimates upload and download rates from the latest pair of readings. Traffic that bypasses the core does not count. Minimizing or hiding the window pauses sampling; the proxy keeps running.
+
+窗口可见且会话已确认时，CLAY 约每两秒读取一次本机内核的累计流量，用相邻两次读数估算上传和下载速率。绕过内核的请求不计入。最小化或收进托盘后停止采样，代理继续运行。
+
 ## Subscriptions / 订阅管理
 
 With the proxy stopped, open **Subscriptions…**, enter a name and HTTPS address, and choose **Download and save**. Pick a saved feed and choose **Use saved nodes** to load its cache for the next session. Refresh only replaces the saved copy; use the refreshed nodes explicitly to switch snapshots. A failed download or import leaves the last working cache available. **Load nodes…** switches back to a local profile. Removing the current feed also clears its selected snapshot.

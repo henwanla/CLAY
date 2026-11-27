@@ -82,6 +82,12 @@ In development builds, enable **Use rules file** while stopped, select a local f
 
 开发版在会话停止时勾选 **Use rules file**，选好文件后点 **Preview rules…**。留空可检查文件，填入域名、IP 或完整 URL 后可以看命中的第一条规则。命中编号跳过注释及空行，语法错误显示实际文件行号。结果对应规则模式；全局和直连模式不使用该文件，系统 PAC 也可能先让本地请求直连。CLAY 不查询、不打开，也不保存测试地址。
 
+## Session traffic / 会话流量
+
+While the window is visible and the session is confirmed, CLAY samples the local core about every two seconds. It shows session totals and estimates rates from the latest pair of readings. Traffic that bypasses the core does not count. Minimizing or hiding the window pauses sampling; the proxy keeps running. Readings stay in memory.
+
+窗口可见且会话已确认时，CLAY 约每两秒读取一次本机内核的累计流量，用相邻两次读数估算速率。绕过内核的请求不计入。最小化或收进托盘后停止采样，代理继续运行。读数只留在内存中。
+
 ## Synthetic checks / 测试
 
 The adapter check works on macOS or Linux. Ubuntu’s GTK check uses the real Linux CLI, a synthetic engine, private dconf storage, and a tray watcher and Secret Service on a private session bus. It verifies exported menu actions, independent system settings readback, restart recovery, background cleanup, and a cached subscription session. The download fixture makes no external requests.

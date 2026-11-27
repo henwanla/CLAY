@@ -53,7 +53,10 @@ internal sealed class MainWindow : Form
     private string? systemNotice;
     private Route? confirmed;
     private bool busy, exiting, exitDetected;
-    private int clockTicks;
+    private int clockTicks, trafficGeneration;
+    private bool trafficVisible;
+    private Task<Traffic?>? trafficRequest;
+    private (Traffic Totals, long Timestamp)? previousTraffic;
 
     internal MainWindow(string cli)
     {
@@ -132,13 +135,7 @@ internal sealed class MainWindow : Form
         start.Click += async (_, _) => await StartAsync();
         system.Click += async (_, _) => await ToggleWindowsAsync();
         apply.Click += async (_, _) => { if (node.SelectedItem is Node n && mode.SelectedItem is Mode m) await ChangeAsync(new(m.Value, n.Number)); };
-        refresh.Click += async (_, _) => await WorkAsync(async () =>
-        {
-            var active = session!;
-            SetConfirmed(await active.RefreshAsync());
-            traffic.Text = L("Reading local traffic counters…", "正在读取本机流量…", "ローカルの通信量を取得中…");
-            ShowTraffic(await active.SampleTrafficAsync());
-        });
+        refresh.Click += async (_, _) => await WorkAsync(async () => SetConfirmed(await session!.RefreshAsync()));
         stop.Click += async (_, _) => await WorkAsync(StopAsync);
         copy.Click += (_, _) => { if (session is not null && confirmed is not null) { try { Clipboard.SetText(session.Address); } catch (ExternalException) { } } };
 
@@ -170,8 +167,14 @@ internal sealed class MainWindow : Form
                 await StopAsync();
                 SetState(L("Proxy process ended", "代理进程已结束", "プロキシプロセスが終了しました"));
             });
-            else if (++clockTicks % 4 == 0 && windowsPac?.Pending == true) UpdateWindowsControls();
+            else if (++clockTicks % 4 == 0)
+            {
+                if (windowsPac?.Pending == true) UpdateWindowsControls();
+                await PollTrafficAsync();
+            }
         };
+        VisibleChanged += (_, _) => UpdateTrafficVisibility();
+        Resize += (_, _) => UpdateTrafficVisibility();
         heartbeat.Start();
         FormClosing += (_, e) =>
         {
@@ -339,8 +342,23 @@ internal sealed class MainWindow : Form
     private async Task WorkAsync(Func<Task> action)
     {
         if (busy) return;
-        busy = true; UpdateControls();
-        try { await action(); }
+        busy = true;
+        ResetTraffic();
+        UpdateControls();
+        try
+        {
+            // Let any in-flight read finish before issuing commands or closing the pipe.
+            if (trafficRequest is { } read)
+            {
+                try { await read; }
+                catch (Exception error) when (TrafficPipeFailed(error))
+                {
+                    await CloseUnresponsiveSessionAsync();
+                    return;
+                }
+            }
+            await action();
+        }
         catch (EngineMismatchException)
         {
             ResetVerifiedEngine();
@@ -394,8 +412,6 @@ internal sealed class MainWindow : Form
         mode.SelectedItem = selected;
         state.Text = L("Local proxy ready", "本机代理已就绪", "ローカルプロキシを利用できます");
         address.Text = session!.Address;
-        if (traffic.Text.Length == 0) traffic.Text = L("Refresh status to see session traffic.",
-            "点「刷新状态」查看本次会话流量。", "「状態を更新」で今回の通信量を確認できます。");
         trayStatus.Text = $"{selected.Caption} · #{route.Node}";
         tray.Text = $"CLAY · {trayStatus.Text}";
         tray.Icon = liveIcon;
@@ -403,23 +419,82 @@ internal sealed class MainWindow : Form
 
     private void SetState(string message)
     {
-        confirmed = null; state.Text = message; address.Text = ""; traffic.Text = "";
+        confirmed = null; state.Text = message; address.Text = "";
+        ResetTraffic();
         trayStatus.Text = session is null ? Stopped() : L("Status unconfirmed", "状态未确认", "状態未確認");
         tray.Text = $"CLAY · {trayStatus.Text}";
         tray.Icon = session is null ? idleIcon : uncertainIcon;
     }
 
-    private void ShowTraffic(Traffic? sample)
+    private void UpdateTrafficVisibility()
     {
-        traffic.Text = sample switch
+        bool shown = Visible && WindowState != FormWindowState.Minimized;
+        if (shown == trafficVisible) return;
+        trafficVisible = shown;
+        ResetTraffic();
+    }
+
+    private void ResetTraffic()
+    {
+        trafficGeneration++;
+        previousTraffic = null;
+        traffic.Text = "";
+    }
+
+    private bool CanReadTraffic => !busy && !exiting && trafficVisible && confirmed is not null && session is { Ended: false };
+    private static bool TrafficPipeFailed(Exception error) => error is IOException or OperationCanceledException or InvalidOperationException;
+
+    private async Task CloseUnresponsiveSessionAsync()
+    {
+        string message = L("The local session stopped responding. Start it again.", "本机会话无响应，请重新启动代理。",
+            "ローカル接続が応答しません。再度開始してください。");
+        SetState(message);
+        await StopAsync();
+        SetState(message);
+    }
+
+    private async Task PollTrafficAsync()
+    {
+        if (!CanReadTraffic || trafficRequest is not null || session is not { } active) return;
+        int generation = trafficGeneration;
+        var read = trafficRequest = active.SampleTrafficAsync();
+        bool failed = false;
+        try
         {
-            null => L("Traffic counters unavailable. You can refresh again.", "暂时读不到流量，可以再次刷新。", "通信量を取得できません。もう一度更新できます。"),
-            { Upload: 0, Download: 0 } => L("No traffic counted yet. Try an app that uses this proxy, then refresh.",
-                "还没有流量。请在使用此代理的应用中发起请求后刷新。", "まだ通信量がありません。このプロキシを使用するアプリで通信してから更新してください。"),
-            { } totals => L($"Session traffic at last refresh · Up {totals.Upload:N0} B · Down {totals.Download:N0} B",
-                $"上次刷新时的会话流量 · 上传 {totals.Upload:N0} B · 下载 {totals.Download:N0} B",
-                $"前回更新時のセッション通信量 · 送信 {totals.Upload:N0} B · 受信 {totals.Download:N0} B")
-        };
+            var sample = await read;
+            if (CanReadTraffic && ReferenceEquals(active, session) && generation == trafficGeneration)
+                ShowTraffic(sample, Stopwatch.GetTimestamp());
+        }
+        catch (Exception error) when (TrafficPipeFailed(error)) { failed = true; }
+        finally { trafficRequest = null; }
+        // An explicit operation owns recovery if it was already waiting for the read.
+        if (failed && !busy && !exiting && ReferenceEquals(active, session))
+            await WorkAsync(CloseUnresponsiveSessionAsync);
+    }
+
+    private void ShowTraffic(Traffic? sample, long now)
+    {
+        var before = previousTraffic;
+        previousTraffic = sample is null ? null : (sample, now);
+        if (sample is null)
+        {
+            traffic.Text = L("Traffic counters are temporarily unavailable.", "暂时读不到流量。", "通信量を一時的に取得できません。");
+            return;
+        }
+        string totals = L($"Session total · Up {sample.Upload:N0} B · Down {sample.Download:N0} B",
+            $"本次会话累计 · 上传 {sample.Upload:N0} B · 下载 {sample.Download:N0} B",
+            $"今回の通信量 · 送信 {sample.Upload:N0} B · 受信 {sample.Download:N0} B");
+        if (before is not { } last || sample.Upload < last.Totals.Upload || sample.Download < last.Totals.Download ||
+            now <= last.Timestamp)
+        {
+            traffic.Text = totals;
+            return;
+        }
+        double seconds = Stopwatch.GetElapsedTime(last.Timestamp, now).TotalSeconds;
+        double up = (sample.Upload - last.Totals.Upload) / seconds;
+        double down = (sample.Download - last.Totals.Download) / seconds;
+        traffic.Text = totals + Environment.NewLine + L($"Rate · Up {up:N0} B/s · Down {down:N0} B/s",
+            $"速率 · 上传 {up:N0} B/s · 下载 {down:N0} B/s", $"速度 · 送信 {up:N0} B/s · 受信 {down:N0} B/s");
     }
 
     private void UpdateControls()

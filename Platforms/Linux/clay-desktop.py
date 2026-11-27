@@ -5,11 +5,13 @@ import argparse
 from pathlib import Path
 import signal
 import threading
+import time
 
 import gi
 
 gi.require_version("Gtk", "3.0")
-from gi.repository import GLib, Gtk, Pango
+gi.require_version("Gdk", "3.0")
+from gi.repository import Gdk, GLib, Gtk, Pango
 
 from desktop_pac import ReleaseError
 from gnome_pac import GnomePac
@@ -30,6 +32,10 @@ class Window(Gtk.Window):
         self.set_border_width(20)
         self.cancel = threading.Event()
         self.session = Session(binary, self.cancel, before_stop=self.restore_before_stop)
+        self.command_lock = threading.Lock()
+        self.traffic_pending = False
+        self.traffic_generation = 0
+        self.previous_traffic = None
         self.pac_notice = None
         self.system_confirmed = False
         self.system_probe_pending = False
@@ -147,6 +153,8 @@ class Window(Gtk.Window):
         self.tray = create_tray(self)
         self.tray_availability_changed(False)
         self.connect("delete-event", self.close_window)
+        self.connect("unmap", self.reset_traffic)
+        self.connect("window-state-event", self.traffic_window_state)
         self.poll_source = GLib.timeout_add(400, self.watch_child)
         self.connect("destroy", self.window_destroyed)
         self.sync_controls()
@@ -273,10 +281,10 @@ class Window(Gtk.Window):
         self.busy = True
         self.system_generation += 1
         self.cancel.clear()
+        self.reset_traffic()
         if not system_only:
             self.status.set_text(message)
             self.address.set_text("")
-            self.traffic.set_text("")
         self.sync_controls()
         if system_only:
             self.system_status.set_text(message)
@@ -284,7 +292,8 @@ class Window(Gtk.Window):
         def run():
             result, message, recovery, invalid_engine = None, None, False, False
             try:
-                result = action()
+                with self.command_lock:
+                    result = action()
             except ReleaseError as error:
                 message, recovery = str(error), True
             except EngineInputError as error:
@@ -500,29 +509,82 @@ class Window(Gtk.Window):
 
     def refresh_session(self, *_):
         if self.refresh.get_sensitive():
-            def sample():
-                return self.session.refresh(), self.session.sample_traffic()
+            self.task("Checking the session…", self.session.refresh, self.display_state)
 
-            def display(result):
-                state, counts = result
-                self.display_state(state)
-                if counts is None:
-                    message = "Traffic counters unavailable. You can refresh again."
-                elif counts == (0, 0):
-                    message = "No traffic counted yet. Try an app that uses this proxy, then refresh."
-                else:
-                    up, down = counts
-                    message = f"Session traffic at last refresh · Up {up:,} B · Down {down:,} B"
-                self.traffic.set_text(message)
+    def reset_traffic(self, *_):
+        self.traffic_generation += 1
+        self.previous_traffic = None
+        self.traffic.set_text("")
 
-            self.task("Checking the session and reading local traffic counters…", sample, display)
+    def traffic_window_state(self, _, event):
+        if event.changed_mask & Gdk.WindowState.ICONIFIED:
+            self.reset_traffic()
+        return False
+
+    def traffic_visible(self):
+        surface = self.get_window()
+        return self.get_mapped() and surface is not None and not (surface.get_state() & Gdk.WindowState.ICONIFIED)
+
+    def poll_traffic(self, child):
+        if (child is None or self.session.state is None or self.closing or
+                self.traffic_pending or not self.traffic_visible()):
+            return
+        generation = self.traffic_generation
+        self.traffic_pending = True
+
+        def read():
+            counts, error, recovery = None, None, False
+            try:
+                with self.command_lock:
+                    # An explicit operation can take priority if this worker hasn't started the read.
+                    if generation == self.traffic_generation and self.session.process is child:
+                        counts = self.session.sample_traffic()
+            except ReleaseError as failure:
+                error, recovery = str(failure), True
+            except Exception:
+                error = "The local session stopped responding. Refresh or start it again."
+            GLib.idle_add(finish, counts, time.monotonic(), error, recovery)
+
+        def finish(counts, now, error, recovery):
+            self.traffic_pending = False
+            if self.destroyed or self.busy:
+                return GLib.SOURCE_REMOVE
+            if error is not None and self.session.state is None:
+                # The bridge may have closed a failed session or left its PAC up for recovery.
+                self.reset_traffic()
+                self.address.set_text("")
+                self.status.set_text(error)
+                if recovery:
+                    self.pac_notice = error
+                    self.show_window()
+                self.sync_controls()
+            elif (self.session.process is child and self.session.state is not None and
+                  generation == self.traffic_generation and self.traffic_visible()):
+                self.display_traffic(counts, now)
+            return GLib.SOURCE_REMOVE
+
+        threading.Thread(target=read, daemon=True).start()
+
+    def display_traffic(self, counts, now):
+        previous = self.previous_traffic
+        self.previous_traffic = (counts, now) if counts is not None else None
+        if counts is None:
+            self.traffic.set_text("Traffic counters are temporarily unavailable.")
+            return
+        up, down = counts
+        message = f"Session total · Up {up:,} B · Down {down:,} B"
+        if previous is not None:
+            (old_up, old_down), then = previous
+            seconds = now - then
+            if seconds > 0 and up >= old_up and down >= old_down:
+                message += f"\nRate · Up {(up - old_up) / seconds:,.0f} B/s · Down {(down - old_down) / seconds:,.0f} B/s"
+        self.traffic.set_text(message)
 
     def display_state(self, state):
         self.nodes.set_active_id(str(state.node))
         self.modes.set_active_id(state.mode)
         self.status.set_text(f"Local proxy ready · {state.mode.title()} mode · Node {state.node}")
         self.address.set_text(f"127.0.0.1:{state.port}")
-        self.traffic.set_text("Refresh status to see session traffic.")
 
     def watch_child(self):
         child = self.session.process
@@ -533,10 +595,12 @@ class Window(Gtk.Window):
                 self.show_window()
 
             self.task("Closing the local session…", self.session.stop, ended)
-        elif not self.busy and self.pac is not None and self.pac.pending:
+        elif not self.busy:
             self.poll_ticks += 1
             if self.poll_ticks % 5 == 0:
-                self.probe_system()
+                if self.pac is not None and self.pac.pending:
+                    self.probe_system()
+                self.poll_traffic(child)
         return GLib.SOURCE_CONTINUE
 
     def request_stop(self):

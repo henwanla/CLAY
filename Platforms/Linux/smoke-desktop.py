@@ -294,6 +294,25 @@ def window_checks(binary, directory, profile, gnome=False, plasma=False):
     destroyed = threading.Event()
     window.connect("destroy", lambda *_: destroyed.set())
     window.show_all()
+    meter_reads = 0
+    hold_meter = threading.Event()
+    meter_started = threading.Event()
+    release_meter = threading.Event()
+    skip_meter = threading.Event()
+    read_traffic = window.session.sample_traffic
+
+    def sample_traffic():
+        nonlocal meter_reads
+        meter_reads += 1
+        if hold_meter.is_set():
+            meter_started.set()
+            if not release_meter.wait(6):
+                raise AssertionError("Timed out waiting to finish the synthetic meter read")
+        if skip_meter.is_set():
+            return None
+        return read_traffic()
+
+    window.session.sample_traffic = sample_traffic
 
     def until(condition, seconds=24):
         context = GLib.MainContext.default()
@@ -371,17 +390,27 @@ def window_checks(binary, directory, profile, gnome=False, plasma=False):
         directory_name, pid, proxy, _ = json.loads(report.read_text(encoding="utf-8"))
         assert window.address.get_text() == f"127.0.0.1:{proxy}"
         assert window.nodes.get_active_id() == "2" and "Global mode" in window.status.get_text()
-        click(window.refresh)
-        assert window.traffic.get_text() == "Session traffic at last refresh · Up 17 B · Down 23 B"
+        # The meter updates without pressing Refresh and never disables routing controls.
+        totals = "Session total · Up 17 B · Down 23 B"
+        until(lambda: window.traffic.get_text() == totals, seconds=6)
+        until(lambda: window.traffic.get_text() == totals + "\nRate · Up 0 B/s · Down 0 B/s", seconds=6)
+        hold_meter.set()
         if gnome:
             assert gsettings("get", "mode") == "'manual'"
             assert gsettings("get", "autoconfig-url") == repr(old_url)
 
         host.set_present(True)
-        until(lambda: window.tray.available)
+        until(lambda: window.tray.available and meter_started.is_set(), seconds=6)
+        assert window.set_node.get_sensitive() and window.set_mode.get_sensitive()
         window.close()
         until(lambda: not window.get_visible())
         assert not destroyed.is_set() and Path(f"/proc/{pid}").exists()
+        release_meter.set()
+        until(lambda: not window.traffic_pending)
+        reads_at_hide = meter_reads
+        hidden_until = time.monotonic() + 2.2
+        until(lambda: time.monotonic() >= hidden_until, seconds=4)
+        assert not window.traffic.get_text() and meter_reads == reads_at_hide
 
         layout = host.layout(until)
         assert "Global · Node 2" in layout and "Open CLAY" in layout
@@ -443,8 +472,14 @@ def window_checks(binary, directory, profile, gnome=False, plasma=False):
         if plasma:
             assert window.pac.confirmed() and window.pac.server.url == url
 
+        skip_meter.set()
         host.click(until, "Open CLAY")
         until(window.get_visible)
+        until(lambda: window.traffic.get_text() == "Traffic counters are temporarily unavailable.", seconds=6)
+        assert window.session.state == State("direct", 1, proxy) and window.address.get_text()
+        skip_meter.clear()
+        until(lambda: window.traffic.get_text() == totals, seconds=6)
+        print("PASS GTK live traffic: automatic totals and rate, hidden sampling paused, late and missing samples discarded")
         window.close()
         until(lambda: not window.get_visible())
         host.set_present(False)

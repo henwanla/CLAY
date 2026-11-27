@@ -81,10 +81,11 @@ def adapter_checks(binary, directory, profile):
     fixture = directory / "synthetic-cli"
     fixture.write_text(f"#!{sys.executable}\n" + ADAPTER_CLI, encoding="utf-8")
     fixture.chmod(0o700)
+    fingerprint = hashlib.sha256(fixture.read_bytes()).hexdigest()
     session = Session(fixture, threading.Event())
 
     def launch(mode="global"):
-        return session.start(profile, preview, 2, fixture, "0" * 64, mode)
+        return session.start(profile, preview, 2, fixture, fingerprint, mode)
 
     profile.write_text(PROFILE.replace("#second", "#edited"), encoding="utf-8")
     expect_error(launch, "profile file changed")

@@ -35,45 +35,11 @@ jobs:
         run: .build/release/CLAYCoreChecks --pac-fixture
       - name: Check subscription downloads
         run: python3 scripts/smoke-subscriptions.py .build/release/CLAYCoreChecks
-      - name: Check live routing, PAC recovery and subscription storage
-        shell: bash
-        run: |
-          set -euo pipefail
-          scratch="$(mktemp -d)"
-          trap 'rm -r "$scratch"' EXIT
-          curl --proto '=https' --fail --silent --show-error --location --retry 3 --max-time 90 \
-            -o "$scratch/mihomo.gz" https://github.com/MetaCubeX/mihomo/releases/download/v1.19.34/mihomo-darwin-arm64-v1.19.34.gz
-          cd "$scratch"
-          printf '%s\n' '1a7a20eca63fbbaec90137717465bfde488d0db2a3a79b8fadebf9b2545b6e4c  mihomo.gz' | shasum -a 256 -c
-          gzip -dc mihomo.gz > mihomo
-          printf '%s\n' 'a55a9073f9b7b1fa596a82c034d2dae3407ec34732102b6e42c5513ce3033f34  mihomo' | shasum -a 256 -c
-          chmod 700 mihomo
-          cd "$GITHUB_WORKSPACE"
-          bash scripts/smoke-workspace.sh "$scratch/mihomo"
       - name: Build and verify the public Apple Silicon package
         shell: bash
         run: |
-          set -euo pipefail
           bash scripts/package-macos.sh --public
-          version="$(cat VERSION)"
-          archive="CLAY-$version-macos-arm64.zip"
-          (cd dist/release && shasum -a 256 -c "$archive.sha256")
-          scratch="$(mktemp -d)"
-          trap 'rm -r "$scratch"' EXIT
-          /usr/bin/ditto -x -k "dist/release/$archive" "$scratch"
-          app="$scratch/CLAY.app"
-          /usr/bin/codesign --verify --strict "$app"
-          [[ "$(/usr/bin/lipo -archs "$app/Contents/MacOS/CLAY")" == arm64 ]]
-          [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" == "$version" ]]
-          [[ "$(/usr/libexec/PlistBuddy -c 'Print :CLAYUseAdjacentMihomo' "$app/Contents/Info.plist")" == false ]]
-          [[ -z "$(find "$scratch" \( -iname '*mihomo*' -o -iname '*xray*' \) -print -quit)" ]]
-          for notice in CLAY Yams libyaml; do
-            test -s "$app/Contents/Resources/LICENSE-$notice.txt"
-          done
-          geo="$app/Contents/Resources/GeoIP"
-          test -s "$geo/LICENSE.txt" && test -s "$geo/README.md"
-          (cd "$geo" && printf '%s\n' 'd217d3e3f8b1b5c3a981dc912ec786360a33bcdc397ac1187b8e3ab1b54803ce  cn.dat' | shasum -a 256 -c)
-          python3 scripts/strip-screenshot-metadata.py --check "$scratch"/docs/screenshots/*.png
+          bash scripts/verify-macos-package.sh
       - name: Upload the verified macOS preview
         if: github.event_name == 'push'
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0

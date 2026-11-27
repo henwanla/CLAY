@@ -1,5 +1,10 @@
 # 更新记录 / Changelog
 
+## 0.3.7 · 桌面预览 / Desktop preview
+
+- macOS 公开安装包内置固定版本的 Mihomo。首次安装默认使用随附内核，无需手动下载或选择；发行 ZIP 同时提供独立的许可证和固定提交的源码。
+- The public macOS package bundles a pinned Mihomo executable and selects it on a fresh install. The ZIP includes the separate license and pinned upstream source.
+
 ## 0.3.6 · 桌面预览 / Desktop preview
 
 - macOS 将单节点和批量测速放进节点页。批量测试异步更新、支持取消和按延时排序，可手动编组并在组内自动测速与切换。

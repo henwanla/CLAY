@@ -2,7 +2,7 @@
 
 [简体中文](README.md) · [Changelog](CHANGELOG.md) · [GitHub Releases](https://github.com/henwanla/CLAY/releases)
 
-CLAY is a native macOS proxy app with subscriptions, menu bar controls, PAC routing, live traffic, and a connection inspector. The [0.3.6 desktop preview](https://github.com/henwanla/CLAY/releases) has downloads for Apple Silicon with macOS 13 or later, Windows x64, and Ubuntu 24.04 x86-64. See the platform notes below for mobile previews and their test coverage.
+CLAY is a native macOS proxy app with subscriptions, menu bar controls, PAC routing, live traffic, and a connection inspector. The [0.3.7 desktop preview](https://github.com/henwanla/CLAY/releases) has downloads for Apple Silicon with macOS 13 or later, Windows x64, and Ubuntu 24.04 x86-64. See the platform notes below for mobile previews and their test coverage.
 
 ## Screenshots
 
@@ -30,13 +30,12 @@ The Nodes view shows scoped latency tests, sorting, and automatic switching. The
 
 ## Getting started
 
-1. **Local preview (build 4 and later):** Open `CLAY.app`. If you have not selected another core, CLAY uses the bundled Mihomo with a pinned fingerprint. To use a different trusted core, choose it in Settings (**设置**). Verify the source and select it again after replacing or upgrading an external core.
-2. **GitHub release:** Download `CLAY-0.3.6-macos-arm64.zip` and the matching `.zip.sha256`. In the download directory, run `shasum -a 256 -c CLAY-0.3.6-macos-arm64.zip.sha256` before extracting the ZIP. The public package requires you to install Mihomo separately, as shown below. The app has an ad hoc signature and has no Developer ID signature or notarization. If macOS blocks the package, you can build it from source under your usual security policy.
-3. Under Subscriptions (**订阅**), select Add subscription (**添加订阅…**) and enter your provider’s HTTPS link. Under Nodes (**节点**), you can also paste share links or import UTF-8 JSON, YAML, or text files.
-4. Choose a node and select Connect macOS (**连接 macOS**) from the main window or menu bar. CLAY starts the local proxy and sets up system PAC for the current primary network service or the service you choose in PAC Rules. For manual setup, use Start local proxy only (**仅启动本机代理**) and enter the HTTP/SOCKS5 address from Overview (**概览**) in the app. If you are still using 0.3.0, use Start (**启动**) and then Apply to macOS (**应用到 macOS**) under PAC Rules.
-5. Closing the window keeps CLAY and its proxy running. In new builds, the menu bar also lets you switch nodes and routing modes. Quit CLAY or press `⌘Q` to end the session. CLAY does not launch automatically at login.
+1. Download `CLAY-0.3.7-macos-arm64.zip` and its matching `.zip.sha256` from GitHub Releases. Run `shasum -a 256 -c CLAY-0.3.7-macos-arm64.zip.sha256` before extracting and opening `CLAY.app`. **Mihomo is bundled and selected by default.** The app has an ad hoc signature and is not notarized. If macOS blocks it, you can build from source.
+2. In Subscriptions (**订阅**), select Add subscription (**添加订阅…**) and enter your provider’s HTTPS link. You can also paste share links or import UTF-8 JSON, YAML, or text files under Nodes (**节点**).
+3. Choose a node and select Connect macOS (**连接 macOS**). CLAY starts the local proxy and sets up system PAC for the primary network; macOS may ask for permission. For manual setup, select Start local proxy only (**仅启动本机代理**) and enter the HTTP/SOCKS5 address from Overview (**概览**) in the app.
+4. Closing the window keeps the proxy running. Use the menu bar to switch nodes or routing modes, copy addresses, reopen the window, or start and stop the proxy. Quit CLAY or press `⌘Q` to end the session. CLAY does not launch automatically at login.
 
-In a local build with an included core, use **Settings → 使用随附 Mihomo** to switch back to that verified executable. If an external executable was replaced or moved, the app stays stopped and offers recovery in the window and menu bar. Connect again after choosing the core. The menu bar shows node numbers and protocols; match the number to the full name in the Nodes view.
+CLAY keeps any external core you previously selected. To switch back, use Settings (**设置**) → Use bundled Mihomo (**使用随附 Mihomo**). CLAY verifies the core’s SHA-256 before launch and stops if the executable has changed.
 
 ### macOS: node groups and routing
 
@@ -46,26 +45,6 @@ See the [issue review and test notes](docs/macOS-同行反馈与验收.md) for n
 - Automatic testing and switching checks the current scope every five minutes in Rule or Global mode. It switches when the current node fails or another is at least 25 ms and 20% faster. A failed round leaves the node in place. Manual selection resets the timer. Tests use the gstatic.com 204 endpoint; results are kept in memory.
 - In PAC Rules, choose a proxy group for Rule mode. Selecting a node within that group changes its exit. Mainland bypass matches .cn or compares an available destination IP with the bundled snapshot, without triggering an extra DNS lookup. The local/private address toggle controls LAN bypass. Reconnect to apply rule edits. Global uses the current node; Direct skips upstream proxies.
 - For Chrome, add it while it is running, select **始终走当前节点**, use Rule mode and the system proxy that follows the traffic mode, then reconnect. An application rule can only match a process the core can identify on a connection that reaches CLAY. A custom PAC may send a request direct before it reaches the core.
-
-### Install Mihomo for the public package
-
-From [Mihomo v1.19.34](https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.34), download `mihomo-darwin-arm64-v1.19.34.gz` from the official Assets list. Verify both the archive and the extracted executable:
-
-```sh
-(
-  set -eu
-  echo '1a7a20eca63fbbaec90137717465bfde488d0db2a3a79b8fadebf9b2545b6e4c  mihomo-darwin-arm64-v1.19.34.gz' | shasum -a 256 -c
-  mkdir -p "$HOME/.local/bin"
-  clay_candidate="$(mktemp "$HOME/.local/bin/.mihomo.XXXXXX")"
-  trap 'rm -f "$clay_candidate"' EXIT
-  gzip -dc mihomo-darwin-arm64-v1.19.34.gz > "$clay_candidate"
-  printf 'a55a9073f9b7b1fa596a82c034d2dae3407ec34732102b6e42c5513ce3033f34  %s\n' "$clay_candidate" | shasum -a 256 -c
-  chmod 755 "$clay_candidate"
-  mv -f "$clay_candidate" "$HOME/.local/bin/mihomo-v1.19.34"
-)
-```
-
-Stop if either hash differs. In Settings (**设置**) → Choose Mihomo (**选择 Mihomo…**), press `⌘⇧G`, enter `~/.local/bin`, and select `mihomo-v1.19.34`. Other trusted builds can be selected; the tested core is v1.19.34.
 
 ## Routing and app setup
 
@@ -137,4 +116,4 @@ The separate [Android VPN technical preview](Platforms/Android/README.md#vpn-技
 
 [Contributing](CONTRIBUTING.md) · [Verification record](docs/验收记录.md) · [Release process](docs/RELEASING.md) · [Security maintenance](docs/安全维护.md)
 
-Original CLAY code uses the [MIT License](LICENSE). Yams and libyaml have [separate upstream license notices](https://github.com/henwanla/CLAY/blob/main/Vendor/Yams/UPSTREAM.md). Mihomo is a standalone GPL dependency. The local preview keeps its license and pinned upstream source reference; the public ZIP does not redistribute it.
+Original CLAY code uses the [MIT License](LICENSE). Yams and libyaml have [separate upstream license notices](https://github.com/henwanla/CLAY/blob/main/Vendor/Yams/UPSTREAM.md). Mihomo is a standalone GPL dependency. The macOS ZIP includes Mihomo, its GPL license, and the pinned upstream source. Windows and Linux still require a separate core.

@@ -2,7 +2,7 @@
 
 [English](README.en.md) · [更新记录](CHANGELOG.md) · [GitHub Releases](https://github.com/henwanla/CLAY/releases)
 
-CLAY 是原生 macOS 代理客户端，把节点、订阅、菜单栏、PAC 分流和实时连接仪表放在同一个应用里。[0.3.6 桌面预览](https://github.com/henwanla/CLAY/releases)提供 Apple Silicon（macOS 13 起）、Windows x64 和 Ubuntu 24.04 x86-64 下载。移动端的预览和验证范围见文末。
+CLAY 是原生 macOS 代理客户端，把节点、订阅、菜单栏、PAC 分流和实时连接仪表放在同一个应用里。[0.3.7 桌面预览](https://github.com/henwanla/CLAY/releases)提供 Apple Silicon（macOS 13 起）、Windows x64 和 Ubuntu 24.04 x86-64 下载。移动端的预览和验证范围见文末。
 
 ## 界面截图
 
@@ -30,13 +30,12 @@ macOS「概览」中的流量走势、当前节点和模式切换。截图使用
 
 ## 安装与开始使用
 
-1. **本机预览包（构建号 4 起）**：打开 `CLAY.app`，未选择其他内核时，CLAY 会使用 App 内附带且已固定指纹的 Mihomo。可在「设置 → 选择 Mihomo…」选其他可信版本；升级或替换外部内核后请校验来源并重新选择。
-2. **GitHub 安装包**：下载 `CLAY-0.3.6-macos-arm64.zip` 和同名的 `.zip.sha256`。在下载目录执行 `shasum -a 256 -c CLAY-0.3.6-macos-arm64.zip.sha256`，校验通过后解压。公开包没有附带 Mihomo，请按下文安装并在「设置 → 选择 Mihomo…」中选中它。App 使用临时签名，未经过 Developer ID 签名和公证；如果系统禁止打开，可从源码构建，并遵守本机安全策略。
-3. 在「订阅」点「添加订阅…」，粘贴服务商提供的 HTTPS 地址；也可以从「节点」粘贴分享链接，或导入 UTF-8 的 JSON、YAML 和文本文件。
-4. 选择节点，在主窗口或菜单栏点「连接 macOS」。CLAY 会启动本机代理，再给当前主要网络服务（或你在「PAC 规则」中选定的服务）配置系统 PAC。只需要手动接入时，点「仅启动本机代理」并在应用里填写「概览」的 HTTP／SOCKS5 地址。仍在使用 0.3.0 时，需先点「启动」，再到「PAC 规则」点「应用到 macOS」。
-5. 关闭窗口后代理继续运行。新版的 macOS 菜单栏可直接切换节点和流量模式，也能复制地址、重新打开窗口或启停代理。「退出 CLAY」或 `⌘Q` 会结束会话；应用不会在登录 macOS 后自动启动。
+1. 在 GitHub Releases 下载 `CLAY-0.3.7-macos-arm64.zip` 和同名的 `.zip.sha256`。执行 `shasum -a 256 -c CLAY-0.3.7-macos-arm64.zip.sha256` 后解压并打开 `CLAY.app`。**包内已附带 Mihomo，无需另外下载或手动选择。** App 使用临时签名，未经过 Developer ID 签名和公证；如果系统禁止打开，可从源码构建。
+2. 在「订阅」点「添加订阅…」，粘贴服务商提供的 HTTPS 地址；也可以从「节点」粘贴分享链接，或导入 UTF-8 的 JSON、YAML 和文本文件。
+3. 选中节点后点「连接 macOS」。CLAY 会启动本机代理并为当前主要网络配置系统 PAC；macOS 可能要求授权修改代理设置。只想手动接入时，点「仅启动本机代理」，再在目标应用填写「概览」里的 HTTP／SOCKS5 地址。
+4. 关闭窗口后代理继续运行。可在菜单栏切换节点或模式、复制地址、重新打开窗口或启停代理。「退出 CLAY」或 `⌘Q` 会结束会话；应用不会在登录 macOS 后自动启动。
 
-自行构建的随附内核试用包可在「设置 → 使用随附 Mihomo」中切回已校验的内核。如果外部文件被替换或移动，连接会保持停止，窗口和菜单栏会显示恢复入口。选好内核后，再点「连接 macOS」。菜单栏只显示节点编号和协议；可在「节点」页用同一编号找到完整名称。
+如果之前设置过外部内核，CLAY 会保留你的选择。可在「设置 → 使用随附 Mihomo」切回包内版本。CLAY 启动内核前会核对其 SHA-256；若内核文件被替换，连接会保持停止。
 
 ### macOS：节点分组与路由
 
@@ -46,26 +45,6 @@ macOS「概览」中的流量走势、当前节点和模式切换。截图使用
 - 打开「自动测速与切换」后，CLAY 在规则或全局模式每 5 分钟检查当前范围。当前节点不可用，或最快节点至少快 25 ms 且快 20% 时才切换。全失败时保留原节点，手动选择后重新计时。测速请求指向 gstatic.com 的 204 地址，不记录历史到磁盘。
 - 在「PAC 规则 → 流量路由」可让规则模式的代理流量走指定组；在该组内选择节点可以更换它的出口。「绕开中国大陆」按 .cn 后缀及已知目的 IP 匹配随附的大陆网段，不额外为识别网段查询 DNS；「本地和私有地址直连」控制局域网。规则改动在重新连接后生效。全局继续使用当前节点，直连不经过上游。
 - 让 Chrome 通过当前节点：在「PAC 规则」添加运行中的 Chrome，去向选「始终走当前节点」，保持「规则」模式和系统代理「跟随流量模式」，重新连接。应用规则仅处理经过 CLAY 且内核能识别进程的连接，不接管绕过系统代理的连接。自定义 PAC 可以在请求到达内核前决定直连。
-
-### 为公开安装包准备 Mihomo
-
-从 [Mihomo v1.19.34 官方发布](https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.34) 的 Assets 下载 `mihomo-darwin-arm64-v1.19.34.gz`。在下载目录校验压缩文件，再解压到用户目录：
-
-```sh
-(
-  set -eu
-  echo '1a7a20eca63fbbaec90137717465bfde488d0db2a3a79b8fadebf9b2545b6e4c  mihomo-darwin-arm64-v1.19.34.gz' | shasum -a 256 -c
-  mkdir -p "$HOME/.local/bin"
-  clay_candidate="$(mktemp "$HOME/.local/bin/.mihomo.XXXXXX")"
-  trap 'rm -f "$clay_candidate"' EXIT
-  gzip -dc mihomo-darwin-arm64-v1.19.34.gz > "$clay_candidate"
-  printf 'a55a9073f9b7b1fa596a82c034d2dae3407ec34732102b6e42c5513ce3033f34  %s\n' "$clay_candidate" | shasum -a 256 -c
-  chmod 755 "$clay_candidate"
-  mv -f "$clay_candidate" "$HOME/.local/bin/mihomo-v1.19.34"
-)
-```
-
-任一步的摘要不一致就停止。选文件时可按 `⌘⇧G` 输入 `~/.local/bin`，再选 `mihomo-v1.19.34`。也可以选择已信任的其他 Mihomo 可执行文件，兼容性以 v1.19.34 的验证为基准。
 
 ## 流量模式和应用接入
 
@@ -137,4 +116,4 @@ Windows 和 Linux 会识别已解压的官方 Mihomo v1.19.34 x64 compatible 构
 
 [参与开发](CONTRIBUTING.md) · [架构调研](docs/架构调研.md) · [验收记录](docs/验收记录.md) · [打包及发布](docs/RELEASING.md) · [安全维护](docs/安全维护.md)
 
-CLAY 原创代码以 [MIT](https://github.com/henwanla/CLAY/blob/main/LICENSE) 许可发布。Yams 和 libyaml 各有 [上游许可证](https://github.com/henwanla/CLAY/blob/main/Vendor/Yams/UPSTREAM.md)。Mihomo 是按其 GPL 许可发布的独立依赖；本机预览包附有其许可证和固定版本的源码入口，公开 ZIP 不含该内核。
+CLAY 原创代码以 [MIT](https://github.com/henwanla/CLAY/blob/main/LICENSE) 许可发布。Yams 和 libyaml 各有 [上游许可证](https://github.com/henwanla/CLAY/blob/main/Vendor/Yams/UPSTREAM.md)。Mihomo 是按其 GPL 许可发布的独立依赖；macOS 公开 ZIP 内附 Mihomo、GPL 许可证及固定提交的源码。Windows 和 Linux 的包需单独准备内核。

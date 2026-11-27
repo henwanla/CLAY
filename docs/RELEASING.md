@@ -1,6 +1,6 @@
 # CLAY 打包与发布 / Release process
 
-桌面公开包面向 Apple Silicon、Windows x64 和 Ubuntu 24.04 x86-64，不分发 Mihomo。各包保留 CLAY 的 MIT 许可和 Yams/libyaml 的上游许可。macOS 包单独携带已固定校验的大陆 IP 快照及其归属和许可文件。本机 macOS 试用包可内置独立的 Mihomo，须保留 GPL 许可证和固定版本的源码入口。GitHub Release 不替代操作系统签名、公证或真实桌面验收。
+桌面公开包面向 Apple Silicon、Windows x64 和 Ubuntu 24.04 x86-64。各包保留 CLAY 的 MIT 许可和 Yams/libyaml 的上游许可。macOS 包携带已固定校验的大陆 IP 快照，以及独立的 Mihomo 可执行文件、GPL 许可证和固定提交的上游源码。Windows 与 Linux 需单独准备内核。GitHub Release 不替代操作系统签名、公证或真实桌面验收。
 
 ## 版本验证
 
@@ -17,9 +17,9 @@
 ## 桌面预发布 / Desktop prerelease
 
 1. 确认 `main` 的三个桌面工作流已对同一个待发布提交通过。下载这三个具体运行的 Actions 产物：**CLAY-macOS-arm64-preview**、**CLAY-Windows-x64-preview**、**CLAY-Linux-x64-preview**。每个只取包和同名 SHA-256 文件；核对版本和架构，Windows 与 Linux 另核对包内 `START-HERE.txt` 的提交。保留运行编号作为来源记录。
-2. 核对三个压缩包的 SHA-256、文件清单、许可和根目录结构。不得含 Mihomo、真实配置、日志、本机路径或凭据；macOS 增查解包后的签名及 Info.plist。发布 CI 实际验证的同一批文件。
+2. 核对三个压缩包的 SHA-256、文件清单、许可和根目录结构。不得含真实配置、日志、本机路径或凭据；Windows 和 Linux 不附 Mihomo。macOS 需检查解包后的签名、Info.plist、固定内核和源码摘要，并用包内内核运行回环检查。发布 CI 实际验证的同一批文件。
 3. 新建 `v<VERSION>` 标签，核对远端标签指向已验证的 `main` 提交。创建 GitHub 预发布草稿，上传三个包及各自的校验文件。回读草稿的资产清单与摘要，通过才公开；同时检查最终发布为不可变及旧发布仍在。变更已发资产时创建新版本。
-4. 写明系统和依赖：macOS 需 Apple Silicon，App 只有临时签名；Windows 需 .NET 10 Desktop Runtime 和 Swift 运行时，Linux 则无需安装 Swift；三个包均需单独准备已校验的 Mihomo。Windows 和 Linux 是未签名预览；Android 和 iOS 仅在其发行验收完成后单独发布。
+4. 写明系统和依赖：macOS 需 Apple Silicon，App 只有临时签名；Windows 需 .NET 10 Desktop Runtime 和 Swift 运行时，Linux 则无需安装 Swift；macOS 默认使用包内 Mihomo；Windows 与 Linux 需单独准备内核。Windows 和 Linux 是未签名预览；Android 和 iOS 仅在其发行验收完成后单独发布。
 
 ## Windows 与 Linux · 官方内核指纹
 
@@ -32,17 +32,14 @@
 
 GitHub CI 先验证官方压缩包摘要，再在 runner 临时目录解压并核对可执行文件。用已核验的官方内核和合成回环节点复验识别、会话启停、换节点、流量计数和失败不回落直连。执行仅限隔离测试；发行包不含 Mihomo 或测试压缩包。
 
-## 本机构建 macOS 公开包（无内核）
+## 本机构建与校验 macOS 公开包
 
 ```sh
 bash scripts/package-macos.sh --public
-cd dist/release
-version="$(cat ../../VERSION)"
-shasum -a 256 -c "CLAY-$version-macos-arm64.zip.sha256"
-unzip -l "CLAY-$version-macos-arm64.zip"
+bash scripts/verify-macos-package.sh
 ```
 
-检查 ZIP 内有 CLAY.app 和许可材料，没有 Mihomo 可执行文件、Xray、真实配置、日志或本机凭据。解压到临时目录验证 App 的 `CFBundleShortVersionString`、arm64 架构和 `codesign --verify --strict`。归档 App 与相邻的 `.zip.sha256` 一同发布。
+构建时下载固定版本的官方 Apple Silicon 资产及固定提交的源码；分别检查压缩包、解压后的内核和源码摘要。升级 Mihomo 时，同时更新 scripts/mihomo-macos.sh 的固定信息和 Workspace.swift 的运行时内核指纹。公开 ZIP 含 CLAY.app、GPL 许可证和原版 Mihomo 的源码归档；源码及其构建脚本见 ZIP 内的 Sources 目录。校验脚本解包检查签名、架构、许可和内核摘要，使用包内的实际内核复验新配置默认选择及本地转发。
 
 此命令供本机复验。发布时使用对应 `main` 运行上传且已验证的压缩包；CI 不创建标签或发布。
 
@@ -62,7 +59,7 @@ The Ubuntu 24.04 x86-64 workflow verifies the official Swift 6.4.3 archive again
 
 ## 本机预览（有独立内核）
 
-验证 [Mihomo 官方资产](https://github.com/henwanla/CLAY/blob/main/README.md#为公开安装包准备-mihomo) 后，使用解压后的可执行文件和 [固定 tag 的许可](https://github.com/MetaCubeX/mihomo/blob/v1.19.34/LICENSE) 生成本机预览目录：
+验证 [Mihomo 官方资产](https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.34) 后，使用解压后的可执行文件和 [固定 tag 的许可](https://github.com/MetaCubeX/mihomo/blob/v1.19.34/LICENSE) 生成本机预览目录：
 
 ```sh
 bash scripts/package-macos.sh /绝对路径/mihomo /绝对路径/Mihomo-LICENSE
@@ -72,4 +69,4 @@ bash scripts/package-macos.sh /绝对路径/mihomo /绝对路径/Mihomo-LICENSE
 
 ## English
 
-Use the three successful desktop Actions runs from the same `main` commit. Keep the run IDs, verify each inner archive against its companion hash, check the contents, and publish those exact files. Point a new version tag at the verified commit. Upload all six assets to an unpublished prerelease draft, check the recorded digests, publish, and verify immutability. Use the local Apple Silicon build for reproduction; it is not the artifact produced by CI. Public packages require a separately installed Mihomo. Do not claim authorization prompts, browser PAC behavior, or native tray interaction as verified unless they were tested separately.
+Use the three successful desktop Actions runs from the same `main` commit. Keep the run IDs, verify each inner archive against its companion hash, check the contents, and publish those exact files. Point a new version tag at the verified commit. Upload all six assets to an unpublished prerelease draft, check the recorded digests, publish, and verify immutability. Use the local Apple Silicon build for reproduction; it is not the artifact produced by CI. The macOS ZIP bundles the verified Mihomo executable and its pinned upstream source. Windows and Linux require a separately installed Mihomo. Do not claim authorization prompts, browser PAC behavior, or native tray interaction as verified unless they were tested separately.

@@ -156,7 +156,7 @@ final class RelaySession implements AutoCloseable {
             State before = refresh();
             if (before.node != node) request("PUT", "/proxies/CLAY", new JSONObject().put("name", ids[node - 1]));
             if (!before.mode.equals(mode)) request("PATCH", "/configs", new JSONObject().put("mode", mode));
-            if (vpn && (before.node != node || !before.mode.equals(mode))) request("DELETE", "/connections", null);
+            if (before.node != node || !before.mode.equals(mode)) request("DELETE", "/connections", null);
             State state = refresh();
             if (state.node != node || !state.mode.equals(mode)) throw new IOException();
             return state;

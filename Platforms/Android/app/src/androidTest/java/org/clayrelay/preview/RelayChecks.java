@@ -90,8 +90,7 @@ final class RelayChecks {
             TrafficChecks.await(test, activity, RelayPanel.ID_TRAFFIC, true);
             // Change the draft source to an invalid manual input while the cached session runs.
             test.runOnMainSync(() -> activity.findViewById(SubscriptionPanel.ID_MANUAL).performClick());
-            select(test, activity, 2, 1);
-            status = await(test, activity, RelayPanel.ID_APPLY, RelayPanel.ID_STATUS, "node and mode read back");
+            status = verifySwitchClosesTunnel(test, activity, local, port, password);
             require(status.contains("127.0.0.1:" + port) && status.contains("2 · " + activity.getString(R.string.relay_global)),
                     "node and mode changed without replacing proxy");
             require(!fetch(local, port, origin.getLocalPort(), password, "unavailable node").contains(marker),
@@ -137,6 +136,45 @@ final class RelayChecks {
             require(await(test, activity, RelayPanel.ID_START, RelayPanel.ID_STATUS, "manual relay stopped")
                     .equals(activity.getString(R.string.relay_stopped)), "manual session stopped cleanly");
             verifyUpstreams(test, activity, local, origin.getLocalPort(), originConnections, forwarding);
+        }
+    }
+
+    private static String verifySwitchClosesTunnel(Instrumentation test, Activity activity, InetAddress local,
+                                                   int proxy, String password) throws Exception {
+        try (ServerSocket origin = new ServerSocket(0, 1, local); Socket client = new Socket()) {
+            Thread echo = new Thread(() -> {
+                try (Socket peer = origin.accept()) {
+                    for (int value; (value = peer.getInputStream().read()) >= 0;) peer.getOutputStream().write(value);
+                } catch (IOException ended) { /* The fixture closes when the verified tunnel ends. */ }
+            });
+            echo.setDaemon(true);
+            echo.start();
+            client.connect(new InetSocketAddress(local, proxy), 1200);
+            client.setSoTimeout(2000);
+            String endpoint = "127.0.0.1:" + origin.getLocalPort();
+            String auth = android.util.Base64.encodeToString(("clay:" + password).getBytes(StandardCharsets.US_ASCII),
+                    android.util.Base64.NO_WRAP);
+            client.getOutputStream().write(("CONNECT " + endpoint + " HTTP/1.1\r\nHost: " + endpoint +
+                    "\r\nProxy-Authorization: Basic " + auth + "\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+            InputStream input = client.getInputStream();
+            BufferedReader headers = new BufferedReader(new InputStreamReader(input, StandardCharsets.US_ASCII));
+            String result = headers.readLine();
+            require(result != null && result.startsWith("HTTP/1.1 200"), "persistent CONNECT tunnel opened in Direct");
+            while ((result = headers.readLine()) != null && !result.isEmpty()) { }
+            require(result != null, "complete CONNECT headers");
+            client.getOutputStream().write(41);
+            require(input.read() == 41, "persistent tunnel reached the echo fixture in Direct");
+            select(test, activity, 1, 2);
+            await(test, activity, RelayPanel.ID_APPLY, RelayPanel.ID_STATUS, "unchanged route read back");
+            client.getOutputStream().write(42);
+            require(input.read() == 42, "selecting the same route did not close the tunnel");
+            select(test, activity, 2, 1);
+            String status = await(test, activity, RelayPanel.ID_APPLY, RelayPanel.ID_STATUS, "node and mode read back");
+            try {
+                client.getOutputStream().write(43);
+                require(input.read() == -1, "old Direct tunnel still forwarded traffic after switching to Global");
+            } catch (java.net.SocketException closed) { /* A reset or broken pipe also proves closure. */ }
+            return status;
         }
     }
 

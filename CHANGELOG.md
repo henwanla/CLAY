@@ -2,6 +2,8 @@
 
 ## 开发中 / Unreleased
 
+- Android Relay 真正切换节点或流量模式时会关闭内核跟踪的旧连接，避免原来的直连隧道在切换到全局后继续传输。重复选择当前项不断流。
+- Android Relay closes existing tracked connections when the node or mode changes. Reselecting the current route leaves connections open.
 - Android VPN 和 Relay 前台面板显示当前内核的累计上传、下载和近一秒速率。退到后台时暂停读取，不保存流量历史。
 - Android VPN and Relay show session upload and download totals and one-second rates in the foreground. The app pauses sampling in the background and keeps no traffic history.
 - Android VPN 使用 TCP 专用节点时，系统可对设定的 IPv4 或 IPv6 DNS 改用 TCP，继续遵守规则和全局模式。不改变其他 UDP 流量的路由。

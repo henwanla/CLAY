@@ -112,6 +112,12 @@ python3 Platforms/Android/smoke-portable.py \
 
 In Relay and VPN, **Select node** lists local display names, protocols, and transports. The first compatible node is selected by default. While connected, choose from the active session's list and tap **Apply node and mode**. Editing pasted input or selecting another cache affects the next session. The node picker is protected from screenshots; the ordinary preview and system tile omit names.
 
+### 切换节点和模式 / Switching nodes and modes
+
+VPN 和 Relay 在节点或模式真正改变后会关闭内核跟踪的旧连接，让应用重新连接并采用新路径。重复选择当前节点和模式不关闭连接。绕过内核的连接不受影响。
+
+VPN and Relay close existing connections tracked by the core when the selected node or mode changes. Apps can then reconnect on the new route. Reselecting the current route leaves connections open; traffic outside the core is unaffected.
+
 ### 会话流量 / Session traffic
 
 VPN 和 Relay 在确认启动后，约每两秒从本地内核读取一次累计上传、下载以及最近一秒的速率。统计的是经过该内核的流量，不是设备总流量；换节点或模式仍沿用同一会话累计值，停止后清空面板。App 退到后台时暂停采样，已建立的 VPN 不受影响。读数不保存，也不进入快捷设置、通知或日志。

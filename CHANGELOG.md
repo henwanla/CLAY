@@ -2,6 +2,8 @@
 
 ## 开发中 / Unreleased
 
+## 0.3.5 · 桌面预览 / Desktop preview
+
 - 可从 Clash 内联配置导入 HTTP CONNECT 和 SOCKS5 TCP 上游，支持身份认证和 TLS，也可粘贴普通 SOCKS5 链接。
 - Import HTTP CONNECT and SOCKS5 TCP upstreams from inline Clash profiles, with authentication and TLS. Plain SOCKS5 links can also be pasted.
 - Android、iOS 和 macOS 的节点界面正确显示 HTTP CONNECT 和 SOCKS5，Android 节点选择器也标明 TLS。Android Relay 模拟器验收确认错误密码或证书指纹不会回落到直连。

@@ -17,7 +17,7 @@ else
 fi
 version="$(cat VERSION)"
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$(uname -m)" == arm64 ]] || { echo 'A numeric VERSION and Apple silicon build host are required.' >&2; exit 1; }
-build_number=9
+build_number=10
 scripts/swift-local.sh build -c release
 builddir="$(scripts/swift-local.sh build -c release --show-bin-path)"
 stage="$(mktemp -d "$root/.build/package.XXXXXX")"

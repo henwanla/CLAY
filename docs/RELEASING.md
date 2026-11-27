@@ -30,7 +30,7 @@
 | `mihomo-linux-amd64-compatible-v1.19.34.gz` | `2763f5b414527f7baf6dc57e3f82f3ab561eedf34bfd7c2f2cde1f7e592efe06` | `5b6644c487e5dffae86b0e0e9bb5cec445579a3a9d03977c09576fee2aeefc01` |
 | `mihomo-windows-amd64-compatible-v1.19.34.zip` → `mihomo-windows-amd64-compatible.exe` | `cd6738d4648cc1a5f48049a1343b697ab510889d648f045c5c780fc1ab443a79` | `5a0231811a80b27477ebdee15684b41946d01afbd2114534e9a4b256125ca147` |
 
-GitHub CI 用对应的官方压缩包复验识别，先验证压缩包，再解压到 runner 临时目录。此检查不执行下载的官方文件；会话启停使用项目内合成夹具。新启用的识别逻辑不把 Mihomo 或压缩包放进发布资产。
+GitHub CI 先验证官方压缩包摘要，再在 runner 临时目录解压并核对可执行文件。用已核验的官方内核和合成回环节点复验识别、会话启停、换节点、流量计数和失败不回落直连。执行仅限隔离测试；发行包不含 Mihomo 或测试压缩包。
 
 ## 本机构建 macOS 公开包（无内核）
 

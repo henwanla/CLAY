@@ -2,7 +2,7 @@
 
 [English](README.en.md) · [更新记录](CHANGELOG.md) · [GitHub Releases](https://github.com/henwanla/CLAY/releases)
 
-CLAY 是原生 macOS 代理客户端，把节点、订阅、菜单栏、PAC 分流和实时连接仪表放在同一个应用里。[0.3.4 桌面预览](https://github.com/henwanla/CLAY/releases/tag/v0.3.4)提供 Apple Silicon（macOS 13 起）、Windows x64 和 Ubuntu 24.04 x86-64 下载。移动端的预览和验证范围见文末。
+CLAY 是原生 macOS 代理客户端，把节点、订阅、菜单栏、PAC 分流和实时连接仪表放在同一个应用里。[0.3.5 桌面预览](https://github.com/henwanla/CLAY/releases)提供 Apple Silicon（macOS 13 起）、Windows x64 和 Ubuntu 24.04 x86-64 下载。移动端的预览和验证范围见文末。
 
 ## 界面截图
 
@@ -20,12 +20,12 @@ macOS「概览」中的流量走势、当前节点和模式切换。截图使用
 ## 安装与开始使用
 
 1. **本机预览包（构建号 4 起）**：打开 `CLAY.app`，未选择其他内核时，CLAY 会使用 App 内附带且已固定指纹的 Mihomo。可在「设置 → 选择 Mihomo…」选其他可信版本；升级或替换外部内核后请校验来源并重新选择。
-2. **GitHub 安装包**：下载 `CLAY-0.3.4-macos-arm64.zip` 和同名的 `.zip.sha256`。在下载目录执行 `shasum -a 256 -c CLAY-0.3.4-macos-arm64.zip.sha256`，校验通过后解压。公开包没有附带 Mihomo，请按下文安装并在「设置 → 选择 Mihomo…」中选中它。App 使用临时签名，未经过 Developer ID 签名和公证；如果系统禁止打开，可从源码构建，并遵守本机安全策略。
+2. **GitHub 安装包**：下载 `CLAY-0.3.5-macos-arm64.zip` 和同名的 `.zip.sha256`。在下载目录执行 `shasum -a 256 -c CLAY-0.3.5-macos-arm64.zip.sha256`，校验通过后解压。公开包没有附带 Mihomo，请按下文安装并在「设置 → 选择 Mihomo…」中选中它。App 使用临时签名，未经过 Developer ID 签名和公证；如果系统禁止打开，可从源码构建，并遵守本机安全策略。
 3. 在「订阅」点「添加订阅…」，粘贴服务商提供的 HTTPS 地址；也可以从「节点」粘贴分享链接，或导入 UTF-8 的 JSON、YAML 和文本文件。
 4. 选择节点，在主窗口或菜单栏点「连接 macOS」。CLAY 会启动本机代理，再给当前主要网络服务（或你在「PAC 规则」中选定的服务）配置系统 PAC。只需要手动接入时，点「仅启动本机代理」并在应用里填写「概览」的 HTTP／SOCKS5 地址。仍在使用 0.3.0 时，需先点「启动」，再到「PAC 规则」点「应用到 macOS」。
 5. 关闭窗口后代理继续运行。新版的 macOS 菜单栏可直接切换节点和流量模式，也能复制地址、重新打开窗口或启停代理。「退出 CLAY」或 `⌘Q` 会结束会话；应用不会在登录 macOS 后自动启动。
 
-开发版可在「设置 → 使用随附 Mihomo」回到试用包内已校验的内核。如果外部文件被替换或移动，连接会保持停止，窗口和菜单栏会显示恢复入口。选好内核后，再点「连接 macOS」。菜单栏只显示节点编号和协议；可在「节点」页用同一编号找到完整名称。
+自行构建的随附内核试用包可在「设置 → 使用随附 Mihomo」中切回已校验的内核。如果外部文件被替换或移动，连接会保持停止，窗口和菜单栏会显示恢复入口。选好内核后，再点「连接 macOS」。菜单栏只显示节点编号和协议；可在「节点」页用同一编号找到完整名称。
 
 ### 为公开安装包准备 Mihomo
 
@@ -58,7 +58,7 @@ macOS「概览」中的流量走势、当前节点和模式切换。截图使用
 | 系统代理 | 点「连接 macOS」，可在「PAC 规则」选择网络服务。 | 支持系统代理的应用跟随流量模式。启用期间暂时关闭该服务的其他代理方式。 |
 | 自定义系统 PAC | 在「PAC 规则」点「应用自定义 PAC」。 | 使用自定义 PAC 预先分流，匹配直连的请求不进入内核。「跟随流量模式」可切回默认接入。 |
 
-规则从上到下，命中第一条后停止；未命中时由你选择直连或代理，初始设置为代理。支持完整域名/IP、域名后缀、域名关键词和 IPv4 网段；开发版还支持 IPv6 网段。网段规则只匹配目标 IP，不会为匹配规则而查询 DNS。IPv4 映射地址（如 `::ffff:192.0.2.7`）按 IPv4 匹配。回环地址始终直连；开启「本地和私有地址直连」后，显式规则仍可覆盖这一默认行为。可输入域名、IP 或 URL 预览命中结果。每行一条，批量导入会追加到列表末尾：
+规则从上到下，命中第一条后停止；未命中时由你选择直连或代理，初始设置为代理。支持完整域名/IP、域名后缀、域名关键词以及 IPv4 和 IPv6 网段。网段规则只匹配目标 IP，不会为匹配规则而查询 DNS。IPv4 映射地址（如 `::ffff:192.0.2.7`）按 IPv4 匹配。回环地址始终直连；开启「本地和私有地址直连」后，显式规则仍可覆盖这一默认行为。可输入域名、IP 或 URL 预览命中结果。每行一条，批量导入会追加到列表末尾：
 
 ```text
 DOMAIN,docs.example.com,DIRECT
@@ -81,11 +81,11 @@ IP-CIDR6,2001:db8:1234::/48,PROXY
 
 CLAY 支持 Shadowsocks 2022 的 AES-128-GCM、AES-256-GCM 和 ChaCha20-Poly1305。可使用 `ss://` 链接或 Clash 内联配置。密钥必须是套件要求长度的标准 Base64；AES 也支持以冒号分隔的服务器与用户密钥。插件参数不执行。
 
-开发版还可在 Clash 内联 `proxies` 中导入 `type: http`（CONNECT）和 `type: socks5` 上游。两种节点都支持可选的用户名和密码，以及 `tls: true`；TLS 默认验证证书，可显式配置 Mihomo 的 SHA-256 `fingerprint`。明文模式不会加密代理握手。SOCKS5 也接受 `socks5://host:port` 或带用户名和密码的链接；带 TLS 的节点请用内联配置。两种上游目前仅支持 TCP；导入时拒绝 `udp: true`、自定义请求头和跳过证书验证。普通 HTTPS 链接仍用于订阅。
+0.3.5 起可在 Clash 内联 `proxies` 中导入 `type: http`（CONNECT）和 `type: socks5` 上游。两种节点都支持可选的用户名和密码，以及 `tls: true`；TLS 默认验证证书，可显式配置 Mihomo 的 SHA-256 `fingerprint`。明文模式不会加密代理握手。SOCKS5 也接受 `socks5://host:port` 或带用户名和密码的链接；带 TLS 的节点请用内联配置。两种上游目前仅支持 TCP；导入时拒绝 `udp: true`、自定义请求头和跳过证书验证。普通 HTTPS 链接仍用于订阅。
 
-开发版的 Hysteria2 支持固定端口、SNI、Salamander 和 Gecko。分享链接省略端口时使用 443，并要求通过 TLS 证书验证；带 `insecure=1`、`pinSHA256`、端口跳跃或 Realms 的链接不导入。Clash/Mihomo 内联的 Hysteria2 和 Trojan 节点可以显式提供 SHA-256 `fingerprint`，此时使用 Mihomo 自身的证书固定机制。Shadowsocks 插件和跳过 Trojan 证书验证的设置不导入。
+Hysteria2 支持固定端口、SNI、Salamander 和 Gecko。分享链接省略端口时使用 443，并要求通过 TLS 证书验证；带 `insecure=1`、`pinSHA256`、端口跳跃或 Realms 的链接不导入。Clash/Mihomo 内联的 Hysteria2 和 Trojan 节点可以显式提供 SHA-256 `fingerprint`，此时使用 Mihomo 自身的证书固定机制。Shadowsocks 插件和跳过 Trojan 证书验证的设置不导入。
 
-开发版的 TUIC v5 需要 UUID、密码和端口，支持 SNI、ALPN、拥塞控制与 `native`／`quic` UDP 中继。分享链接使用正常 TLS 证书验证；内联 Clash/Mihomo 节点还可指定 Mihomo 原生 SHA-256 `fingerprint`。不导入 TUIC v4 令牌、禁用 SNI、跳过证书验证或开启 0-RTT 的配置。
+TUIC v5 需要 UUID、密码和端口，支持 SNI、ALPN、拥塞控制与 `native`／`quic` UDP 中继。分享链接使用正常 TLS 证书验证；内联 Clash/Mihomo 节点还可指定 Mihomo 原生 SHA-256 `fingerprint`。不导入 TUIC v4 令牌、禁用 SNI、跳过证书验证或开启 0-RTT 的配置。
 
 ## 源码与验证
 
@@ -101,9 +101,9 @@ Linux 有可下载的 [Ubuntu 24.04 x86-64 GTK 桌面预览](Platforms/Linux/REA
 
 [Windows x64 桌面预览](Platforms/Windows/README.md#download-for-windows-x64--下载试用包)支持手动接入和 Windows PAC，也可手动刷新 HTTPS 订阅并加密保存节点。关闭窗口后保留托盘入口，支持切换节点和规则／全局／直连。
 
-Windows 和 Linux 的开发版可在连接前点「预览规则」，离线检查规则文件，或查看指定域名、IP 或 URL 命中的规则。
+Windows 和 Linux 的 0.3.5 版可在连接前点「预览规则」，离线检查规则文件，或查看指定域名、IP 或 URL 命中的规则。
 
-Windows 和 Linux 开发版还会识别已解压的官方 Mihomo v1.19.34 x64 compatible 构建，匹配后自动填入 SHA-256。其他版本仍需要手动核验。
+Windows 和 Linux 会识别已解压的官方 Mihomo v1.19.34 x64 compatible 构建，匹配后自动填入 SHA-256。其他版本仍需要手动核验。窗口可见时，会话面板显示上传和下载速率及累计流量。
 
 连上后可在采用该代理的应用里发起请求，再点 **刷新状态**。窗口显示 Mihomo 在本次会话中统计的上传、下载字节数。系统 PAC 绕开 CLAY 的请求不计入；刷新不会发起测速、读取连接列表或上传数据。
 

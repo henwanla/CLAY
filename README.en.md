@@ -2,7 +2,7 @@
 
 [简体中文](README.md) · [Changelog](CHANGELOG.md) · [GitHub Releases](https://github.com/henwanla/CLAY/releases)
 
-CLAY is a native macOS proxy app with subscriptions, menu bar controls, PAC routing, live traffic, and a connection inspector. The [0.3.4 desktop preview](https://github.com/henwanla/CLAY/releases/tag/v0.3.4) has downloads for Apple Silicon with macOS 13 or later, Windows x64, and Ubuntu 24.04 x86-64. See the platform notes below for mobile previews and their test coverage.
+CLAY is a native macOS proxy app with subscriptions, menu bar controls, PAC routing, live traffic, and a connection inspector. The [0.3.5 desktop preview](https://github.com/henwanla/CLAY/releases) has downloads for Apple Silicon with macOS 13 or later, Windows x64, and Ubuntu 24.04 x86-64. See the platform notes below for mobile previews and their test coverage.
 
 ## Screenshots
 
@@ -20,12 +20,12 @@ The macOS Overview shows traffic, the selected node, and the routing mode. The s
 ## Getting started
 
 1. **Local preview (build 4 and later):** Open `CLAY.app`. If you have not selected another core, CLAY uses the bundled Mihomo with a pinned fingerprint. To use a different trusted core, choose it in Settings (**设置**). Verify the source and select it again after replacing or upgrading an external core.
-2. **GitHub release:** Download `CLAY-0.3.4-macos-arm64.zip` and the matching `.zip.sha256`. In the download directory, run `shasum -a 256 -c CLAY-0.3.4-macos-arm64.zip.sha256` before extracting the ZIP. The public package requires you to install Mihomo separately, as shown below. The app has an ad hoc signature and has no Developer ID signature or notarization. If macOS blocks the package, you can build it from source under your usual security policy.
+2. **GitHub release:** Download `CLAY-0.3.5-macos-arm64.zip` and the matching `.zip.sha256`. In the download directory, run `shasum -a 256 -c CLAY-0.3.5-macos-arm64.zip.sha256` before extracting the ZIP. The public package requires you to install Mihomo separately, as shown below. The app has an ad hoc signature and has no Developer ID signature or notarization. If macOS blocks the package, you can build it from source under your usual security policy.
 3. Under Subscriptions (**订阅**), select Add subscription (**添加订阅…**) and enter your provider’s HTTPS link. Under Nodes (**节点**), you can also paste share links or import UTF-8 JSON, YAML, or text files.
 4. Choose a node and select Connect macOS (**连接 macOS**) from the main window or menu bar. CLAY starts the local proxy and sets up system PAC for the current primary network service or the service you choose in PAC Rules. For manual setup, use Start local proxy only (**仅启动本机代理**) and enter the HTTP/SOCKS5 address from Overview (**概览**) in the app. If you are still using 0.3.0, use Start (**启动**) and then Apply to macOS (**应用到 macOS**) under PAC Rules.
 5. Closing the window keeps CLAY and its proxy running. In new builds, the menu bar also lets you switch nodes and routing modes. Quit CLAY or press `⌘Q` to end the session. CLAY does not launch automatically at login.
 
-In development builds, use **Settings → 使用随附 Mihomo** to switch back to the verified core in the local preview. If an external executable was replaced or moved, the app stays stopped and offers recovery in the window and menu bar. Connect again after choosing the core. The menu bar shows node numbers and protocols; match the number to the full name in the Nodes view.
+In a local build with an included core, use **Settings → 使用随附 Mihomo** to switch back to that verified executable. If an external executable was replaced or moved, the app stays stopped and offers recovery in the window and menu bar. Connect again after choosing the core. The menu bar shows node numbers and protocols; match the number to the full name in the Nodes view.
 
 ### Install Mihomo for the public package
 
@@ -58,7 +58,7 @@ Choose a routing mode from Overview or the menu bar. **Rule** uses the loaded po
 | System proxy | Select Connect macOS (**连接 macOS**). You can choose the network service in PAC Rules. | Apps that use the macOS proxy follow the current routing mode. The service’s other proxy settings are temporarily disabled. |
 | Custom system PAC | In PAC Rules, select Apply custom PAC (**应用自定义 PAC**). | Direct PAC matches bypass the core. Select Follow routing mode (**跟随流量模式**) to switch back. |
 
-Rules run from top to bottom. The first match wins; unmatched traffic uses your chosen Direct or Proxy default. The initial default is Proxy. Loopback is always direct. Explicit rules can override the optional local and private address bypass. Rules match exact domains or IPs, domain suffixes, domain keywords, and IPv4 CIDR ranges. Development builds add IPv6 CIDR ranges. CIDR rules match destination IPs without a DNS lookup. IPv4-mapped addresses such as `::ffff:192.0.2.7` use IPv4 rules. Enter a domain, IP, or URL to see which rule matches. Paste rules one per line to append them in bulk, for example:
+Rules run from top to bottom. The first match wins; unmatched traffic uses your chosen Direct or Proxy default. The initial default is Proxy. Loopback is always direct. Explicit rules can override the optional local and private address bypass. Rules match exact domains or IPs, domain suffixes, domain keywords, and IPv4 and IPv6 CIDR ranges. CIDR rules match destination IPs without a DNS lookup. IPv4-mapped addresses such as `::ffff:192.0.2.7` use IPv4 rules. Enter a domain, IP, or URL to see which rule matches. Paste rules one per line to append them in bulk, for example:
 
 ```text
 DOMAIN,docs.example.com,DIRECT
@@ -79,13 +79,13 @@ When CLAY shows **系统代理已启用**, the default macOS proxy points to CLA
 
 **Compatibility:** VMess and VLESS share links, Base64 lists, V2Ray/Xray JSON outbounds, Shadowsocks SIP002 (legacy AEAD and Shadowsocks 2022), TCP/TLS Trojan, Hysteria2 (`hysteria2://` or `hy2://`), TUIC v5 (`tuic://`), and inline `proxies` from Clash/Mihomo YAML or JSON. A subscription has a 2 MiB download limit and can import up to 100 compatible nodes. CLAY does not run imported providers, policy groups, rules, DNS, inbounds, or TUN settings.
 
-Development builds also accept HTTP CONNECT (`type: http`) and `type: socks5` upstreams in inline Clash profiles. Both support optional username and password and `tls: true`, with certificate verification by default and optional native Mihomo SHA-256 `fingerprint` pinning. Plain mode does not encrypt the proxy handshake. Basic `socks5://host:port` links can include credentials; use inline profiles for SOCKS5 over TLS. These upstreams forward TCP only. CLAY rejects `udp: true`, custom request headers, and requests to skip certificate verification. Ordinary HTTPS links remain subscription URLs.
+Starting with 0.3.5, CLAY accepts HTTP CONNECT (`type: http`) and `type: socks5` upstreams in inline Clash profiles. Both support optional username and password and `tls: true`, with certificate verification by default and optional native Mihomo SHA-256 `fingerprint` pinning. Plain mode does not encrypt the proxy handshake. Basic `socks5://host:port` links can include credentials; use inline profiles for SOCKS5 over TLS. These upstreams forward TCP only. CLAY rejects `udp: true`, custom request headers, and requests to skip certificate verification. Ordinary HTTPS links remain subscription URLs.
 
 Shadowsocks 2022 supports AES-128-GCM, AES-256-GCM, and ChaCha20-Poly1305 from `ss://` links and inline Clash profiles. Keys must use standard Base64 at the cipher’s required length. AES also accepts colon-separated server and user keys. CLAY does not run plugin parameters.
 
 The development build adds Hysteria2 with a fixed port, SNI, Salamander, and Gecko. Share links default to port 443 and require TLS certificate validation. Links with `insecure=1`, `pinSHA256`, port hopping, or Realms are not imported. Inline Clash/Mihomo Hysteria2 and Trojan nodes can provide a SHA-256 `fingerprint` to use Mihomo's native certificate pinning. Shadowsocks plugins and Trojan settings that bypass certificate validation are not imported.
 
-TUIC v5 in development builds requires a UUID, password, and port. It supports SNI, ALPN, congestion control, and `native` or `quic` UDP relay. Share links use standard TLS validation; inline Clash/Mihomo nodes can also use Mihomo's native SHA-256 `fingerprint`. Imports reject TUIC v4 tokens, disabled SNI, skipped certificate verification, and 0-RTT.
+TUIC v5 requires a UUID, password, and port. It supports SNI, ALPN, congestion control, and `native` or `quic` UDP relay. Share links use standard TLS validation; inline Clash/Mihomo nodes can also use Mihomo's native SHA-256 `fingerprint`. Imports reject TUIC v4 tokens, disabled SNI, skipped certificate verification, and 0-RTT.
 
 ## Build and verify
 
@@ -101,9 +101,9 @@ The [downloadable GTK desktop preview](Platforms/Linux/README.md#download-for-ub
 
 The [Windows x64 desktop preview](Platforms/Windows/README.md#download-for-windows-x64--下载试用包) offers a manual loopback proxy, optional Windows PAC with restoration, and manual HTTPS subscription refresh with encrypted caching. Its tray icon keeps the session accessible after the window is closed and offers node and mode switching.
 
-Windows and Linux development builds add **Preview rules** before connecting. Check a local rules file or enter a domain, IP address, or URL to see its first match offline.
+In Windows and Linux 0.3.5, use **Preview rules** before connecting. Check a local rules file or enter a domain, IP address, or URL to see its first match offline.
 
-Windows and Linux development builds also recognize the extracted upstream Mihomo v1.19.34 x64 compatible executable and fill in its expected SHA-256. Other builds still need manual verification.
+Windows and Linux also recognize the extracted upstream Mihomo v1.19.34 x64 compatible executable and fill in its expected SHA-256. Other builds still need manual verification. The visible session panel shows upload and download rates and totals.
 
 After connecting, make a request in an app that uses the proxy and choose **Refresh status** to see how many bytes this Mihomo session counted. Requests that bypass CLAY via system PAC are excluded. Refreshing does not run a probe, read connection records, or upload data.
 

@@ -34,11 +34,11 @@ CI 在临时 Windows 用户配置中验收系统 PAC、原生 PAC 决策、加�
 
 ## Download for Windows x64 / 下载试用包
 
-Download the Windows x64 ZIP and its matching SHA-256 file from the [0.3.4 preview](https://github.com/henwanla/CLAY/releases/tag/v0.3.4). Compare the companion hash with `(Get-FileHash -Algorithm SHA256 .\FILE.zip).Hash` using the downloaded filename. Extract only after the hashes match and follow `START-HERE.txt`. The preview is unsigned and requires the .NET 10 Desktop Runtime, Swift runtime, and a separately verified Mihomo executable. For newer branch builds, see the 14-day **CLAY-Windows-x64-preview** artifact in [Windows Actions](https://github.com/henwanla/CLAY/actions/workflows/portable-windows.yml?query=branch%3Amain).
+Download the Windows x64 ZIP and its matching SHA-256 file from the [0.3.5 preview](https://github.com/henwanla/CLAY/releases). Compare the companion hash with `(Get-FileHash -Algorithm SHA256 .\FILE.zip).Hash` using the downloaded filename. Extract only after the hashes match and follow `START-HERE.txt`. The preview is unsigned and requires the .NET 10 Desktop Runtime, Swift runtime, and a separately verified Mihomo executable. For newer branch builds, see the 14-day **CLAY-Windows-x64-preview** artifact in [Windows Actions](https://github.com/henwanla/CLAY/actions/workflows/portable-windows.yml?query=branch%3Amain).
 
-从 [0.3.4 预览版](https://github.com/henwanla/CLAY/releases/tag/v0.3.4) 下载 Windows x64 的 ZIP 和校验文件。用上述 PowerShell 命令核对 ZIP 的 SHA-256 后再解压，按 `START-HERE.txt` 试用。预览包未签名，需准备 .NET 10 Desktop Runtime、Swift 运行时和已核验的 Mihomo。
+从 [0.3.5 预览版](https://github.com/henwanla/CLAY/releases) 下载 Windows x64 的 ZIP 和校验文件。用上述 PowerShell 命令核对 ZIP 的 SHA-256 后再解压，按 `START-HERE.txt` 试用。预览包未签名，需准备 .NET 10 Desktop Runtime、Swift 运行时和已核验的 Mihomo。
 
-## Engine setup in development builds / 开发版内核准备
+## Verify the engine / 核验内核
 
 Use **Official v1.19.34** in CLAY or open the [fixed upstream release](https://github.com/MetaCubeX/mihomo/releases/tag/v1.19.34). From the official release, download **mihomo-windows-amd64-compatible-v1.19.34.zip** and extract it. Select **mihomo-windows-amd64-compatible.exe** inside. CLAY fills in the expected SHA-256 after the file matches its built-in fingerprint, regardless of the file name. For another build, supply the expected SHA-256 from a trusted source. After you select a different file, CLAY clears the previous value. Startup checks the digest again before running the private copy.
 
@@ -46,9 +46,9 @@ Use **Official v1.19.34** in CLAY or open the [fixed upstream release](https://g
 
 ## Offline rule preview / 离线规则预览
 
-In development builds, select a local rule file while stopped, then choose **Preview rules…**. Leave the target blank to verify the file or enter a domain, IP address, or full URL and click **Check**. The first matching rule wins. Match numbers count rules only; errors show the actual line in the file. The preview describes the selected file in Rule mode. Global and Direct ignore the file; system PAC can bypass the proxy for local requests before the engine sees them. CLAY never looks up the preview target, opens it, or saves it.
+In 0.3.5, select a local rule file while stopped, then choose **Preview rules…**. Leave the target blank to verify the file or enter a domain, IP address, or full URL and click **Check**. The first matching rule wins. Match numbers count rules only; errors show the actual line in the file. The preview describes the selected file in Rule mode. Global and Direct ignore the file; system PAC can bypass the proxy for local requests before the engine sees them. CLAY never looks up the preview target, opens it, or saves it.
 
-开发版在会话停止时选好本地规则文件，点「预览规则…」。留空可检查文件，填入域名、IP 或完整 URL 后可以看命中的第一条规则。命中编号跳过注释及空行，语法错误显示实际文件行号。结果对应规则模式；全局和直连模式不使用该文件，系统 PAC 也可能先让本地请求直连。CLAY 不查询、不打开，也不保存测试地址。
+在 0.3.5 版中，会话停止时选好本地规则文件，点「预览规则…」。留空可检查文件，填入域名、IP 或完整 URL 后可以看命中的第一条规则。命中编号跳过注释及空行，语法错误显示实际文件行号。结果对应规则模式；全局和直连模式不使用该文件，系统 PAC 也可能先让本地请求直连。CLAY 不查询、不打开，也不保存测试地址。
 
 ## Session traffic / 会话流量
 

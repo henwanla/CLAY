@@ -61,6 +61,10 @@ final class VpnChecks {
             return "CLAY_ANDROID_VPN_CONSENT_CANCEL_PASS";
         }
         require(VpnService.prepare(activity) == null, "isolated emulator VPN permission");
+        if (fault.equals("forwarding")) {
+            verifyForwarding(test, activity, direct, proof, new ForwardingFixture(fixture.getString("forwardingFixture")));
+            return "CLAY_ANDROID_VPN_FORWARDING_PASS";
+        }
         if (fault.isEmpty()) {
             ServiceInfo service = activity.getPackageManager().getServiceInfo(new ComponentName(activity, ClayVpnTile.class), 0);
             require(service.exported && "android.permission.BIND_QUICK_SETTINGS_TILE".equals(service.permission),
@@ -175,6 +179,63 @@ final class VpnChecks {
         } catch (java.io.IOException failure) {
             throw new AssertionError(step + ": " + failure.getClass().getSimpleName());
         } finally { test.runOnMainSync(ClayVpnService::stopFromPanel); }
+    }
+
+    private static void verifyForwarding(Instrumentation test, Activity activity, int origin, String directProof,
+                                         ForwardingFixture fixture) throws Exception {
+        require(fetch("10.0.2.2", origin).endsWith(directProof + "-D"), "direct TCP origin reachable before VPN");
+        String profile = fixture.profile();
+        test.runOnMainSync(() -> {
+            edit(activity, MainActivity.ID_NODE_INPUT).setText(profile);
+            edit(activity, MainActivity.ID_PAC_RULES).setText("");
+            edit(activity, VpnPanel.ID_DNS).setText(DNS4);
+            ((CompoundButton) activity.findViewById(MainActivity.ID_PAC_BYPASS)).setChecked(false);
+            ((Spinner) activity.findViewById(VpnPanel.ID_MODE)).setSelection(1);
+        });
+        NodePickerChecks.choose(test, activity, VpnPanel.ID_NODE, 1, fixture.label(1));
+        test.runOnMainSync(() -> activity.findViewById(VpnPanel.ID_START).performClick());
+        try {
+            await(test, R.string.vpn_ready, 1, "global", "forwarding VPN started");
+            Process engine = ownedEngine(test);
+            require(engine != null && engine.isAlive(), "working VPN engine");
+            for (int node = 1; node <= ForwardingFixture.COUNT; node++) {
+                if (node != 1) selectForwarding(test, activity, fixture, node);
+                require(ownedEngine(test) == engine && engine.isAlive(), "switch retained the running VPN");
+                String[] status = new String[1];
+                test.runOnMainSync(() -> status[0] = ((TextView) activity.findViewById(VpnPanel.ID_STATE)).getText().toString());
+                require(!fixture.hasPrivateData(status[0]), "VPN status omits upstream address and credentials");
+                boolean working = node <= ForwardingFixture.WORKING;
+                String response;
+                try { response = fetchForwarding(origin); }
+                catch (java.io.IOException failed) {
+                    if (working) throw new AssertionError("system TCP did not reach authenticated upstream " + node + ": " + failed.getClass().getSimpleName());
+                    response = "";
+                }
+                require(working ? response.endsWith(fixture.proof(node)) : response.isEmpty(),
+                        working ? "system TCP uses selected upstream " + node : "VPN refuses invalid authentication or pin " + node);
+            }
+            selectForwarding(test, activity, fixture, 1);
+            require(fetchForwarding(origin).endsWith(fixture.proof(1)), "same VPN recovers after switching to working upstream");
+        } finally {
+            test.runOnMainSync(ClayVpnService::stopFromPanel);
+            await(test, R.string.vpn_stopped, 0, null, "forwarding VPN stopped");
+        }
+        assertClean(activity);
+        require(fetch("10.0.2.2", origin).endsWith(directProof + "-D"), "direct TCP restored after VPN stop");
+    }
+
+    private static void selectForwarding(Instrumentation test, Activity activity, ForwardingFixture fixture, int node) {
+        NodePickerChecks.choose(test, activity, VpnPanel.ID_NODE, node, fixture.label(node));
+        test.runOnMainSync(() -> activity.findViewById(VpnPanel.ID_APPLY).performClick());
+        await(test, R.string.vpn_ready, node, "global", "confirmed VPN upstream " + node);
+    }
+
+    private static String fetchForwarding(int port) throws java.io.IOException {
+        try (Socket socket = new Socket(Proxy.NO_PROXY)) {
+            socket.connect(new InetSocketAddress("10.0.2.2", port), 2500);
+            socket.setSoTimeout(9000);
+            return exchange(socket, "GET /test HTTP/1.0\r\n\r\n");
+        }
     }
 
     private static PendingIntent currentNotificationStop(Activity activity) {
@@ -392,7 +453,7 @@ final class VpnChecks {
         }
     }
 
-    private static String exchange(Socket socket, String request) throws Exception {
+    private static String exchange(Socket socket, String request) throws java.io.IOException {
         socket.getOutputStream().write(request.getBytes(StandardCharsets.US_ASCII));
         try (InputStream in = socket.getInputStream(); ByteArrayOutputStream reply = new ByteArrayOutputStream()) {
             for (int ch; reply.size() < 2000 && (ch = in.read()) != -1;) reply.write(ch);

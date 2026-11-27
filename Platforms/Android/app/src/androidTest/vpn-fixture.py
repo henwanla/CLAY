@@ -42,6 +42,8 @@ def tls_context():
 class Request(StreamRequestHandler):
     def reply(self, stream, connection):
         line = stream.readline(512).strip()
+        if self.server.kind == "D" and line == b"GET /test HTTP/1.0":
+            Path("unexpected-direct-http").touch()
         for _ in range(30):
             if stream.readline(4096) == b"\r\n":
                 if line in (b"GET /clay-vpn HTTP/1.0", b"GET /clay-vpn HTTP/1.1"):

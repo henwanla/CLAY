@@ -19,12 +19,13 @@ for package in "$app" "$app.tests" "$revoker"; do
 done
 umask 077
 work=$(mktemp -d "${TMPDIR:-/tmp}/clay-vpn-smoke.XXXXXX")
-fixture= watch_pid= installed=false test_installed=false revoker_installed=false
+fixture= upstream_pid= watch_pid= installed=false test_installed=false revoker_installed=false
 cleanup() {
   if [[ -n "$watch_pid" ]]; then kill "$watch_pid" 2>/dev/null || true; fi
   if $revoker_installed; then "${adb[@]}" uninstall "$revoker" >/dev/null || true; fi
   if $test_installed; then "${adb[@]}" uninstall "$app.tests" >/dev/null || true; fi
   if $installed; then "${adb[@]}" uninstall "$app" >/dev/null || true; fi
+  if [[ -n "$upstream_pid" ]]; then kill "$upstream_pid" 2>/dev/null || true; fi
   if [[ -n "$fixture" ]]; then kill "$fixture" 2>/dev/null || true; fi
   rm -rf "$work"
 }
@@ -58,6 +59,7 @@ check_result() {
   report=$(tr -d '\r' < "$1")
   printf '%s\n' "$report"
   if [[ -e "$work/unexpected-direct-udp" ]]; then printf 'A UDP packet marked PROXY reached the local origin.\n' >&2; exit 1; fi
+  if [[ -e "$work/unexpected-direct-http" ]]; then printf 'A TCP request in Global mode reached the direct origin.\n' >&2; exit 1; fi
   grep -qx "$2" <<< "$report"
   grep -qx 'CLAY_ANDROID_SUBSCRIPTIONS_PASS' <<< "$report"
   grep -qx 'INSTRUMENTATION_CODE: -1' <<< "$report"
@@ -99,3 +101,16 @@ grep -qx 'INSTRUMENTATION_CODE: -1' <<< "$replacement"
 wait "$watch_pid"
 watch_pid=
 check_result "$work/revoke" CLAY_ANDROID_VPN_REVOKE_PASS
+
+# The upstreams accept only the exact QEMU alias and synthetic origin port, and never dial out.
+(cd "$work" && exec python3 "$base/app/src/androidTest/relay-fixture.py" --vpn "$direct") &
+upstream_pid=$!
+for _ in {1..100}; do
+  if [[ -s "$work/fixture-ready" ]] || ! kill -0 "$upstream_pid" 2>/dev/null; then break; fi
+  sleep 0.1
+done
+[[ -s "$work/fixture-ready" ]] || { printf 'The loopback upstream fixtures did not start.\n' >&2; exit 1; }
+# The earlier revocation test transferred permission to the synthetic revoker.
+"${adb[@]}" shell appops set "$app" ACTIVATE_VPN allow
+instrument -e vpnFault forwarding -e forwardingFixture "$(cat "$work/fixture-ready")" > "$work/report"
+check_result "$work/report" CLAY_ANDROID_VPN_FORWARDING_PASS

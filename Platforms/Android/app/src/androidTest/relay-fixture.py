@@ -9,6 +9,7 @@ import re
 from secrets import token_hex
 import socketserver
 import ssl
+import sys
 from subprocess import DEVNULL, run
 from threading import Event, Thread
 
@@ -31,9 +32,10 @@ def headers(stream):
     raise ValueError("invalid synthetic headers")
 
 
-def connect_http(stream, peer):
+def connect_http(stream, peer, target, target_port):
     line, fields = headers(stream)
-    if not re.fullmatch(rb"CONNECT 127\.0\.0\.1:[0-9]{1,5} HTTP/1\.[01]\r\n", line):
+    port_pattern = str(target_port).encode("ascii") if target_port else rb"[0-9]{1,5}"
+    if not re.fullmatch(rb"CONNECT " + re.escape(target.encode("ascii")) + b":" + port_pattern + rb" HTTP/1\.[01]\r\n", line):
         return False
     if fields.get(b"proxy-authorization") != auth:
         peer.sendall(b"HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 0\r\n\r\n")
@@ -42,7 +44,7 @@ def connect_http(stream, peer):
     return True
 
 
-def connect_socks(stream, peer):
+def connect_socks(stream, peer, target, target_port):
     greeting = stream.read(2)
     if len(greeting) != 2 or greeting[0] != 5 or b"\x02" not in stream.read(greeting[1]):
         return False
@@ -59,8 +61,9 @@ def connect_socks(stream, peer):
         peer.sendall(b"\x01\x01")
         return False
     peer.sendall(b"\x01\x00")
-    target = stream.read(10)
-    if len(target) != 10 or not target.startswith(b"\x05\x01\x00\x01\x7f\x00\x00\x01"):
+    address = b"\x05\x01\x00\x01" + bytes(map(int, target.split(".")))
+    request = stream.read(10)
+    if len(request) != 10 or request[:8] != address or (target_port and int.from_bytes(request[8:], "big") != target_port):
         return False
     peer.sendall(b"\x05\x00\x00\x01\x7f\x00\x00\x01\x00\x00")
     return True
@@ -75,7 +78,7 @@ class Fixture(socketserver.BaseRequestHandler):
                 if self.server.tls:
                     peer = stack.enter_context(self.server.tls.wrap_socket(peer, server_side=True))
                 stream = stack.enter_context(peer.makefile("rb"))
-                if not self.server.handshake(stream, peer):
+                if not self.server.handshake(stream, peer, self.server.target, self.server.target_port):
                     return
                 line, fields = headers(stream)
                 if line not in (b"GET /test HTTP/1.1\r\n", b"GET /test HTTP/1.0\r\n") or b"proxy-authorization" in fields:
@@ -97,6 +100,14 @@ def certificate():
 
 
 def main():
+    # VPN mode accepts only the QEMU alias at the exact synthetic origin port.
+    target, target_port = "127.0.0.1", None
+    if len(sys.argv) > 1:
+        if len(sys.argv) != 3 or sys.argv[1] != "--vpn" or not re.fullmatch(r"[0-9]{1,5}", sys.argv[2]):
+            raise SystemExit("usage: relay-fixture.py [--vpn ORIGIN_PORT]")
+        target, target_port = "10.0.2.2", int(sys.argv[2])
+        if not 1 <= target_port <= 65535:
+            raise SystemExit("invalid synthetic origin port")
     tls, pin = certificate()
     with ExitStack() as stack:
         ports = []
@@ -105,6 +116,7 @@ def main():
             server = stack.enter_context(socketserver.ThreadingTCPServer(("127.0.0.1", 0), Fixture))
             server.daemon_threads = True
             server.variant, server.handshake, server.tls = variant, handshake, encryption
+            server.target, server.target_port = target, target_port
             Thread(target=server.serve_forever, daemon=True).start()
             ports.append(str(server.server_address[1]))
         Path("fixture.tmp").write_text(",".join(ports + [proof, user, password, pin]) + "\n", encoding="ascii")

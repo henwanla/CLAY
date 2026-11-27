@@ -14,7 +14,7 @@ import ucrt
 #endif
 
 private enum CommandError: Error {
-    case usage, file, profilePipe, noNodes, invalidPolicy, missingSecret, controller
+    case usage, file, profilePipe, targetPipe, noNodes, invalidPolicy, missingSecret, controller
 }
 
 private struct PortableCLI {
@@ -25,6 +25,7 @@ private struct PortableCLI {
         catch CommandError.usage { quit(usage, code: 64) }
         catch CommandError.file { quit("Unable to read a UTF-8 input file of up to 2 MiB.", code: 65) }
         catch CommandError.profilePipe { quit("Unable to read a UTF-8 profile from the private input pipe.", code: 65) }
+        catch CommandError.targetPipe { quit("Rule preview requires private input and output pipes.", code: 65) }
         catch CommandError.noNodes { quit("No supported nodes.", code: 65) }
         catch CommandError.invalidPolicy { quit("Invalid PAC rules, decision, or target.", code: 65) }
         catch PACError.invalidRuleLine(let line, _) { quit("Invalid PAC rule at line \(line).", code: 65) }
@@ -73,6 +74,11 @@ private struct PortableCLI {
             let report = ProfileImporter.read(try readProfile(arguments[1]))
             guard !report.profiles.isEmpty else { throw CommandError.noNodes }
             printInspection(report, numbered: true, includeLabels: true)
+        case "desktop-rule-preview":
+            // A URL can carry private data. Accept the target only over a pipe.
+            guard arguments.count == 2 else { throw CommandError.usage }
+            guard desktopPipes() else { throw CommandError.targetPipe }
+            desktopRulePreview(arguments[1])
         #endif
         case "pac-check", "pac-script":
             let values = arguments.dropFirst(2)
@@ -90,14 +96,7 @@ private struct PortableCLI {
                 print(try policy.makeScript(proxyPort: port))
             } else if let value {
                 guard let match = try? policy.evaluate(value) else { throw CommandError.invalidPolicy }
-                let description: String
-                switch match.reason {
-                case .loopback: description = "loopback"
-                case .local: description = "local"
-                case .rule: description = "rule:\((match.ruleIndex ?? 0) + 1)"
-                case .fallback: description = "default"
-                }
-                print("decision=\(match.decision.rawValue) source=\(description)")
+                print(decisionLine(match))
             } else {
                 print("valid_pac_rules=\(rules.count)")
             }
@@ -112,24 +111,62 @@ private struct PortableCLI {
         case "mihomo-run":
             guard let options = LinuxRunOptions(arguments) else { throw CommandError.usage }
             let profiles = ProfileImporter.read(try readProfile(options.source)).profiles
-            let policy = try options.rules.map {
-                try PACPolicy(rules: PACPolicy.importRules(readText($0)), defaultDecision: .proxy, bypassLocal: true)
-            }
+            let policy = try options.rules.map(portablePolicy)
             let status = try LinuxMihomoRuntime.run(profiles: profiles, options: options, policy: policy)
             if status != 0 { exit(status) }
         #elseif os(Windows)
         case "mihomo-run":
             guard let options = WindowsRunOptions(arguments) else { throw CommandError.usage }
             let profiles = ProfileImporter.read(try readProfile(options.source)).profiles
-            let policy = try options.rules.map {
-                try PACPolicy(rules: PACPolicy.importRules(readText($0)), defaultDecision: .proxy, bypassLocal: true)
-            }
+            let policy = try options.rules.map(portablePolicy)
             let status = try WindowsMihomoRuntime.run(profiles: profiles, options: options, policy: policy)
             if status != 0 { exit(status) }
         #endif
         default: throw CommandError.usage
         }
     }
+
+    private static func portablePolicy(_ path: String) throws -> PACPolicy {
+        let rules = try PACPolicy.importRules(readText(path))
+        return PACPolicy(rules: rules, defaultDecision: .proxy, bypassLocal: true)
+    }
+
+    private static func decisionLine(_ match: PACMatch) -> String {
+        let source: String
+        switch match.reason {
+        case .loopback: source = "loopback"
+        case .local: source = "local"
+        case .rule: source = "rule:\((match.ruleIndex ?? 0) + 1)"
+        case .fallback: source = "default"
+        }
+        return "decision=\(match.decision.rawValue) source=\(source)"
+    }
+
+    #if os(macOS) || os(Linux) || os(Windows)
+    private static func desktopRulePreview(_ path: String) {
+        guard let bytes = try? read(.standardInput, maxBytes: 4096), let target = String(data: bytes, encoding: .utf8),
+              target.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) }) else {
+            print("error=target")
+            return
+        }
+        let policy: PACPolicy
+        do { policy = try portablePolicy(path) }
+        catch PACError.invalidRuleLine(let line, _) {
+            print("error=rule-line:\(line)")
+            return
+        } catch {
+            print("error=rules")
+            return
+        }
+        if target.trimmingCharacters(in: .whitespaces).isEmpty {
+            print("valid_pac_rules=\(policy.rules.count)")
+        } else if let match = try? policy.evaluate(target) {
+            print(decisionLine(match))
+        } else {
+            print("error=target")
+        }
+    }
+    #endif
 
     private static func printInspection(_ report: ImportResult, numbered: Bool, includeLabels: Bool) {
         func kind(_ profile: NodeProfile) -> String { "\(profile.protocolName)/\(profile.transport)/\(profile.security)" }

@@ -22,6 +22,7 @@ internal sealed class MainWindow : Form
     private readonly Button openEngine = Button(L("Choose Mihomo…", "选择 Mihomo…", "Mihomo を選択…"));
     private readonly Button openRule = Button(L("Choose rules…", "选择规则…", "ルールを選択…"));
     private readonly Button clearRule = Button(L("Clear", "清除", "クリア"));
+    private readonly Button previewRule = Button(L("Preview rules…", "预览规则…", "ルールを確認…"));
     private readonly Button start = Button(L("Start proxy", "启动代理", "プロキシを開始"));
     private readonly Button apply = Button(L("Apply", "应用切换", "適用"));
     private readonly Button stop = Button(L("Stop", "停止", "停止"));
@@ -86,7 +87,7 @@ internal sealed class MainWindow : Form
         inputs.Controls.Add(openProfile, 0, 0); inputs.Controls.Add(profileLabel, 1, 0); inputs.Controls.Add(subscriptions, 2, 0);
         inputs.Controls.Add(openEngine, 0, 1); inputs.Controls.Add(engineLabel, 1, 1); inputs.SetColumnSpan(engineLabel, 2);
         inputs.Controls.Add(Label("SHA-256"), 0, 2); inputs.Controls.Add(digest, 1, 2); inputs.SetColumnSpan(digest, 2);
-        inputs.Controls.Add(openRule, 0, 3); inputs.Controls.Add(ruleLabel, 1, 3); inputs.Controls.Add(clearRule, 2, 3);
+        inputs.Controls.Add(openRule, 0, 3); inputs.Controls.Add(ruleLabel, 1, 3); inputs.Controls.Add(Row(previewRule, clearRule), 2, 3);
         files.Controls.Add(inputs); layout.Controls.Add(files);
 
         var live = Group(L("Session", "当前会话", "セッション"));
@@ -112,6 +113,7 @@ internal sealed class MainWindow : Form
         openEngine.Click += (_, _) => { if (Choose("Mihomo (*.exe)|*.exe") is { } path) { engine = path; engineLabel.Text = Path.GetFileName(path); digest.Clear(); UpdateControls(); } };
         openRule.Click += (_, _) => { if (Choose("Text files|*.txt;*.csv;*.list|All files|*.*") is { } path) { rules = path; ruleLabel.Text = Path.GetFileName(path); UpdateControls(); } };
         clearRule.Click += (_, _) => { rules = null; ruleLabel.Text = None(); UpdateControls(); };
+        previewRule.Click += (_, _) => { if (rules is { } path) RulePreviewDialog.Show(this, cli, path); };
         digest.TextChanged += (_, _) => UpdateControls();
         start.Click += async (_, _) => await StartAsync();
         system.Click += async (_, _) => await ToggleWindowsAsync();
@@ -345,7 +347,7 @@ internal sealed class MainWindow : Form
     {
         var idle = !busy && session is null;
         openProfile.Enabled = subscriptions.Enabled = openEngine.Enabled = openRule.Enabled = digest.Enabled = idle;
-        clearRule.Enabled = idle && rules is not null;
+        clearRule.Enabled = previewRule.Enabled = idle && rules is not null;
         start.Enabled = idle && profile is not null && engine is not null && digest.Text.Trim().Length == 64;
         var running = !busy && session is not null;
         node.Enabled = mode.Enabled = !busy && profile is not null;

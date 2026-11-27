@@ -99,6 +99,8 @@ The [downloadable GTK desktop preview](Platforms/Linux/README.md#download-for-ub
 
 The [Windows x64 desktop preview](Platforms/Windows/README.md#download-for-windows-x64--下载试用包) offers a manual loopback proxy, optional Windows PAC with restoration, and manual HTTPS subscription refresh with encrypted caching. Its tray icon keeps the session accessible after the window is closed and offers node and mode switching.
 
+Windows and Linux development builds add **Preview rules** before connecting. Check a local rules file or enter a domain, IP address, or URL to see its first match offline.
+
 The [Android ARM64 offline preview](Platforms/Android/README.md) checks profiles and PAC rules in Simplified Chinese, English, and Japanese. The debug APK passed tests on an Android API 24 ARM64 emulator. It has no network permission or VPN support.
 
 The [Android local relay preview](Platforms/Android/README.md#本机代理预览--local-relay-preview) uses a separate app ID. Clients that accept authenticated HTTP or SOCKS5 proxies can connect manually over loopback. The app can switch nodes and Rule, Global, or Direct mode. Only clients configured with the manual proxy are affected.

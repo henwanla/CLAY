@@ -14,7 +14,7 @@ from gi.repository import GLib, Gtk, Pango
 from desktop_pac import ReleaseError
 from gnome_pac import GnomePac
 from kde_pac import KdePac, plasma6_session
-from session import DesktopError, MODES, Session, default_pac, inspect
+from session import DesktopError, MODES, Session, default_pac, inspect, preview_rules
 from subscription_dialog import SubscriptionDialog
 from subscriptions import Manager, Store, wipe
 from tray import create_tray
@@ -46,6 +46,7 @@ class Window(Gtk.Window):
         self.preview = None
         self.selected_subscription = None
         self.subscription_dialog = None
+        self.rule_dialog = None
         self.busy = False
         self.closing = False
         self.destroyed = False
@@ -83,8 +84,12 @@ class Window(Gtk.Window):
         self.use_rules = Gtk.CheckButton(label="Use rules file")
         self.use_rules.connect("toggled", lambda *_: self.sync_controls())
         self.rules = self.chooser("Choose a local PAC rules file")
+        self.rules.connect("file-set", lambda *_: self.sync_controls())
+        self.rule_preview = Gtk.Button(label="Preview rules…")
+        self.rule_preview.connect("clicked", self.open_rule_preview)
         grid.attach(self.use_rules, 0, 4, 1, 1)
         grid.attach(self.rules, 1, 4, 1, 1)
+        grid.attach(self.rule_preview, 2, 4, 1, 1)
 
         self.nodes = Gtk.ComboBoxText()
         for cell in self.nodes.get_cells():
@@ -145,12 +150,13 @@ class Window(Gtk.Window):
 
     def sync_controls(self):
         running = self.session.process is not None
-        active = self.busy or self.closing or self.subscription_dialog is not None
+        active = self.busy or self.closing or self.subscription_dialog is not None or self.rule_dialog is not None
         confirmed = not active and self.session.state is not None
         editable = not active and not running
         for widget in (self.profile, self.load, self.subscriptions, self.engine, self.fingerprint, self.use_rules):
             widget.set_sensitive(editable)
         self.rules.set_sensitive(editable and self.use_rules.get_active())
+        self.rule_preview.set_sensitive(self.rules.get_sensitive() and bool(self.rules.get_filename()))
         self.nodes.set_sensitive(confirmed or (editable and self.preview is not None))
         self.modes.set_sensitive(confirmed or editable)
         self.set_node.set_sensitive(confirmed)
@@ -166,7 +172,7 @@ class Window(Gtk.Window):
     def sync_system_controls(self):
         pending = self.pac is not None and self.pac.pending
         running = self.session.process is not None
-        enabled = self.pac is not None and not self.busy and not self.closing and self.subscription_dialog is None and (
+        enabled = self.pac is not None and not self.busy and not self.closing and self.subscription_dialog is None and self.rule_dialog is None and (
             pending or (self.session.state is not None if running else self.start.get_sensitive()))
         name = self.desktop_name
         label = (f"Restore {name} proxy" if pending else f"Apply to {name}" if running else
@@ -295,6 +301,72 @@ class Window(Gtk.Window):
             return GLib.SOURCE_REMOVE
 
         threading.Thread(target=run).start()
+
+    def open_rule_preview(self, *_):
+        path = self.rules.get_filename()
+        if not path or not self.rule_preview.get_sensitive():
+            return
+        dialog = Gtk.Dialog(title="Rule preview", transient_for=self, modal=True, destroy_with_parent=True)
+        dialog.set_default_size(460, -1)
+        dialog.add_button("Close", Gtk.ResponseType.CLOSE)
+        body = dialog.get_content_area()
+        body.set_border_width(12)
+        body.set_spacing(8)
+        intro = ("Check this file in Rule mode. Global and Direct ignore the file. The system PAC may bypass "
+                 "the proxy for local requests. Rule numbers skip comments and blank lines.")
+        body.pack_start(Gtk.Label(label=intro, xalign=0, wrap=True), False, False, 0)
+        caption = Gtk.Label(label="Domain, IP address or URL (optional)", xalign=0)
+        target = Gtk.Entry(max_length=4096)
+        caption.set_mnemonic_widget(target)
+        body.pack_start(caption, False, False, 0)
+        body.pack_start(target, False, False, 0)
+        submit = Gtk.Button(label="Check")
+        hint = "Leave blank to validate the file. No lookup or connection is made."
+        result = Gtk.Label(label=hint, xalign=0, wrap=True)
+        body.pack_start(submit, False, False, 0)
+        body.pack_start(result, False, False, 0)
+        cancelled = threading.Event()
+
+        def closed(*_):
+            cancelled.set()
+            self.rule_dialog = None
+            if not self.destroyed:
+                self.sync_controls()
+
+        def finish(message):
+            if not cancelled.is_set():
+                result.set_text(message)
+                submit.set_sensitive(True)
+                target.set_sensitive(True)
+                target.grab_focus()
+            return GLib.SOURCE_REMOVE
+
+        def check(*_):
+            if not submit.get_sensitive():
+                return
+            value = target.get_text()
+            submit.set_sensitive(False)
+            target.set_sensitive(False)
+            result.set_text("Checking…")
+
+            def run():
+                try:
+                    message = preview_rules(self.session.binary, path, value, cancelled)
+                except Exception:
+                    message = "Could not check the rules file."
+                GLib.idle_add(finish, message)
+
+            threading.Thread(target=run, daemon=True).start()
+
+        target.connect("activate", check)
+        target.connect("changed", lambda *_: result.set_text(hint))
+        submit.connect("clicked", check)
+        dialog.connect("response", lambda *_: dialog.destroy())
+        dialog.connect("destroy", closed)
+        self.rule_dialog = dialog
+        self.sync_controls()
+        dialog.show_all()
+        target.grab_focus()
 
     def load_profile(self, *_):
         path = self.profile.get_filename()

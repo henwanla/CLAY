@@ -189,6 +189,29 @@ def desktop_bridge_checks(directory):
     print("PASS named desktop nodes through pipes and refusal of disk redirects")
 
 
+def desktop_rule_checks(directory):
+    rules = directory / "规则.txt"
+    rules.write_text("# Preview fixture\nDOMAIN-SUFFIX,example.test,DIRECT\n\n"
+                     "DOMAIN,private.example.test,PROXY\nIP-CIDR6,2001:db8::/32,DIRECT\n", encoding="utf-8")
+    args = ("desktop-rule-preview", rules)
+    private_target = b"https://private.example.test/path?sig=SYNTHETIC_URL_TOKEN"
+    for target, expected in ((b"", b"valid_pac_rules=3"), (private_target, b"decision=DIRECT source=rule:1"),
+                             (b"[2001:db8::42]", b"decision=DIRECT source=rule:3"),
+                             (b"outside.test", b"decision=PROXY source=default"),
+                             (b"127.0.0.1", b"decision=DIRECT source=loopback"),
+                             (b"10.0.0.6", b"decision=DIRECT source=local"),
+                             (b"https://", b"error=target"), (b"x\ny", b"error=target"),
+                             (b"\xff", b"error=target"), (b"x" * 4097, b"error=target")):
+        assert run(*args, data=target) == expected + b"\n"
+    rules.write_text("# Comment\n\nUNKNOWN,SYNTHETIC_PRIVATE_RULE,DIRECT\n", encoding="utf-8")
+    assert run(*args, data=private_target) == b"error=rule-line:3\n"
+    assert run("desktop-rule-preview", directory / "missing.txt", data=b"") == b"error=rules\n"
+    with (directory / "redirected-rule-preview.txt").open("wb") as disk:
+        refused = subprocess.run([BINARY, *args], input=private_target, stdout=disk, stderr=subprocess.PIPE, timeout=15)
+        assert refused.returncode == 65 and disk.tell() == 0 and b"SYNTHETIC_URL_TOKEN" not in refused.stderr
+    print("PASS private rule preview, first match, IPv6, error line and disk redirect refusal")
+
+
 class Fixture(http.server.BaseHTTPRequestHandler):
     requests = []
     redirect = False
@@ -239,5 +262,6 @@ def controller_checks():
 with tempfile.TemporaryDirectory(prefix="clay-portable-") as temp:
     offline_checks(pathlib.Path(temp))
     desktop_bridge_checks(pathlib.Path(temp))
+    desktop_rule_checks(pathlib.Path(temp))
 if "--offline-only" not in sys.argv[2:]:
     controller_checks()

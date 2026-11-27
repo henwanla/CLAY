@@ -38,6 +38,12 @@ Download the Windows x64 ZIP and its matching SHA-256 file from the [0.3.4 previ
 
 从 [0.3.4 预览版](https://github.com/henwanla/CLAY/releases/tag/v0.3.4) 下载 Windows x64 的 ZIP 和校验文件。用上述 PowerShell 命令核对 ZIP 的 SHA-256 后再解压，按 `START-HERE.txt` 试用。预览包未签名，需准备 .NET 10 Desktop Runtime、Swift 运行时和已核验的 Mihomo。
 
+## Offline rule preview / 离线规则预览
+
+In development builds, select a local rule file while stopped, then choose **Preview rules…**. Leave the target blank to verify the file or enter a domain, IP address, or full URL and click **Check**. The first matching rule wins. Match numbers count rules only; errors show the actual line in the file. The preview describes the selected file in Rule mode. Global and Direct ignore the file; system PAC can bypass the proxy for local requests before the engine sees them. CLAY never looks up the preview target, opens it, or saves it.
+
+开发版在会话停止时选好本地规则文件，点「预览规则…」。留空可检查文件，填入域名、IP 或完整 URL 后可以看命中的第一条规则。命中编号跳过注释及空行，语法错误显示实际文件行号。结果对应规则模式；全局和直连模式不使用该文件，系统 PAC 也可能先让本地请求直连。CLAY 不查询、不打开，也不保存测试地址。
+
 ## Subscriptions / 订阅管理
 
 With the proxy stopped, open **Subscriptions…**, enter a name and HTTPS address, and choose **Download and save**. Pick a saved feed and choose **Use saved nodes** to load its cache for the next session. Refresh only replaces the saved copy; use the refreshed nodes explicitly to switch snapshots. A failed download or import leaves the last working cache available. **Load nodes…** switches back to a local profile. Removing the current feed also clears its selected snapshot.

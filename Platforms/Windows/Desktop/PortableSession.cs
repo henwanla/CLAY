@@ -15,6 +15,7 @@ internal sealed record Node(int Number, string Kind, string Label)
 
 internal sealed record Inspection(string? Path, byte[] Digest, IReadOnlyList<Node> Nodes);
 internal sealed record Route(string Mode, int Node);
+internal sealed record RulePreview(string Kind, int Number = 0, bool Direct = false);
 internal sealed class ProfileChangedException : Exception { }
 internal sealed class SessionCleanupException : Exception { }
 internal sealed class BridgeException(string step, int? exitCode = null) : IOException
@@ -32,6 +33,9 @@ internal sealed class PortableSession : IAsyncDisposable
     private static readonly Regex Ready = new(@"\Amihomo=ready proxy=127\.0\.0\.1:([0-9]{1,5}) controller=127\.0\.0\.1:[0-9]{1,5}\z");
     private static readonly Regex Status = new(@"\Amode=(rule|global|direct) node=([1-9][0-9]{0,2})\z");
     private static readonly Regex Sha256 = new(@"\A[0-9a-fA-F]{64}\z");
+    private static readonly Regex PreviewCount = new(@"\Avalid_pac_rules=([0-9]{1,7})\z");
+    private static readonly Regex PreviewLine = new(@"\Aerror=rule-line:([1-9][0-9]{0,6})\z");
+    private static readonly Regex PreviewDecision = new(@"\Adecision=(DIRECT|PROXY) source=(loopback|local|default|rule:([1-9][0-9]{0,6}))\z");
     private readonly Process cli;
     private readonly Task discardErrors;
     private readonly HashSet<int> nodes;
@@ -45,6 +49,45 @@ internal sealed class PortableSession : IAsyncDisposable
 
     internal string Address { get; private set; } = "";
     internal bool Ended => cli.HasExited;
+
+    internal static async Task<RulePreview> PreviewRulesAsync(string executable, string path, string target,
+        CancellationToken cancel = default)
+    {
+        if (Encoding.UTF8.GetByteCount(target) > 4096) return new("too-long");
+        using var child = StartProcess(executable, ["desktop-rule-preview", path]);
+        var discard = child.StandardError.BaseStream.CopyToAsync(Stream.Null);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+        timeout.CancelAfter(TimeSpan.FromSeconds(5));
+        try
+        {
+            await child.StandardInput.BaseStream.WriteAsync(Encoding.UTF8.GetBytes(target), timeout.Token);
+            child.StandardInput.Close();
+            var buffer = new char[81];
+            var length = await child.StandardOutput.ReadBlockAsync(buffer.AsMemory(), timeout.Token);
+            if (length is 0 or >= 81 || buffer[length - 1] != '\n') throw new BridgeException("rule-preview-output");
+            await child.WaitForExitAsync(timeout.Token);
+            if (child.ExitCode != 0) throw new BridgeException("rule-preview", child.ExitCode);
+            var end = length > 1 && buffer[length - 2] == '\r' ? length - 2 : length - 1;
+            var result = new string(buffer, 0, end);
+            if (result == "error=target") return new("target");
+            if (result == "error=rules") return new("rules");
+            var match = PreviewCount.Match(result);
+            if (match.Success) return new("count", int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture));
+            match = PreviewLine.Match(result);
+            if (match.Success) return new("rule-line", int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture));
+            match = PreviewDecision.Match(result);
+            if (!match.Success) throw new BridgeException("rule-preview-output");
+            var direct = match.Groups[1].Value == "DIRECT";
+            return match.Groups[3].Success
+                ? new("rule", int.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture), direct)
+                : new(match.Groups[2].Value, Direct: direct);
+        }
+        finally
+        {
+            if (!child.HasExited) child.Kill();
+            await discard;
+        }
+    }
 
     internal static async Task<string> DefaultPacAsync(string executable, string address)
     {

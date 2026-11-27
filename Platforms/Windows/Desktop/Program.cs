@@ -64,6 +64,14 @@ internal static class Program
             var rule = Path.Combine(scratch.FullName, "rule.txt");
             await File.WriteAllTextAsync(profile, "ss://aes-128-gcm:sample-one@example.invalid:443#hidden-entry-one\n" +
                                                 "ss://aes-128-gcm:sample-two@example.invalid:444#テスト%20节点\n");
+            await File.WriteAllTextAsync(rule, "# Fixture\nIP-CIDR6,2001:db8::/32,DIRECT\n");
+            if (await PortableSession.PreviewRulesAsync(cli, rule, "") != new RulePreview("count", 1) ||
+                await PortableSession.PreviewRulesAsync(cli, rule, "https://[2001:db8::42]/private?token=fixtures-only") != new RulePreview("rule", 1, true))
+                throw new BridgeException("rule-preview-match");
+            await File.AppendAllTextAsync(rule, "\nINVALID,hidden.example.test,PROXY\n");
+            if (await PortableSession.PreviewRulesAsync(cli, rule, "") != new RulePreview("rule-line", 4))
+                throw new BridgeException("rule-preview-invalid-line");
+            Console.WriteLine("Windows desktop check: offline rule preview passed");
             await File.WriteAllTextAsync(rule, "DOMAIN-SUFFIX,example.invalid,DIRECT\n");
             var inspection = await PortableSession.InspectAsync(cli, profile);
             if (inspection.Nodes.Count != 2 || inspection.Nodes[0].WindowCaption != "1 · hidden-entry-one  [ss/tcp/aead]" ||

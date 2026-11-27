@@ -200,6 +200,40 @@ def launch(binary, *arguments):
         raise DesktopError("Could not run the supplied clay-portable binary.") from None
 
 
+def preview_rules(binary, path, target, cancel=None):
+    data = target.encode("utf-8")
+    if len(data) > 4096:
+        return "Enter a shorter domain, IP address, or URL."
+    with launch(binary, "desktop-rule-preview", path) as child:
+        try:
+            deadline = time.monotonic() + 5
+            # At most 4096 bytes fit in an empty Linux pipe. Write no URL to argv.
+            child.stdin.write(data)
+            child.stdin.close()
+            lines = Lines(child.stdout, limit=80)
+            result = lines.read(deadline, cancel)
+            if result is None or lines.read(deadline, cancel) is not None or child.wait(timeout=1) != 0:
+                raise DesktopError("Could not check the rules file.")
+        finally:
+            if child.poll() is None:
+                child.kill()
+    if result == b"error=target":
+        return "Enter a valid domain, IP address, or URL."
+    if result == b"error=rules":
+        return "Choose a readable UTF-8 rules file of up to 2 MiB."
+    if match := re.fullmatch(rb"error=rule-line:([1-9][0-9]{0,6})", result):
+        return f"Invalid rule on line {int(match[1])}."
+    if match := re.fullmatch(rb"valid_pac_rules=([0-9]{1,7})", result):
+        return f"Valid file · Rule count: {int(match[1])}"
+    if match := re.fullmatch(rb"decision=(DIRECT|PROXY) source=(loopback|local|default|rule:[1-9][0-9]{0,6})", result):
+        action = "Direct" if match[1] == b"DIRECT" else "Proxy"
+        reason = {b"loopback": "Loopback", b"local": "Local address", b"default": "No matching rule"}.get(match[2])
+        if reason is None:
+            reason = f"Rule {int(match[2][5:])}"
+        return f"{action} · {reason}"
+    raise DesktopError("Could not check the rules file.")
+
+
 def default_pac(binary, port, cancel=None):
     if not isinstance(port, int) or not 1 <= port <= 65535:
         raise DesktopError("The local proxy has no confirmed port.")

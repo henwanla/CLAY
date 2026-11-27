@@ -15,7 +15,7 @@ import time
 from urllib.error import HTTPError
 from urllib.request import ProxyHandler, build_opener
 
-from session import DesktopError, Session, State, default_pac, inspect
+from session import DesktopError, Session, State, default_pac, inspect, preview_rules
 
 
 ADAPTER_CLI = '''
@@ -69,6 +69,12 @@ def expect_error(action, text):
 
 
 def adapter_checks(binary, directory, profile):
+    rules_file = directory / "rules.txt"
+    rules_file.write_text("# Fixture\nIP-CIDR6,2001:db8::/32,DIRECT\n", encoding="utf-8")
+    assert preview_rules(binary, rules_file, "") == "Valid file · Rule count: 1"
+    assert preview_rules(binary, rules_file, "https://[2001:db8::42]/private?token=fixtures-only") == "Direct · Rule 1"
+    rules_file.write_text("# Fixture\n\nINVALID,hidden.example.test,PROXY\n", encoding="utf-8")
+    assert preview_rules(binary, rules_file, "") == "Invalid rule on line 3."
     preview = inspect(binary, profile)
     assert tuple((n.kind, n.label) for n in preview.nodes) == (("ss/tcp/aead", "synthetic-private-name"), ("trojan/tcp/tls", "second"))
     assert preview.skipped == 1
@@ -261,7 +267,7 @@ def window_checks(binary, directory, profile, gnome=False, plasma=False):
         assert sys.path[0] == str(module_path)
         assert Path(sys.modules["session"].__file__).resolve().parent == module_path
     window_class = runpy.run_path(str(module_path / "clay-desktop.py"))["Window"]
-    from gi.repository import GLib
+    from gi.repository import GLib, Gtk
 
     root = Path(__file__).resolve().parents[2]
     template = runpy.run_path(str(root / "scripts" / "smoke-linux-runtime.py"))["ENGINE"]
@@ -327,6 +333,17 @@ def window_checks(binary, directory, profile, gnome=False, plasma=False):
         window.use_rules.set_active(True)
         assert window.rules.set_filename(str(rules))
         until(lambda: window.engine.get_filename() == str(engine) and window.rules.get_filename() == str(rules))
+        window.rules.emit("file-set")  # set_filename is not a user selection.
+        click(window.rule_preview)
+        dialog = window.rule_dialog
+        assert dialog is not None and not window.start.get_sensitive()
+        widgets = dialog.get_content_area().get_children()
+        entry = next(item for item in widgets if isinstance(item, Gtk.Entry))
+        entry.set_text("https://preview.example.test/synthetic")
+        entry.emit("activate")
+        until(lambda: any(isinstance(item, Gtk.Label) and item.get_text() == "Direct · Rule 1" for item in widgets))
+        dialog.response(Gtk.ResponseType.CLOSE)
+        assert window.rule_dialog is None and window.session.process is None
         window.modes.set_active_id("global")
 
         window.fingerprint.set_text("0" * 64)

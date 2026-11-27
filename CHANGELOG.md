@@ -10,6 +10,8 @@
 - Android VPN accepts one IPv4 or IPv6 DNS address. System lookups still follow the active node and routing policy.
 - iOS 隧道实验可选择 IPv4 或 IPv6 TCP 端点。宿主回环验证了 IPv6 转发和在线切换 VLESS 节点；签名真机验证待完成。
 - The iOS Tunnel Lab can use an IPv4 or IPv6 TCP endpoint. Host loopback tests cover IPv6 forwarding and live VLESS node switching; signed device testing is still pending.
+- Windows 和 Linux 开发版可在连接前检查规则文件，输入域名、IP 或 URL 可离线预览命中的规则。
+- Windows and Linux development builds check local rule files and preview a domain, IP address, or URL offline before connecting.
 
 ## 0.3.4 · 桌面预览 / Desktop preview
 

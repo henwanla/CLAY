@@ -70,6 +70,12 @@ Linux 桌面预览可以读取本地节点配置、启动通过 SHA-256 校验�
 
 **Plasma 6** 可按上面的命令构建 KConfig 辅助程序，再使用 **Connect Plasma**、**Apply to Plasma** 或 **Restore Plasma proxy**。CLAY 只临时改代理模式和脚本地址，原有手动代理字段和例外列表仍保留。需要应用支持读取 Plasma 代理设置，例如使用带 KDE 后端和 PAC 支持的 libproxy；部分已打开的应用可能需要重启。使用独立代理设置的应用可填手动地址。Plasma 5 和受管理或非标准配置不在本次预览范围。
 
+## Offline rule preview / 离线规则预览
+
+In development builds, enable **Use rules file** while stopped, select a local file, then choose **Preview rules…**. Leave the target blank to verify the file or enter a domain, IP address, or full URL and click **Check**. The first matching rule wins. Match numbers count rules only; errors show the actual line in the file. The preview describes the selected file in Rule mode. Global and Direct ignore the file; system PAC can bypass the proxy for local requests before the engine sees them. CLAY never looks up the preview target, opens it, or saves it.
+
+开发版在会话停止时勾选 **Use rules file**，选好文件后点 **Preview rules…**。留空可检查文件，填入域名、IP 或完整 URL 后可以看命中的第一条规则。命中编号跳过注释及空行，语法错误显示实际文件行号。结果对应规则模式；全局和直连模式不使用该文件，系统 PAC 也可能先让本地请求直连。CLAY 不查询、不打开，也不保存测试地址。
+
 ## Synthetic checks / 测试
 
 The adapter check works on macOS or Linux. Ubuntu’s GTK check uses the real Linux CLI, a synthetic engine, private dconf storage, and a tray watcher and Secret Service on a private session bus. It verifies exported menu actions, independent system settings readback, restart recovery, background cleanup, and a cached subscription session. The download fixture makes no external requests.

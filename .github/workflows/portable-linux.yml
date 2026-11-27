@@ -60,8 +60,12 @@ jobs:
           "$swift" build -c release --static-swift-stdlib --product clay-portable
       - name: Install GTK and KDE test dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends python3-gi gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1 dbus-daemon xvfb xauth gsettings-desktop-schemas dconf-gsettings-backend dconf-service libglib2.0-bin python3-cryptography libsecret-tools gnome-keyring libkf5config-dev qtbase5-dev libproxy-tools
+          # These dependencies are all in Ubuntu. Do not refresh or install
+          # from unrelated third-party sources in the hosted runner image.
+          test -s /etc/apt/sources.list.d/ubuntu.sources
+          sources=(-o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources -o Dir::Etc::sourceparts=-)
+          sudo apt-get "${sources[@]}" update
+          sudo apt-get "${sources[@]}" install -y --no-install-recommends python3-gi gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1 dbus-daemon xvfb xauth gsettings-desktop-schemas dconf-gsettings-backend dconf-service libglib2.0-bin python3-cryptography libsecret-tools gnome-keyring libkf5config-dev qtbase5-dev libproxy-tools
       - name: Build the native KDE configuration helper
         run: |
           cmake -S Platforms/Linux/kde -B .build/kde -DCMAKE_BUILD_TYPE=Release

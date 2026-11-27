@@ -18,16 +18,18 @@ dns_targets = (bytes.fromhex("02003501c6336435"),
                bytes.fromhex("02003503") + IPv6Address("2001:db8::53").packed)
 label = f"clay-{proof}".encode("ascii")
 question = bytes([len(label)]) + label + b"\x04test\x00\x00\x01\x00\x01"
-labels = (f"proxy-{proof}", f"direct-{proof}")
-names = {bytes([len(name)]) + name.encode("ascii") + b"\x04test\x00" for name in labels}
+labels_by_target = {target: tuple(f"{action}-{family}-{proof}" for action in ("proxy", "direct"))
+                    for target, family in zip(dns_targets, ("v4", "v6"))}
+names_by_target = {target: tuple(bytes([len(name)]) + name.encode("ascii") + b"\x04test\x00" for name in labels)
+                   for target, labels in labels_by_target.items()}
 
 
 def tls_context():
-    # Ephemeral certificate for only the two synthetic names. The Android test
+    # Ephemeral certificate for the synthetic names. The Android test
     # trusts this certificate in its own SSLContext, never at the system level.
     Path("tls.cnf").write_text("[req]\ndistinguished_name=dn\nx509_extensions=ext\nprompt=no\n"
                               "[dn]\nCN=CLAY loopback fixture\n[ext]\nsubjectAltName=" +
-                              ",".join(f"DNS:{name}.test" for name in labels) + "\n")
+                              ",".join(f"DNS:{name}.test" for labels in labels_by_target.values() for name in labels) + "\n")
     run(["openssl", "req", "-x509", "-newkey", "ec", "-pkeyopt", "ec_paramgen_curve:prime256v1",
          "-nodes", "-days", "1", "-config", "tls.cnf", "-out", "tls.pem", "-keyout", "tls-key.pem"],
         stdout=DEVNULL, stderr=DEVNULL, check=True)
@@ -80,7 +82,7 @@ class Request(StreamRequestHandler):
         query = self.rfile.read(length)
         if query[4:10] != pack("!HHH", 1, 0, 0):
             return
-        qname = next((name for name in names if query[12:].startswith(name)), None)
+        qname = next((name for name in names_by_target[dns_target] if query[12:].startswith(name)), None)
         answer = b""
         if query[12:] == question:
             query_question = question

@@ -71,8 +71,9 @@ check_result "$work/report" CLAY_ANDROID_VPN_CONSENT_CANCEL_PASS
 # Only the fixtures on this disposable emulator are preauthorized.
 "${adb[@]}" shell appops set "$app" ACTIVATE_VPN allow
 "${adb[@]}" shell appops set "$revoker" ACTIVATE_VPN allow
-for cycle in 1 2; do
-  instrument > "$work/report"
+for resolver in v4 v6; do
+  printf 'Checking Android system DNS over %s\n' "$resolver"
+  instrument -e resolver "$resolver" > "$work/report"
   check_result "$work/report" CLAY_ANDROID_VPN_PASS
 done
 instrument -e vpnFault engine > "$work/report"

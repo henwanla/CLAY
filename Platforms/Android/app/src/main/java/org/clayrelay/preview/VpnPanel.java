@@ -17,6 +17,7 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.Spinner;
 import android.widget.TextView;
+import java.net.InetAddress;
 
 final class VpnPanel {
     static final int CONSENT = 590, NOTICES = 592;
@@ -112,12 +113,16 @@ final class VpnPanel {
 
     private void start() {
         if (asks || pending != null) return;
-        if (!validRequest()) { status.setText(R.string.vpn_invalid); return; }
+        InetAddress server = VpnTransport.parseDns(dns.getText().toString().trim());
+        if (server == null || !source.available() || rules.length() > 12_000) {
+            status.setText(R.string.vpn_invalid);
+            return;
+        }
         byte[] material = source.snapshot();
         if (material == null || material.length == 0) { status.setText(R.string.vpn_invalid); return; }
         pending = new ClayVpnService.Draft(material, picker.selected(), MODES[mode.getSelectedItemPosition()],
                 rules.getText().toString(), (direct.isChecked() ? 1 : 0) | (bypass.isChecked() ? 2 : 0),
-                dns.getText().toString().trim());
+                server);
         if (Build.VERSION.SDK_INT >= 33 && !askedNotifications && activity.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
                 != PackageManager.PERMISSION_GRANTED) {
             asks = true; askedNotifications = true;
@@ -156,15 +161,5 @@ final class VpnPanel {
     private void discard() {
         if (pending != null) pending.wipe();
         pending = null;
-    }
-
-    private boolean validRequest() {
-        String server = dns.getText().toString().trim();
-        if (!server.matches("(0|[1-9][0-9]{0,2})(\\.(0|[1-9][0-9]{0,2})){3}")) return false;
-        String[] parts = server.split("\\.");
-        for (String part : parts) if (Integer.parseInt(part) > 255) return false;
-        int first = Integer.parseInt(parts[0]);
-        return first > 0 && first != 127 && first < 224 && !server.startsWith("198.18.0.")
-                && source.available() && rules.length() <= 12_000;
     }
 }

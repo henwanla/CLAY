@@ -6,6 +6,8 @@
 - The Android VPN preview routes IPv6 alongside IPv4 with node switching and Rule, Global, or Direct mode. A failed proxy path does not fall back to direct IPv6 in Global mode.
 - 规则预览、PAC 脚本和内核规则支持 IPv6 网段。Android VPN 拒绝节点不支持的代理 UDP 流量，明确设置为直连的规则照常工作。
 - Rule previews, PAC scripts, and engine rules support IPv6 CIDR. Android VPN drops proxied UDP traffic when the selected node lacks UDP support; explicit Direct rules still work.
+- Android VPN 的 DNS 输入可填写一个 IPv4 或 IPv6 地址，系统解析仍按当前节点和规则转发。
+- Android VPN accepts one IPv4 or IPv6 DNS address. System lookups still follow the active node and routing policy.
 
 ## 0.3.4 · 桌面预览 / Desktop preview
 

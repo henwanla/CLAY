@@ -13,6 +13,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import java.io.File;
+import java.net.InetAddress;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -36,8 +37,9 @@ public final class ClayVpnService extends VpnService {
     static final class Draft {
         final byte[] source;
         final int node, options;
-        final String mode, rules, dns;
-        Draft(byte[] source, int node, String mode, String rules, int options, String dns) {
+        final String mode, rules;
+        final InetAddress dns;
+        Draft(byte[] source, int node, String mode, String rules, int options, InetAddress dns) {
             this.source = source; this.node = node; this.mode = mode; this.rules = rules; this.options = options; this.dns = dns;
         }
         void wipe() { Arrays.fill(source, (byte) 0); }

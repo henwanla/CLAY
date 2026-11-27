@@ -6,11 +6,15 @@ import android.os.ParcelFileDescriptor;
 import android.os.SystemClock;
 import android.system.ErrnoException;
 import android.system.Os;
+import android.system.OsConstants;
 import java.io.File;
 import java.io.FileDescriptor;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.Inet4Address;
+import java.net.Inet6Address;
+import java.net.InetAddress;
 
 /** Owns the platform TUN and the private descriptor channel for one engine. */
 final class VpnTransport implements AutoCloseable {
@@ -18,13 +22,52 @@ final class VpnTransport implements AutoCloseable {
     private static final String IPV6_ADDRESS = "fdfe:dcba:9876::1";
     private static final int IPV6_PREFIX = 126;
     static final String IPV6_TUN_CIDR = IPV6_ADDRESS + "/" + IPV6_PREFIX;
+    private static final byte[] IPV6_TUN_BYTES = Os.inet_pton(OsConstants.AF_INET6, IPV6_ADDRESS).getAddress();
     private final ClayVpnService service;
-    private final String dns;
+    private final InetAddress dns;
     private ParcelFileDescriptor tun;
     private LocalSocket channel;
     private volatile boolean closed, channelLost;
 
-    VpnTransport(ClayVpnService service, String dns) { this.service = service; this.dns = dns; }
+    VpnTransport(ClayVpnService service, InetAddress dns) { this.service = service; this.dns = dns; }
+
+    static InetAddress parseDns(String literal) {
+        // Numeric-only parsing: no DNS requests, interface zones, brackets, or host:port.
+        if (literal.length() > 45 || !literal.matches("[0-9a-fA-F:.]+")) return null;
+        int lastColon = literal.lastIndexOf(':');
+        // Android's native parser allows padded IPv4 octets. Preserve CLAY's
+        // existing canonical dotted-decimal requirement, including IPv6 tails.
+        if (literal.indexOf('.') >= 0 && !literal.substring(lastColon + 1)
+                .matches("(0|[1-9][0-9]{0,2})(\\.(0|[1-9][0-9]{0,2})){3}")) return null;
+        if (lastColon >= 0) {
+            InetAddress address = Os.inet_pton(OsConstants.AF_INET6, literal);
+            if (!(address instanceof Inet6Address) || ((Inet6Address) address).isIPv4CompatibleAddress()
+                    || address.isLinkLocalAddress() || address.isMulticastAddress()) return null;
+            byte[] bytes = address.getAddress();
+            if (isMappedIPv4(bytes) || inTunSubnet(bytes)) return null;
+            return address;
+        }
+        InetAddress address = Os.inet_pton(OsConstants.AF_INET, literal);
+        if (!(address instanceof Inet4Address)) return null;
+        byte[] bytes = address.getAddress();
+        int first = bytes[0] & 255;
+        return first == 0 || first == 127 || first >= 224 || (first == 198 && bytes[1] == 18 && bytes[2] == 0)
+                ? null : address;
+    }
+
+    private static boolean inTunSubnet(byte[] address) {
+        for (int i = 0; i < address.length; i++) {
+            int bits = Math.min(8, Math.max(0, IPV6_PREFIX - 8 * i));
+            int mask = 0xff << (8 - bits) & 0xff;
+            if (((address[i] ^ IPV6_TUN_BYTES[i]) & mask) != 0) return false;
+        }
+        return true;
+    }
+
+    private static boolean isMappedIPv4(byte[] address) {
+        for (int i = 0; i < 10; i++) if (address[i] != 0) return false;
+        return address[10] == -1 && address[11] == -1;
+    }
 
     synchronized void establish() throws IOException {
         if (closed || tun != null) throw new IOException();

@@ -43,6 +43,7 @@ import javax.net.ssl.TrustManagerFactory;
 final class VpnChecks {
     // Default QEMU IPv6 loopback alias, paired with a host fixture bound only to ::1.
     private static final String IPV6_FIXTURE = "fec0::2";
+    private static final String DNS4 = "198.51.100.53", DNS6 = "2001:db8::53";
 
     static String run(Instrumentation test, Activity activity, Bundle fixture) throws Exception {
         int first = port(fixture, "firstPort"), second = port(fixture, "secondPort"), direct = port(fixture, "directPort");
@@ -52,7 +53,10 @@ final class VpnChecks {
         String proof = fixture.getString("proof", "");
         require(proof.matches("[a-f0-9]{24}"), "synthetic proof");
         String fault = fixture.getString("vpnFault", "");
+        String resolver = fixture.getString("resolver", "v4");
+        require(resolver.equals("v4") || resolver.equals("v6"), "synthetic resolver family");
         if (fault.equals("cancel")) {
+            verifyNumericResolvers();
             verifyCancel(test, activity, first, second);
             return "CLAY_ANDROID_VPN_CONSENT_CANCEL_PASS";
         }
@@ -64,12 +68,14 @@ final class VpnChecks {
             test.runOnMainSync(() -> require(ClayVpnTile.action(ClayVpnService.state()) == ClayVpnTile.Action.OPEN,
                     "idle tile opens app"));
         }
+        String step = "ordinary IPv6 reachability";
         try {
             if (fault.isEmpty()) {
                 require(fetch(IPV6_FIXTURE, ipv6).endsWith(proof + "-V6"), "ordinary IPv6 reachable before starting tunnel");
                 require(fetch(IPV6_FIXTURE, ipv6Origin).endsWith(proof + "-V6-ORIGIN"), "origin-only IPv6 is reachable without the VPN");
             }
-            start(test, activity, first, second, proof);
+            step = "first node in Global mode";
+            start(test, activity, first, second, proof, resolver);
             await(test, R.string.vpn_ready, 1, "global", "foreground start");
             require(fetch("198.51.100.42", 18080).endsWith(proof + "-A"), "system TCP uses first node");
             require(fetch(IPV6_FIXTURE, ipv6).endsWith(proof + "-A"), "global IPv6 TCP uses the first node instead of the reachable origin");
@@ -81,38 +87,46 @@ final class VpnChecks {
                 require(ClayVpnTile.action(oldTile[0]) == ClayVpnTile.Action.STOP, "connected tile offers stop");
             });
             assertNoIPv6Fallback(ipv6Origin);
-            checkDns("198.51.100.53", proof, 73);
-            checkDns("2001:db8::53", proof, 73);
+            checkDns(DNS4, proof, 73);
+            checkDns(DNS6, proof, 73);
+            step = "second node in Global mode";
             test.runOnMainSync(() -> edit(activity, MainActivity.ID_NODE_INPUT).setText("changed draft"));
             select(test, activity, 2, 1);
             await(test, R.string.vpn_ready, 2, "global", "confirmed node change");
             require(fetch("198.51.100.42", 18080).endsWith(proof + "-B"), "system TCP uses second node");
             require(fetch(IPV6_FIXTURE, ipv6).endsWith(proof + "-B"), "global IPv6 TCP switches to the IPv6-addressed node");
-            checkDns("198.51.100.53", proof, 74);
-            checkDns("2001:db8::53", proof, 74);
+            checkDns(DNS4, proof, 74);
+            checkDns(DNS6, proof, 74);
+            step = "Rule mode for IP targets";
             select(test, activity, 2, 0);
             await(test, R.string.vpn_ready, 2, "rule", "confirmed rule mode");
             require(fetch("10.0.2.2", direct).endsWith(proof + "-B"), "rule mode honors the first IPv4 rule");
             require(fetch("198.51.100.42", 18080).endsWith(proof + "-B"), "rule fallback uses node");
             require(fetch(IPV6_FIXTURE, ipv6).endsWith(proof + "-V6"), "rule mode honors the first IPv6 CIDR rule");
             require(fetch("2001:db8::42", ipv6).endsWith(proof + "-B"), "unmatched IPv6 in rule mode uses the selected node");
-            String proxyName = "proxy-" + proof + ".test", directName = "direct-" + proof + ".test";
+            step = "system lookup and HTTP rule";
+            // These names are answered only at the configured DNS destination.
+            String proxyName = fixtureName("proxy", resolver, proof), directName = fixtureName("direct", resolver, proof);
             require(fetchNamed(proxyName, direct).endsWith(proof + "-B"), "HTTP domain rule selects the proxy for a shared IPv4 address");
             require(fetchNamed(directName, direct).endsWith(proof + "-D"), "HTTP domain rule can keep the same IPv4 address direct");
+            step = "TLS domain rule";
             SSLContext tlsContext = fixtureTLS(fixture.getString("tlsCert", ""));
             require(fetchTLS(tlsContext, proxyName, tls).endsWith(proof + "-B"), "TLS SNI selects the proxy while retaining the IPv4 destination");
             require(fetchTLS(tlsContext, directName, tls).endsWith(proof + "-TLS-D"), "TLS SNI can keep the same IPv4 destination direct");
+            step = "Rule mode with a TCP-only node";
             select(test, activity, 3, 0);
             await(test, R.string.vpn_ready, 3, "rule", "selected a node without UDP");
             require(fetch("10.0.2.2", direct).endsWith(proof + "-A"), "TCP still uses the selected node without UDP");
             require(udpProbe(IPV6_FIXTURE, udp6, "direct-" + proof), "explicit IPv6 DIRECT still forwards UDP");
             require(!udpProbe("10.0.2.2", udp4, "blocked-" + proof), "proxied UDP must not fall through to DIRECT");
+            step = "Direct mode";
             select(test, activity, 2, 2);
             await(test, R.string.vpn_ready, 2, "direct", "confirmed direct mode");
             require(fetch("10.0.2.2", direct).endsWith(proof + "-D"), "direct mode routes to origin");
             require(udpProbe("10.0.2.2", udp4, "direct-" + proof), "the UDP origin was reachable in intentional Direct mode");
             require(fetch(IPV6_FIXTURE, ipv6Origin).endsWith(proof + "-V6-ORIGIN"),
                     "direct mode can reach the IPv6 origin that Global did not fall back to");
+            step = "background Global mode";
             select(test, activity, 2, 1);
             await(test, R.string.vpn_ready, 2, "global", "confirmed global mode before leaving");
             test.runOnMainSync(activity::finish);
@@ -123,11 +137,12 @@ final class VpnChecks {
             require(stop.equals(currentNotificationStop(activity)), "the same session retains its stop action after node and mode changes");
             stop.send();
             await(test, R.string.vpn_stopped, 0, null, "notification stop cleaned session");
+            step = "same-process restart and cleanup";
             Intent reopen = new Intent(Intent.ACTION_MAIN).setClassName(test.getTargetContext(), MainActivity.class.getName())
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             Activity returned = test.startActivitySync(reopen);
             try {
-                start(test, returned, first, second, proof);
+                start(test, returned, first, second, proof, resolver);
                 await(test, R.string.vpn_ready, 1, "global", "restart within same process");
                 require(fetch("198.51.100.42", 18080).endsWith(proof + "-A"), "restarted tunnel forwards traffic");
                 require(fetch(IPV6_FIXTURE, ipv6).endsWith(proof + "-A"), "restarted tunnel forwards IPv6");
@@ -143,7 +158,7 @@ final class VpnChecks {
                 fresh.send();
                 await(test, R.string.vpn_stopped, 0, null, "fresh notification stops the restarted tunnel");
                 assertClean(returned);
-                start(test, returned, first, second, proof);
+                start(test, returned, first, second, proof, resolver);
                 await(test, R.string.vpn_ready, 1, "global", "restart for quick settings check");
                 test.runOnMainSync(() -> {
                     require(ClayVpnService.stopFromTile(ClayVpnService.state()), "current tile can request stop");
@@ -157,6 +172,8 @@ final class VpnChecks {
             assertClean(activity);
             require(fetch(IPV6_FIXTURE, ipv6).endsWith(proof + "-V6"), "ordinary IPv6 resumes after stopping VPN");
             return "CLAY_ANDROID_VPN_PASS";
+        } catch (java.io.IOException failure) {
+            throw new AssertionError(step + ": " + failure.getClass().getSimpleName());
         } finally { test.runOnMainSync(ClayVpnService::stopFromPanel); }
     }
 
@@ -179,7 +196,7 @@ final class VpnChecks {
 
     private static void verifyCancel(Instrumentation test, Activity activity, int first, int second) throws Exception {
         require(VpnService.prepare(activity) != null, "fixture must have no VPN authorization");
-        start(test, activity, first, second, "");
+        start(test, activity, first, second, "", "v4");
         // Cancel the actual system-owned consent request using its result contract.
         test.runOnMainSync(() -> activity.finishActivity(VpnPanel.CONSENT));
         for (int attempt = 0; attempt < 100; attempt++) {
@@ -238,7 +255,23 @@ final class VpnChecks {
         require(activity.getSystemService(NotificationManager.class).getActiveNotifications().length == 0, "foreground notification removed");
     }
 
-    private static void start(Instrumentation test, Activity activity, int first, int second, String proof) {
+    private static void verifyNumericResolvers() {
+        require(VpnTransport.parseDns(DNS4) instanceof java.net.Inet4Address, "valid IPv4 resolver");
+        require(VpnTransport.parseDns(DNS6) instanceof java.net.Inet6Address, "valid IPv6 resolver");
+        require(VpnTransport.parseDns("fd00::53") != null, "IPv6 private resolver remains available");
+        for (String invalid : new String[] {"example.test", "198.51.100", "198.051.100.53", "0.0.0.1", "127.0.0.1",
+                "198.18.0.1", "224.0.0.53", "[2001:db8::53]", "fe80::1%wlan0", "fe80::53", "ff02::53", "::", "::1",
+                "::192.0.2.53", "::ffff:192.0.2.53", "fdfe:dcba:9876::3", "2001::db8::53", "2001:db8::53/64",
+                "2001:db8::192.051.0.1"}) {
+            require(VpnTransport.parseDns(invalid) == null, "reject invalid DNS fixture " + invalid);
+        }
+    }
+
+    private static String fixtureName(String action, String resolver, String proof) {
+        return action + "-" + resolver + "-" + proof + ".test";
+    }
+
+    private static void start(Instrumentation test, Activity activity, int first, int second, String proof, String resolver) {
         test.runOnMainSync(() -> {
             String vless = ", type: vless, uuid: 56dc6c3e-8793-4d37-a363-f9f19db29c6d, network: tcp, udp: ";
             edit(activity, MainActivity.ID_NODE_INPUT).setText("proxies:\n" +
@@ -246,10 +279,11 @@ final class VpnChecks {
                     "  - {name: Fixture-B, server: '" + IPV6_FIXTURE + "', port: " + second + vless + "true}\n" +
                     "  - {name: Fixture-C, server: 10.0.2.2, port: " + first + vless + "false}");
             edit(activity, MainActivity.ID_PAC_RULES).setText((proof.isEmpty() ? "" :
-                    "DOMAIN,proxy-" + proof + ".test,PROXY\nDOMAIN-SUFFIX,direct-" + proof + ".test,DIRECT\n") +
+                    "DOMAIN," + fixtureName("proxy", resolver, proof) + ",PROXY\n" +
+                    "DOMAIN-SUFFIX," + fixtureName("direct", resolver, proof) + ",DIRECT\n") +
                     "IP-CIDR,10.0.2.2/32,PROXY\nIP-CIDR,10.0.2.2/32,DIRECT\n" +
                     "IP-CIDR6,fec0::/126,DIRECT,no-resolve\nIP-CIDR6,fec0::2/128,PROXY");
-            edit(activity, VpnPanel.ID_DNS).setText("198.51.100.53");
+            edit(activity, VpnPanel.ID_DNS).setText(resolver.equals("v6") ? DNS6 : DNS4);
             ((CompoundButton) activity.findViewById(MainActivity.ID_PAC_BYPASS)).setChecked(false);
             ((CompoundButton) activity.findViewById(MainActivity.ID_PAC_DIRECT)).setChecked(false);
             ((Spinner) activity.findViewById(VpnPanel.ID_MODE)).setSelection(1);

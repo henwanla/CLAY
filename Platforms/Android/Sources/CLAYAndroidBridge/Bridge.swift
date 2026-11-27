@@ -31,7 +31,7 @@ public func relayConfig(
     config["authentication"] = ["clay:\(password)"]
     config["skip-auth-prefixes"] = [String]()
     if options["vpn"] as? Bool == true {
-        // Android owns all routes. The supplied IPv4 DNS address is a regular
+        // Android owns all routes. The supplied DNS address is a regular
         // tunnel destination and follows the selected engine mode/rules.
         config["ipv6"] = true
         config["tun"] = ["enable": true, "stack": "gvisor", "auto-route": false,

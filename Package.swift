@@ -8,6 +8,7 @@ var products: [Product] = [
 var platformTargets: [Target] = []
 var portableDependencies: [Target.Dependency] = ["CLAYCore"]
 let excludedCoreSources: [String]
+let coreResources: [Resource]
 // Swift's Windows Clang importer must see the same static declarations as CYaml.
 #if os(Windows)
 let coreSwiftSettings: [SwiftSetting] = [.unsafeFlags(["-Xcc", "-DYAML_DECLARE_STATIC"])]
@@ -17,6 +18,7 @@ let coreSwiftSettings: [SwiftSetting] = []
 
 #if os(macOS)
 excludedCoreSources = []
+coreResources = [.copy("GeoIP")]
 products += [.executable(name: "CLAY", targets: ["CLAY"]), .executable(name: "clayctl", targets: ["clayctl"])]
 platformTargets = [
     .executableTarget(name: "CLAY", dependencies: ["CLAYCore"]),
@@ -26,7 +28,8 @@ platformTargets = [
 #else
 // The desktop runtime, Apple PAC services and subscription networking remain
 // macOS-only. The CLI uses the shared offline parsers and PAC generator.
-excludedCoreSources = ["PACServer.swift", "Runtime.swift", "Subscriptions.swift", "SystemPAC.swift"]
+excludedCoreSources = ["PACServer.swift", "Runtime.swift", "Subscriptions.swift", "SystemPAC.swift", "GeoIP"]
+coreResources = []
 #endif
 
 #if os(Windows)
@@ -42,7 +45,7 @@ let package = Package(
     targets: [
         .target(name: "CYaml", path: "Vendor/Yams/Sources/CYaml", exclude: ["CMakeLists.txt"],
                 cSettings: [.define("YAML_DECLARE_STATIC")]),
-        .target(name: "CLAYCore", dependencies: ["CYaml"], exclude: excludedCoreSources, swiftSettings: coreSwiftSettings),
+        .target(name: "CLAYCore", dependencies: ["CYaml"], exclude: excludedCoreSources, resources: coreResources, swiftSettings: coreSwiftSettings),
         .executableTarget(name: "clay-portable", dependencies: portableDependencies)
     ] + platformTargets
 )

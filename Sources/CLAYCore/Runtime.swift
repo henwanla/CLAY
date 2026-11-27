@@ -3,6 +3,25 @@ import CryptoKit
 import Darwin
 import Foundation
 
+extension CoreAppRoute {
+    /// Match the path the kernel reports to Mihomo. Foundation's URL resolver
+    /// can retain /var aliases even though proc_pidpath reports /private/var.
+    public static func canonicalPath(_ url: URL) -> String? {
+        guard url.isFileURL, let resolved = realpath(url.path, nil) else { return nil }
+        defer { free(resolved) }
+        return String(validatingUTF8: resolved)
+    }
+}
+
+extension NodeProfile {
+    /// Persist only inside the private subscription catalog. The digest is
+    /// stable across imports and ignores the display label and session UUID.
+    public var connectionDigest: String {
+        guard let data = try? JSONSerialization.data(withJSONObject: options, options: [.sortedKeys]) else { return "" }
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+}
+
 public enum EngineIdentity {
     public static func fingerprint(_ executable: URL) throws -> String {
         guard executable.isFileURL, FileManager.default.isExecutableFile(atPath: executable.path),
@@ -70,7 +89,8 @@ private final class ControllerRedirectPolicy: NSObject, URLSessionTaskDelegate, 
     }
 
     public static func start(engine: URL, nodes: [NodeProfile], active: NodeProfile, expectedFingerprint: String? = nil,
-                             mode: CoreRoutingMode = .rule, policy: PACPolicy? = nil) async throws -> CoreSession {
+                             mode: CoreRoutingMode = .rule, policy: PACPolicy? = nil,
+                             routing: CoreRoutingPlan = .init()) async throws -> CoreSession {
         guard engine.isFileURL, FileManager.default.isExecutableFile(atPath: engine.path) else { throw SessionError.engineMissing }
         let ports = try reservePorts()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("clay-runtime-\(UUID().uuidString)", isDirectory: true)
@@ -80,6 +100,9 @@ private final class ControllerRedirectPolicy: NSObject, URLSessionTaskDelegate, 
         do {
             defer { ports.0.release(); ports.1.release() }
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+            if routing.bypassMainland {
+                try installCountryData(in: directory)
+            }
             if let expectedFingerprint {
                 let copy = directory.appendingPathComponent("mihomo")
                 do {
@@ -94,7 +117,7 @@ private final class ControllerRedirectPolicy: NSObject, URLSessionTaskDelegate, 
                 process.executableURL = copy
             } else { process.executableURL = engine }
             try CoreConfig.make(nodes: nodes, active: active, proxyPort: ports.0.number, controlPort: ports.1.number,
-                                secret: secret, mode: mode, policy: policy).write(to: configURL, options: .withoutOverwriting)
+                                secret: secret, mode: mode, policy: policy, routing: routing).write(to: configURL, options: .withoutOverwriting)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configURL.path)
             process.arguments = ["-d", directory.path, "-f", configURL.path]
             process.currentDirectoryURL = directory
@@ -123,6 +146,23 @@ private final class ControllerRedirectPolicy: NSObject, URLSessionTaskDelegate, 
     private static func reservePorts() throws -> (PortReservation, PortReservation) {
         let proxy = try PortReservation()
         do { return (proxy, try PortReservation()) } catch { proxy.release(); throw error }
+    }
+
+    private static func installCountryData(in directory: URL) throws {
+        let relative = "GeoIP/cn.dat"
+        let expected = "d217d3e3f8b1b5c3a981dc912ec786360a33bcdc397ac1187b8e3ab1b54803ce"
+        var candidates = [Bundle.main.resourceURL?.appendingPathComponent(relative)]
+        #if SWIFT_PACKAGE
+        // SwiftPM runs from a build directory; packaged installs use the first URL.
+        if Bundle.main.bundleURL.pathExtension != "app" { candidates.append(Bundle.module.resourceURL?.appendingPathComponent(relative)) }
+        #endif
+        for case let url? in candidates {
+            guard let data = try? Data(contentsOf: url), data.count == 236235,
+                  SHA256.hash(data: data).map({ String(format: "%02x", $0) }).joined() == expected else { continue }
+            try data.write(to: directory.appendingPathComponent("GeoIP.dat"), options: .withoutOverwriting)
+            return
+        }
+        throw SessionError.countryDataUnavailable
     }
 
     private func ownsListener(_ port: Int) async -> Bool {
@@ -197,9 +237,9 @@ private final class ControllerRedirectPolicy: NSObject, URLSessionTaskDelegate, 
         }
     }
 
-    private func selectedNodeName() async throws -> String {
+    private func selectedNodeName(in selector: String = "CLAY") async throws -> String {
         struct Selection: Decodable { let now: String }
-        return try JSONDecoder().decode(Selection.self, from: await call("/proxies/CLAY")).now
+        return try JSONDecoder().decode(Selection.self, from: await call("/proxies/\(selector)")).now
     }
 
     private func currentMode() async throws -> CoreRoutingMode {
@@ -214,12 +254,15 @@ private final class ControllerRedirectPolicy: NSObject, URLSessionTaskDelegate, 
         return (try await currentMode(), try await selectedNodeName())
     }
 
-    public func switchTo(_ node: NodeProfile) async throws {
+    public func switchTo(_ node: NodeProfile, group: UUID? = nil) async throws {
         do {
-            if try await selectedNodeName() != node.localName {
-                drainPending = true
-                _ = try await call("/proxies/CLAY", method: "PUT", body: JSONEncoder().encode(["name": node.localName]))
-                guard try await selectedNodeName() == node.localName else { throw SessionError.selectionFailed }
+            let selectors = ["CLAY"] + (group.map { [CoreRoutingPlan.name(of: $0)] } ?? [])
+            for selector in selectors {
+                if try await selectedNodeName(in: selector) != node.localName {
+                    drainPending = true
+                    _ = try await call("/proxies/\(selector)", method: "PUT", body: JSONEncoder().encode(["name": node.localName]))
+                    guard try await selectedNodeName(in: selector) == node.localName else { throw SessionError.selectionFailed }
+                }
             }
             try await finishRoutingChange()
         } catch { throw SessionError.selectionFailed }

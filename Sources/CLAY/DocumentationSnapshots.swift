@@ -25,9 +25,20 @@ private final class DocumentationPACBackend: SystemPACBackend {
         let store = SubscriptionStore(directory: cache.appendingPathComponent("subscriptions"),
                                       keyStore: LocalSubscriptionKeyStore(directory: cache.appendingPathComponent("private")))
         let model = Workspace(store: store, pac: PACControl(manager: manager, preferences: preferences), preferences: preferences)
-        let sample = "vless://4624a73a-98ce-43e7-8868-4deba224779c@node.example.test:443#示例节点"
-        guard model.applyImport(sample), let node = model.chosen else { throw CocoaError(.fileReadCorruptFile) }
+        let sample = ["示例节点 · 东京", "示例节点 · 大阪", "示例节点 · 新加坡", "示例节点 · 香港", "备用节点"]
+            .enumerated().map { index, name in
+                "vless://4624a73a-98ce-43e7-8868-4deba224779c@node\(index + 1).example.test:443#\(name.addingPercentEncoding(withAllowedCharacters: .urlFragmentAllowed)!)"
+            }.joined(separator: "\n")
+        guard model.applyImport(sample), let node = model.chosen, model.nodes.count == 5,
+              model.saveGroup(id: nil, name: "日常使用", nodeIDs: Set(model.nodes.prefix(4).map(\.id))) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        model.setAutomatic(true)
         model.selectRoutingMode(.rule)
+        model.routingOptions.proxyGroup = model.selectedGroup
+        model.routingOptions.bypassMainland = true
+        model.routingOptions.applications = [CoreAppRoute(name: "示例浏览器", path: "/Applications/Example Browser.app",
+                                                         includesBundleHelpers: true, target: .selected)]
 
         let now = Date(timeIntervalSince1970: 1_764_118_800)
         let rows = ["docs.example.test", "cdn.example.test", "api.example.test", "images.example.test", "updates.example.test"]
@@ -48,18 +59,21 @@ private final class DocumentationPACBackend: SystemPACBackend {
                                       connections: rows, connectionCount: rows.count)
         model.showDocumentationTraffic(snapshot, points: points)
         model.pac.showDocumentationSystemProxy()
+        model.showDocumentationProbes([42, 28, 83, nil], at: now)
 
         // Render standalone views. No screen capture, window, app interaction,
         // engine process, network access or user's workspace storage is needed.
         NSApplication.shared.setActivationPolicy(.prohibited)
         try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
-        try render(model: model, connections: false, to: output.appendingPathComponent("macos-overview.png"))
-        try render(model: model, connections: true, to: output.appendingPathComponent("macos-connections.png"))
+        try render(model: model, section: "overview", height: 800, in: output)
+        try render(model: model, section: "connections", height: 540, in: output)
+        try render(model: model, section: "nodes", height: 720, in: output)
+        try render(model: model, section: "routing", height: 1000, in: output)
     }
 
-    @MainActor private static func render(model: Workspace, connections: Bool, to file: URL) throws {
-        let size = CGSize(width: 940, height: connections ? 540 : 800)
-        let content = documentationDashboard(model: model, connections: connections)
+    @MainActor private static func render(model: Workspace, section: String, height: CGFloat, in output: URL) throws {
+        let size = CGSize(width: 940, height: height)
+        let content = documentationDashboard(model: model, section: section)
             .environment(\.colorScheme, .light)
             .environment(\.locale, Locale(identifier: "zh-Hans"))
             .frame(width: size.width, height: size.height)
@@ -70,7 +84,7 @@ private final class DocumentationPACBackend: SystemPACBackend {
         guard let bitmap = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds) else { throw CocoaError(.fileWriteUnknown) }
         hosting.cacheDisplay(in: hosting.bounds, to: bitmap)
         guard let data = bitmap.representation(using: .png, properties: [:]) else { throw CocoaError(.fileWriteUnknown) }
-        try data.write(to: file, options: .atomic)
+        try data.write(to: output.appendingPathComponent("macos-\(section).png"), options: .atomic)
     }
 }
 #endif

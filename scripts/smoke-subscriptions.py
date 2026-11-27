@@ -24,14 +24,34 @@ class RouteNode(socketserver.StreamRequestHandler):
     def handle(self):
         self.connection.settimeout(8)
         try:
-            header = b"\x00" + TEST_ACCOUNT + b"\x00\x01" + self.server.origin_port.to_bytes(2, "big") + b"\x01\x7f\x00\x00\x01"
+            header = b"\x00" + TEST_ACCOUNT + b"\x00\x01" + self.server.origin_port.to_bytes(2, "big")
             if self.rfile.read(len(header)) != header:
                 return
+            kind = self.rfile.read(1)
+            if kind == b"\x01":
+                allowed = self.rfile.read(4) == b"\x7f\x00\x00\x01"
+            elif kind == b"\x02":
+                length = int.from_bytes(self.rfile.read(1), "big")
+                allowed = self.rfile.read(length) == b"route.example.test"
+            else:
+                allowed = False
+            if not allowed:
+                return
             self.wfile.write(b"\x00\x00")
-            while self.rfile.readline(512) == b"GET /keepalive HTTP/1.1\r\n":
-                if self.rfile.readline(512) != b"Host: 127.0.0.1\r\n" or self.rfile.readline(4) != b"\r\n":
+            while request := self.rfile.readline(512):
+                if request == b"GET /keepalive HTTP/1.1\r\n":
+                    if self.rfile.readline(512) != b"Host: 127.0.0.1\r\n" or self.rfile.readline(4) != b"\r\n":
+                        return
+                    self.wfile.write(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n" + self.server.marker)
+                elif request == b"HEAD /clay-latency HTTP/1.1\r\n":
+                    for _ in range(12):
+                        if self.rfile.readline(512) == b"\r\n":
+                            self.wfile.write(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n")
+                            break
+                    else:
+                        return
+                else:
                     return
-                self.wfile.write(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n" + self.server.marker)
         except OSError:
             pass
 

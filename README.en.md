@@ -2,7 +2,7 @@
 
 [简体中文](README.md) · [Changelog](CHANGELOG.md) · [GitHub Releases](https://github.com/henwanla/CLAY/releases)
 
-CLAY is a native macOS proxy app with subscriptions, menu bar controls, PAC routing, live traffic, and a connection inspector. The [0.3.5 desktop preview](https://github.com/henwanla/CLAY/releases) has downloads for Apple Silicon with macOS 13 or later, Windows x64, and Ubuntu 24.04 x86-64. See the platform notes below for mobile previews and their test coverage.
+CLAY is a native macOS proxy app with subscriptions, menu bar controls, PAC routing, live traffic, and a connection inspector. The [0.3.6 desktop preview](https://github.com/henwanla/CLAY/releases) has downloads for Apple Silicon with macOS 13 or later, Windows x64, and Ubuntu 24.04 x86-64. See the platform notes below for mobile previews and their test coverage.
 
 ## Screenshots
 
@@ -17,15 +17,35 @@ The macOS Overview shows traffic, the selected node, and the routing mode. The s
 
 </details>
 
+The Nodes view shows scoped latency tests, sorting, and automatic switching. The screenshot uses sample nodes and synthetic timings.
+
+![CLAY macOS Nodes view showing a node group, latency sorting, and automatic testing](docs/screenshots/macos-nodes.png)
+
+<details>
+<summary>Show the PAC Rules view</summary>
+
+![CLAY macOS routing view with Rule mode, a proxy group, an application rule and mainland bypass](docs/screenshots/macos-routing.png)
+
+</details>
+
 ## Getting started
 
 1. **Local preview (build 4 and later):** Open `CLAY.app`. If you have not selected another core, CLAY uses the bundled Mihomo with a pinned fingerprint. To use a different trusted core, choose it in Settings (**设置**). Verify the source and select it again after replacing or upgrading an external core.
-2. **GitHub release:** Download `CLAY-0.3.5-macos-arm64.zip` and the matching `.zip.sha256`. In the download directory, run `shasum -a 256 -c CLAY-0.3.5-macos-arm64.zip.sha256` before extracting the ZIP. The public package requires you to install Mihomo separately, as shown below. The app has an ad hoc signature and has no Developer ID signature or notarization. If macOS blocks the package, you can build it from source under your usual security policy.
+2. **GitHub release:** Download `CLAY-0.3.6-macos-arm64.zip` and the matching `.zip.sha256`. In the download directory, run `shasum -a 256 -c CLAY-0.3.6-macos-arm64.zip.sha256` before extracting the ZIP. The public package requires you to install Mihomo separately, as shown below. The app has an ad hoc signature and has no Developer ID signature or notarization. If macOS blocks the package, you can build it from source under your usual security policy.
 3. Under Subscriptions (**订阅**), select Add subscription (**添加订阅…**) and enter your provider’s HTTPS link. Under Nodes (**节点**), you can also paste share links or import UTF-8 JSON, YAML, or text files.
 4. Choose a node and select Connect macOS (**连接 macOS**) from the main window or menu bar. CLAY starts the local proxy and sets up system PAC for the current primary network service or the service you choose in PAC Rules. For manual setup, use Start local proxy only (**仅启动本机代理**) and enter the HTTP/SOCKS5 address from Overview (**概览**) in the app. If you are still using 0.3.0, use Start (**启动**) and then Apply to macOS (**应用到 macOS**) under PAC Rules.
 5. Closing the window keeps CLAY and its proxy running. In new builds, the menu bar also lets you switch nodes and routing modes. Quit CLAY or press `⌘Q` to end the session. CLAY does not launch automatically at login.
 
 In a local build with an included core, use **Settings → 使用随附 Mihomo** to switch back to that verified executable. If an external executable was replaced or moved, the app stays stopped and offers recovery in the window and menu bar. Connect again after choosing the core. The menu bar shows node numbers and protocols; match the number to the full name in the Nodes view.
+
+### macOS: node groups and routing
+
+See the [issue review and test notes](docs/macOS-同行反馈与验收.md) for network changes, subscription refreshes, and automatic switching.
+
+- In Nodes, choose **新建分组…** and check the members. Start the local proxy to test a single node or the current group. You can switch nodes or modes, or stop the proxy, while the batch runs. Latency sorting keeps the original node numbers.
+- Automatic testing and switching checks the current scope every five minutes in Rule or Global mode. It switches when the current node fails or another is at least 25 ms and 20% faster. A failed round leaves the node in place. Manual selection resets the timer. Tests use the gstatic.com 204 endpoint; results are kept in memory.
+- In PAC Rules, choose a proxy group for Rule mode. Selecting a node within that group changes its exit. Mainland bypass matches .cn or compares an available destination IP with the bundled snapshot, without triggering an extra DNS lookup. The local/private address toggle controls LAN bypass. Reconnect to apply rule edits. Global uses the current node; Direct skips upstream proxies.
+- For Chrome, add it while it is running, select **始终走当前节点**, use Rule mode and the system proxy that follows the traffic mode, then reconnect. An application rule can only match a process the core can identify on a connection that reaches CLAY. A custom PAC may send a request direct before it reaches the core.
 
 ### Install Mihomo for the public package
 

@@ -13,6 +13,7 @@ struct TrafficPoint: Identifiable {
 
 enum Probe {
     case ok(Int), failed
+    var milliseconds: Int? { if case .ok(let ms) = self { return ms }; return nil }
     var text: String { switch self { case .ok(let n): return "\(n) ms"; case .failed: return "探测失败" } }
     func change(from earlier: Probe) -> String {
         switch (earlier, self) {
@@ -28,6 +29,23 @@ enum Probe {
 }
 
 @MainActor final class Workspace: ObservableObject {
+    struct RoutingOptions: Codable, Equatable {
+        var proxyGroup: UUID?
+        var bypassMainland = false
+        var applications: [CoreAppRoute] = []
+    }
+
+    enum NodeOrder: String, CaseIterable, Identifiable {
+        case imported = "导入顺序", latency = "延时从低到高"
+        var id: Self { self }
+    }
+
+    struct ProbeProgress {
+        let total: Int
+        var completed = 0
+        let automatic: Bool
+    }
+
     @Published var nodes: [NodeProfile] = []
     @Published var active: UUID?
     @Published private var engineSelection: EngineSelection?
@@ -35,6 +53,14 @@ enum Probe {
     @Published private(set) var routingMode: CoreRoutingMode = .global
     @Published private(set) var routingConfirmed = true
     @Published private(set) var runningRules: PACPolicy?
+    @Published var routingOptions = RoutingOptions() {
+        didSet {
+            if let data = try? JSONEncoder().encode(routingOptions) { preferences.set(data, forKey: Self.optionsPreference) }
+        }
+    }
+    @Published private var runningRoutingOptions: RoutingOptions?
+    @Published private var runningGroupMembers: [UUID: Set<UUID>] = [:]
+    @Published private var groupPreferred: [UUID: NodeGroup.Member] = [:]
     @Published var issues: [ImportError: Int] = [:]
     @Published var hasImported = false
     @Published var proxyAddress: String?
@@ -44,6 +70,13 @@ enum Probe {
     @Published var lastProbe: Date?
     @Published private(set) var latestBatch: [UUID: Probe] = [:]
     @Published private(set) var previousBatch: [UUID: Probe] = [:]
+    @Published private(set) var groups: [NodeGroup] = []
+    @Published private(set) var selectedGroup: UUID?
+    @Published private(set) var groupMessage = ""
+    @Published var nodeOrder: NodeOrder = .imported
+    @Published private(set) var probeProgress: ProbeProgress?
+    @Published private(set) var probeMessage = ""
+    @Published private(set) var automaticAll = false
     @Published var presentImport = false
     @Published var presentSubscription = false
     @Published private(set) var subscriptions: [SubscriptionSummary] = []
@@ -61,6 +94,14 @@ enum Probe {
     private var core: CoreSession?
     private var pendingStart: Task<Void, Never>?
     private var sessionTask: Task<Void, Never>?
+    private var probeTask: Task<Void, Never>?
+    private var probeID: UUID?
+    private var autoTimer: Task<Void, Never>?
+    private let automaticInterval: Duration
+    private let probeDelay: @MainActor (CoreSession, NodeProfile, URL) async throws -> Int
+    private var memberKeys: [UUID: NodeGroup.Member] = [:]
+    private var manualGroups: [NodeGroup] = []
+    private var groupSelections: [UUID: UUID] = [:]
     private var healthTask: Task<Void, Never>?
     private var subscriptionTask: Task<Void, Never>?
     private var telemetryTask: Task<Void, Never>?
@@ -85,11 +126,17 @@ enum Probe {
     }
     private static let enginePreference = "clay.trusted-mihomo.v1"
     private static let routingPreference = "clay.routing-mode.v1"
+    private static let optionsPreference = "clay.routing-options.v1"
+    private static let groupSelectionPreference = "clay.subscription-groups-selected.v1"
     private static let previewEngineFingerprint = "a55a9073f9b7b1fa596a82c034d2dae3407ec34732102b6e42c5513ce3033f34"
     init(store: SubscriptionStore = SubscriptionStore(), pac: PACControl? = nil, preferences: UserDefaults = .standard,
-         bundledEngine: URL? = Bundle.main.resourceURL?.appendingPathComponent("Mihomo/mihomo")) {
+         bundledEngine: URL? = Bundle.main.resourceURL?.appendingPathComponent("Mihomo/mihomo"),
+         automaticInterval: Duration = .seconds(300),
+         probeDelay: @escaping @MainActor (CoreSession, NodeProfile, URL) async throws -> Int = { try await $0.delay($1, target: $2) }) {
         self.store = store
         self.preferences = preferences
+        self.automaticInterval = automaticInterval
+        self.probeDelay = probeDelay
         self.bundledEngine = bundledEngine?.standardizedFileURL
         self.pac = pac ?? PACControl()
         let saved = preferences.data(forKey: Self.enginePreference).flatMap { try? JSONDecoder().decode(TrustedEngine.self, from: $0) }
@@ -103,6 +150,10 @@ enum Probe {
             engineIssue = "找不到之前选择的 Mihomo。请核对来源后重新选择。"
         }
         routingMode = preferences.string(forKey: Self.routingPreference).flatMap(CoreRoutingMode.init(rawValue:)) ?? .global
+        routingOptions = preferences.data(forKey: Self.optionsPreference)
+            .flatMap { try? JSONDecoder().decode(RoutingOptions.self, from: $0) } ?? RoutingOptions()
+        groupSelections = preferences.data(forKey: Self.groupSelectionPreference)
+            .flatMap { try? JSONDecoder().decode([UUID: UUID].self, from: $0) } ?? [:]
         do {
             catalog = try store.load()
             for entry in catalog.entries { subscriptionResults[entry.id] = SubscriptionImporter.parse(entry.content) }
@@ -126,6 +177,94 @@ enum Probe {
     }
     var chosen: NodeProfile? { nodes.first { $0.id == active } }
     func nodeNumber(_ id: UUID) -> Int? { nodes.firstIndex { $0.id == id }.map { $0 + 1 } }
+    var currentGroup: NodeGroup? { groups.first { $0.id == selectedGroup } }
+    var automaticEnabled: Bool { currentGroup?.automatic ?? automaticAll }
+    var canMeasure: Bool { running && !shuttingDown && probeProgress == nil }
+    var scopedNodes: [NodeProfile] { currentGroup.map { members(of: $0) } ?? nodes }
+
+    func members(of group: NodeGroup) -> [NodeProfile] {
+        nodes.filter { memberKeys[$0.id].map(group.members.contains) ?? false }
+    }
+
+    var orderedNodes: [NodeProfile] {
+        guard nodeOrder == .latency else { return scopedNodes }
+        func rank(_ node: NodeProfile) -> (Int, Int) {
+            switch probes[node.id] {
+            case .ok(let delay): return (0, delay)
+            case nil: return (1, 0)
+            case .failed: return (2, 0)
+            }
+        }
+        return scopedNodes.enumerated().sorted {
+            let lhs = rank($0.element), rhs = rank($1.element)
+            return lhs == rhs ? $0.offset < $1.offset : lhs < rhs
+        }.map(\.element)
+    }
+
+    func chooseGroup(_ id: UUID?) {
+        guard id == nil || groups.contains(where: { $0.id == id }), id != selectedGroup else { return }
+        if probeProgress?.automatic == true { cancelProbe() }
+        selectedGroup = id
+        groupMessage = ""
+        if let liveSource { groupSelections[liveSource] = id; rememberGroupSelections() }
+        scheduleAutomatic(immediate: true)
+    }
+
+    private func rememberGroupSelections() {
+        if let data = try? JSONEncoder().encode(groupSelections) { preferences.set(data, forKey: Self.groupSelectionPreference) }
+    }
+
+    @discardableResult func saveGroup(id: UUID?, name: String, nodeIDs: Set<UUID>) -> Bool {
+        let title = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
+        let keys = Set(nodeIDs.compactMap { memberKeys[$0] })
+        guard !title.isEmpty, !keys.isEmpty else { return false }
+        var next = groups
+        let groupID = id ?? UUID()
+        if let id {
+            guard let index = next.firstIndex(where: { $0.id == id }) else { return false }
+            next[index].name = title
+            // Keep references to missing subscription nodes so their membership
+            // can be restored if the provider brings them back later.
+            next[index].members = keys.union(next[index].members.subtracting(Set(memberKeys.values)))
+        } else {
+            next.append(NodeGroup(id: groupID, name: title, members: keys, automatic: false))
+        }
+        guard persistGroups(next) else { return false }
+        if selectedGroup == groupID {
+            if probeProgress?.automatic == true { cancelProbe() }
+            scheduleAutomatic()
+        } else { chooseGroup(groupID) }
+        return true
+    }
+
+    func removeGroup(_ id: UUID) {
+        guard persistGroups(groups.filter { $0.id != id }) else { return }
+        if selectedGroup == id { chooseGroup(nil) }
+    }
+
+    private func persistGroups(_ next: [NodeGroup]) -> Bool {
+        if let liveSource {
+            // A removed subscription can remain live until the proxy stops.
+            if catalog.entries.contains(where: { $0.id == liveSource }) {
+                var updated = catalog
+                var bySource = updated.nodeGroups ?? [:]
+                bySource[liveSource] = next
+                updated.nodeGroups = bySource
+                guard saveCatalog(updated) else { groupMessage = subscriptionMessage; return false }
+            }
+        } else { manualGroups = next }
+        groups = next; groupMessage = ""
+        return true
+    }
+
+    func setAutomatic(_ enabled: Bool) {
+        if let id = selectedGroup, let index = groups.firstIndex(where: { $0.id == id }) {
+            var next = groups; next[index].automatic = enabled
+            guard persistGroups(next) else { return }
+        } else { automaticAll = enabled }
+        if !enabled, probeProgress?.automatic == true { cancelProbe() }
+        scheduleAutomatic(immediate: enabled)
+    }
     var running: Bool { proxyAddress != nil }
     var canStartManual: Bool {
         !shuttingDown && !busy && !running && !pac.busy && !pac.hasLiveOwnership && !pac.needsRecovery && engine != nil && chosen != nil
@@ -144,6 +283,20 @@ enum Probe {
         return "代理已停止"
     }
     var canUseManual: Bool { manualResults != nil && selectedSubscription != nil }
+    private var currentGroupMembers: [UUID: Set<UUID>] {
+        Dictionary(groups.compactMap { group in
+            let ids = Set(members(of: group).map(\.id))
+            return ids.isEmpty ? nil : (group.id, ids)
+        }, uniquingKeysWith: { first, _ in first })
+    }
+    var hasUnappliedRoutes: Bool {
+        running && (runningRules != pac.policy || runningRoutingOptions != routingOptions || runningGroupMembers != currentGroupMembers)
+    }
+
+    func groupNode(_ group: NodeGroup) -> NodeProfile? {
+        let candidates = members(of: group)
+        return candidates.first { groupPreferred[group.id] == memberKeys[$0.id] } ?? candidates.first { $0.id == active } ?? candidates.first
+    }
 
     #if CLAY_DOCUMENTATION
     func showDocumentationTraffic(_ snapshot: ProxyTelemetry, points: [TrafficPoint]) {
@@ -151,6 +304,16 @@ enum Probe {
         status = "演示会话 · 合成数据"
         telemetry = snapshot
         trafficHistory = points
+        runningRules = pac.policy
+        runningRoutingOptions = routingOptions
+        runningGroupMembers = currentGroupMembers
+    }
+
+    func showDocumentationProbes(_ samples: [Int?], at date: Date) {
+        probes = Dictionary(uniqueKeysWithValues: zip(nodes, samples).map { ($0.id, $1.map(Probe.ok) ?? .failed) })
+        lastProbe = date
+        probeMessage = "测速结束 · \(samples.compactMap { $0 }.count)/\(samples.count) 可用"
+        nodeOrder = .latency
     }
     #endif
 
@@ -187,7 +350,10 @@ enum Probe {
     }
 
     func routeLabel(_ name: String) -> String {
-        nodes.first(where: { $0.localName == name })?.name ?? name
+        if name.hasPrefix("group-"), let id = UUID(uuidString: String(name.dropFirst(6))), let group = groups.first(where: { $0.id == id }) {
+            return group.name
+        }
+        return nodes.first(where: { $0.localName == name })?.name ?? name
     }
 
     func closeConnection(_ id: UUID? = nil) {
@@ -327,8 +493,11 @@ enum Probe {
         guard !fetchingSubscription else { return }
         let wasSelected = selectedSubscription == id
         var next = catalog; next.entries.removeAll { $0.id == id }
+        next.nodeGroups?.removeValue(forKey: id)
         if wasSelected { next.selected = next.entries.first { subscriptionResults[$0.id]?.profiles.isEmpty == false }?.id }
         guard saveCatalog(next) else { return }
+        groupSelections.removeValue(forKey: id)
+        rememberGroupSelections()
         subscriptionResults.removeValue(forKey: id); publishCatalog()
         if wasSelected { installSelectedSource() }
         subscriptionMessage = "订阅已移除。"
@@ -355,11 +524,25 @@ enum Probe {
     }
 
     private func applySelectedSource() {
+        cancelProbe(reschedule: false)
+        autoTimer?.cancel(); autoTimer = nil
+        if liveSource != selectedSubscription { automaticAll = false }
         let previous = liveSource == selectedSubscription ? chosen : nil
         let imported = selectedSubscription.flatMap { subscriptionResults[$0] } ?? manualResults
         nodes = imported?.profiles ?? []; issues = imported?.issues ?? [:]; hasImported = imported != nil
+        var occurrences: [String: Int] = [:]
+        memberKeys = Dictionary(uniqueKeysWithValues: nodes.map { node in
+            let digest = node.connectionDigest
+            let index = occurrences[digest, default: 0]
+            occurrences[digest] = index + 1
+            return (node.id, NodeGroup.Member(digest: digest, occurrence: index))
+        })
         active = previous.flatMap { old in nodes.first { $0.id == old.id || $0.hasSameConnection(as: old) } }?.id ?? nodes.first?.id
+        let oldGroup = liveSource == selectedSubscription ? selectedGroup : selectedSubscription.flatMap { groupSelections[$0] }
         liveSource = selectedSubscription; sourceChangePending = false
+        groups = liveSource.map { catalog.nodeGroups?[$0] ?? [] } ?? manualGroups
+        selectedGroup = groups.first { $0.id == oldGroup }?.id
+        groupMessage = ""; probeMessage = ""
         probes = [:]; lastProbe = nil; latestBatch = [:]; previousBatch = [:]
         status = engine == nil ? "等待选择 Mihomo" : nodes.isEmpty ? "等待导入节点" : "可启动"
     }
@@ -369,6 +552,16 @@ enum Probe {
         guard canConnectSystem else { return }
         if running { publishPAC(to: .system(routing)) }
         else { startSession(systemRouting: routing) }
+    }
+
+    /// Explicit handoff after a Wi-Fi/Ethernet change. The existing listener
+    /// stays up; we restore the old service before changing the new one.
+    func reconnectPrimaryNetwork() {
+        guard running, !busy, !pac.busy, !pac.needsRecovery, pac.systemService != nil, !pac.systemPACIsEffective else { return }
+        let routing: PACControl.SystemRouting = pac.followsRoutingMode ? .followMode : .customPolicy
+        guard pac.restoreSystem() else { return }
+        pac.serviceID = ""
+        publishPAC(to: .system(routing))
     }
 
     func selectRoutingMode(_ mode: CoreRoutingMode) {
@@ -386,6 +579,8 @@ enum Probe {
                 guard actual.mode == mode else { throw SessionError.routingFailed }
                 try showConfirmedRoute(actual)
                 status = "流量模式已切换为\(mode.label)"
+                if mode == .direct, probeProgress?.automatic == true { cancelProbe(reschedule: false) }
+                scheduleAutomatic()
             } catch {
                 guard self.core === core, !Task.isCancelled else { return }
                 status = "未确认流量模式与旧连接状态；请重试切换或停止会话。"
@@ -416,6 +611,13 @@ enum Probe {
     private func startSession(systemRouting: PACControl.SystemRouting? = nil) {
         guard canStartManual, let selection = engineSelection, let selected = chosen else { return }
         let policy = pac.policy
+        let options = routingOptions
+        let membership = currentGroupMembers
+        let routing = CoreRoutingPlan(groups: groups.map { group in
+            let items = members(of: group).map(\.id)
+            guard let preferred = groupNode(group)?.id else { return .init(id: group.id, members: []) }
+            return .init(id: group.id, members: [preferred] + items.filter { $0 != preferred })
+        }, proxyGroup: options.proxyGroup, applications: options.applications, bypassMainland: options.bypassMainland)
         busy = true; status = "正在启动 Mihomo…"
         pendingStart = Task { [weak self] in
             guard let self else { return }
@@ -430,11 +632,14 @@ enum Probe {
             do {
                 let session = try await CoreSession.start(engine: selection.url, nodes: nodes, active: selected,
                                                           expectedFingerprint: selection.identity.fingerprint,
-                                                          mode: routingMode, policy: policy)
+                                                          mode: routingMode, policy: policy, routing: routing)
                 if Task.isCancelled { session.stopAndWait(); return }
                 core = session; proxyAddress = session.proxyAddress; status = "本机代理已就绪"
                 runningRules = policy
+                runningRoutingOptions = options; runningGroupMembers = membership
+                for group in routing.groups { groupPreferred[group.id] = group.members.first.flatMap { self.memberKeys[$0] } }
                 monitorTraffic(session)
+                scheduleAutomatic(immediate: true)
                 if let systemRouting { publishPAC(to: .system(systemRouting)) }
             } catch let error as SessionError {
                 if error == .engineChanged || error == .engineMissing {
@@ -466,10 +671,13 @@ enum Probe {
 
     private func clearSession() {
         sessionTask?.cancel()
+        autoTimer?.cancel(); autoTimer = nil
+        cancelProbe(reschedule: false)
         telemetryTask?.cancel(); telemetryTask = nil
         connectionTask?.cancel(); connectionTask = nil; connectionActionBusy = false; connectionMessage = ""
         telemetry = nil; trafficHistory = []; telemetryStale = false; trafficSegment = 0
         core?.stopAndWait(); core = nil; proxyAddress = nil; runningRules = nil
+        runningRoutingOptions = nil; runningGroupMembers = [:]
         routingConfirmed = true
         if sourceChangePending { applySelectedSource() }
     }
@@ -490,54 +698,115 @@ enum Probe {
         status = restored ? "Mihomo 已退出，可以重试启动" : "Mihomo 已退出 · 请在 PAC 页面恢复系统设置。"
     }
     func select(_ node: NodeProfile) {
-        guard !busy else { return }
-        guard let core else { active = node.id; return }
+        guard !busy, nodes.contains(where: { $0.id == node.id }) else { return }
+        if probeProgress?.automatic == true { cancelProbe(reschedule: false) }
+        scheduleAutomatic()
+        switchNode(to: node, automatic: false)
+    }
+
+    private func switchNode(to node: NodeProfile, automatic: Bool) {
+        let scope = currentGroup.flatMap { members(of: $0).contains(where: { $0.id == node.id }) ? $0.id : nil }
+        guard let core else {
+            active = node.id
+            if let scope { groupPreferred[scope] = memberKeys[node.id] }
+            return
+        }
+        let liveGroup = scope.flatMap { runningGroupMembers[$0]?.contains(node.id) == true ? $0 : nil }
         busy = true
         routingConfirmed = false
         status = "正在确认节点与旧连接状态…"
         sessionTask = Task {
             defer { busy = false; sessionTask = nil }
             do {
-                try await core.switchTo(node)
+                try await core.switchTo(node, group: liveGroup)
                 let actual = try await core.confirmedRouting()
                 guard self.core === core, !Task.isCancelled else { return }
                 guard actual.nodeName == node.localName else { throw SessionError.selectionFailed }
                 try showConfirmedRoute(actual)
-                status = "节点已切换"
+                if let scope { groupPreferred[scope] = memberKeys[node.id] }
+                status = automatic ? "已根据测速自动切换节点" : "节点已切换"
             } catch {
                 guard self.core === core, !Task.isCancelled else { return }
                 status = "未确认节点与旧连接状态；请重试切换或停止会话。"; checkHealth()
             }
         }
     }
-    func measure(_ selection: [NodeProfile], compare: Bool = false) {
-        guard let core, !busy else { return }
-        busy = true; status = "正在通过节点探测…"
-        sessionTask = Task {
-            defer { busy = false; sessionTask = nil }
-            let target = Self.probeTarget
+
+    func cancelProbe(reschedule: Bool = true) {
+        guard probeID != nil else { return }
+        probeTask?.cancel(); probeTask = nil; probeID = nil; probeProgress = nil
+        probeMessage = "已停止测速，保留已完成的结果。"
+        if reschedule { scheduleAutomatic() }
+    }
+
+    private func scheduleAutomatic(immediate: Bool = false) {
+        autoTimer?.cancel(); autoTimer = nil
+        guard running, automaticEnabled, !scopedNodes.isEmpty, routingMode != .direct, !shuttingDown else { return }
+        let interval = automaticInterval
+        autoTimer = Task { [weak self] in
+            if !immediate { do { try await SuspendingClock().sleep(for: interval) } catch { return } }
+            guard !Task.isCancelled, let self else { return }
+            autoTimer = nil
+            guard canMeasure, !busy, routingConfirmed else { scheduleAutomatic(); return }
+            measure(scopedNodes, compare: true, automatic: true)
+        }
+    }
+
+    func measure(_ requested: [NodeProfile], compare: Bool = false, automatic: Bool = false) {
+        guard let core, canMeasure else { return }
+        let ids = Set(requested.map(\.id))
+        let selection = nodes.filter { ids.contains($0.id) }
+        guard !selection.isEmpty else { return }
+        autoTimer?.cancel(); autoTimer = nil
+        let id = UUID()
+        let scope = selectedGroup
+        let before = active
+        let delay = probeDelay
+        probeID = id; probeProgress = ProbeProgress(total: selection.count, automatic: automatic)
+        probeMessage = ""
+        probeTask = Task { [weak self] in
             var results: [UUID: Probe] = [:]
-            // Small batches prevent a large import from creating a burst of outbound requests.
-            for offset in stride(from: 0, to: selection.count, by: 4) {
-                guard core.isRunning, !Task.isCancelled else { break }
-                let chunk = Array(selection.dropFirst(offset).prefix(4))
-                await withTaskGroup(of: (UUID, Probe).self) { group in
-                    for node in chunk { group.addTask { @MainActor in
-                        do { return (node.id, .ok(try await core.delay(node, target: target))) }
+            await withTaskGroup(of: (UUID, Probe).self) { tasks in
+                var remaining = selection.makeIterator()
+                for _ in 0..<min(4, selection.count) {
+                    guard let node = remaining.next() else { break }
+                    _ = tasks.addTaskUnlessCancelled { @MainActor in
+                        do { return (node.id, .ok(try await delay(core, node, Self.probeTarget))) }
                         catch { return (node.id, .failed) }
-                    } }
-                    for await (id, result) in group where self.core === core && !Task.isCancelled {
-                        probes[id] = result; results[id] = result
                     }
                 }
-                guard self.core === core, !Task.isCancelled else { return }
-                lastProbe = .now
+                while let (nodeID, result) = await tasks.next() {
+                    guard let self, self.core === core, self.probeID == id, !Task.isCancelled else { tasks.cancelAll(); return }
+                    self.probes[nodeID] = result; results[nodeID] = result
+                    self.probeProgress?.completed = results.count; self.lastProbe = .now
+                    if core.isRunning, let node = remaining.next() {
+                        _ = tasks.addTaskUnlessCancelled { @MainActor in
+                            do { return (node.id, .ok(try await delay(core, node, Self.probeTarget))) }
+                            catch { return (node.id, .failed) }
+                        }
+                    }
+                }
             }
-            guard self.core === core, !Task.isCancelled else { return }
+            guard let self, self.core === core, probeID == id, !Task.isCancelled else { return }
+            probeID = nil; probeTask = nil; probeProgress = nil
             if compare && results.count == selection.count {
-                previousBatch = latestBatch; latestBatch = results
+                previousBatch = Set(latestBatch.keys) == Set(results.keys) ? latestBatch : [:]
+                latestBatch = results
             }
-            status = "探测结束"; checkHealth()
+            probeMessage = "测速结束 · \(results.values.filter { $0.milliseconds != nil }.count)/\(selection.count) 可用"
+            if automatic, scope == selectedGroup, before == active, automaticEnabled, !busy, routingConfirmed, routingMode != .direct,
+               results.count == selection.count, core.isRunning {
+                if let fastest = selection.compactMap({ node in results[node.id]?.milliseconds.map { (node, $0) } })
+                    .min(by: { $0.1 < $1.1 }) {
+                    let current = before.flatMap { results[$0]?.milliseconds }
+                    let groupNeedsSameNode = fastest.0.id == active && currentGroup.map { self.groupNode($0)?.id != self.active } == true
+                    let meaningfullyFaster = fastest.0.id != active && (current.map { $0 - fastest.1 >= 25 && Double(fastest.1) <= Double($0) * 0.8 } ?? true)
+                    if meaningfullyFaster || groupNeedsSameNode {
+                        switchNode(to: fastest.0, automatic: true)
+                    }
+                }
+            }
+            scheduleAutomatic()
         }
     }
     func copy(_ content: String) { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(content, forType: .string) }
@@ -568,6 +837,7 @@ enum Probe {
         case .controlUnavailable: return "未能确认 Mihomo 控制接口或代理端口已就绪"
         case .portsUnavailable: return "无法为本机代理分配独立端口"
         case .setupFailed: return "无法创建本次运行配置"
+        case .countryDataUnavailable: return "大陆网段数据缺失或校验失败。请重新安装 CLAY，或关闭「绕开中国大陆」。"
         default: return "Mihomo 会话启动失败" }
     }
 }

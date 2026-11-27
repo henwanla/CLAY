@@ -1,3 +1,4 @@
+import AppKit
 import CLAYCore
 import SwiftUI
 
@@ -13,15 +14,121 @@ struct PACDashboard: View {
     @State private var showImport = false
     @State private var importText = ""
     @State private var importError = ""
+    @State private var showApplications = false
+    @State private var runningApps: [CoreAppRoute] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 15) {
+            routing
             runtime
             policy
             rules
         }
+        #if !CLAY_DOCUMENTATION
         .onAppear { control.refreshServices() }
+        #endif
         .sheet(isPresented: $showImport, onDismiss: { importText = ""; importError = "" }) { importSheet }
+        .sheet(isPresented: $showApplications) { applicationSheet }
+    }
+
+    private var routing: some View {
+        card("流量路由", icon: "point.topleft.down.to.point.bottomright.curvepath") {
+            RouteModePicker(model: model)
+            if model.hasUnappliedRoutes {
+                Label("规则已保存，重新连接代理后生效。", systemImage: "arrow.clockwise.circle")
+                    .font(.callout).foregroundStyle(.orange)
+            }
+            HStack(alignment: .center, spacing: 16) {
+                Picker("代理流量走", selection: $model.routingOptions.proxyGroup) {
+                    Text("当前节点").tag(UUID?.none)
+                    ForEach(model.groups) { group in
+                        Text(group.name).tag(Optional(group.id)).disabled(model.members(of: group).isEmpty)
+                    }
+                    if let id = model.routingOptions.proxyGroup, !model.groups.contains(where: { $0.id == id }) {
+                        Text("分组不可用").tag(Optional(id))
+                    }
+                }.frame(maxWidth: 300)
+                if let group = model.groups.first(where: { $0.id == model.routingOptions.proxyGroup }), let node = model.groupNode(group) {
+                    Text("经 \(node.name)").lineLimit(1).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Toggle("绕开中国大陆", isOn: $model.routingOptions.bypassMainland).toggleStyle(ClaySwitchStyle())
+            }
+            Text("规则模式下，可让走代理的域名及默认流量进入指定组；大陆选项将 .cn 和命中随附大陆网段的目标设为直连。全局模式使用当前节点。")
+                .font(.caption).foregroundStyle(.secondary)
+            Divider()
+            HStack {
+                Label("应用规则", systemImage: "macwindow").font(.subheadline.weight(.semibold))
+                Spacer()
+                Button("添加运行中的应用…") { openApplicationPicker() }
+            }
+            ForEach(model.routingOptions.applications) { app in
+                HStack {
+                    Label(app.name, systemImage: "app.dashed").lineLimit(1)
+                    Spacer()
+                    Picker("去向", selection: Binding(get: {
+                        model.routingOptions.applications.first { $0.id == app.id }?.target ?? app.target
+                    }, set: { value in
+                        if let index = model.routingOptions.applications.firstIndex(where: { $0.id == app.id }) {
+                            model.routingOptions.applications[index].target = value
+                        }
+                    })) { routeTargets(app.target) }.labelsHidden().fixedSize()
+                    Button(role: .destructive) { model.routingOptions.applications.removeAll { $0.id == app.id } } label: {
+                        Image(systemName: "trash")
+                    }.buttonStyle(.borderless).accessibilityLabel("删除\(app.name)规则")
+                }.padding(9).background(.background.opacity(0.66), in: RoundedRectangle(cornerRadius: 8))
+            }
+            Text("应用规则仅在规则模式下匹配通过 CLAY 的连接，优先于域名和网段规则；回环保护仍优先。建议用「跟随流量模式」系统代理。忽略系统代理或无法识别来源进程的请求不会命中应用规则。")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder private func routeTargets(_ selected: CoreRouteTarget) -> some View {
+        Text("始终走当前节点").tag(CoreRouteTarget.selected)
+        Text("直连").tag(CoreRouteTarget.direct)
+        ForEach(model.groups) { group in
+            Text(group.name).tag(CoreRouteTarget.group(group.id)).disabled(model.members(of: group).isEmpty)
+        }
+        if case .group(let id) = selected, !model.groups.contains(where: { $0.id == id }) {
+            Text("分组不可用 · 使用当前节点").tag(selected)
+        }
+    }
+
+    private func openApplicationPicker() {
+        let existing = Set(model.routingOptions.applications.map(\.path))
+        var seen: Set<String> = []
+        runningApps = NSWorkspace.shared.runningApplications.compactMap { app in
+            guard app.activationPolicy == .regular, app.processIdentifier != ProcessInfo.processInfo.processIdentifier,
+                  let bundle = app.bundleURL, let name = app.localizedName,
+                  let path = CoreAppRoute.canonicalPath(bundle) else { return nil }
+            let row = CoreAppRoute(name: name, path: path, includesBundleHelpers: true, target: .selected)
+            return row.isValid && !existing.contains(path) && seen.insert(path).inserted ? row : nil
+        }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        showApplications = true
+    }
+
+    private var applicationSheet: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("选择运行中的应用").font(.title2.bold())
+            Text("选择后默认将该应用及安装包内的辅助进程设为走当前节点，可以再改成分组或直连。")
+                .font(.callout).foregroundStyle(.secondary)
+            if runningApps.isEmpty { Text("没有可添加的应用。打开目标应用后再试。").foregroundStyle(.secondary) }
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    ForEach(runningApps) { app in
+                        HStack {
+                            Label(app.name, systemImage: "macwindow").lineLimit(1)
+                            Spacer()
+                            Button("添加") {
+                                model.routingOptions.applications.append(app)
+                                showApplications = false
+                            }
+                        }.padding(8)
+                    }
+                }
+            }.frame(maxHeight: 240)
+            HStack { Spacer(); Button("关闭") { showApplications = false }.keyboardShortcut(.cancelAction) }
+        }.padding(22).frame(width: 480)
     }
 
     private var runtime: some View {
@@ -38,11 +145,13 @@ struct PACDashboard: View {
                     .font(.callout).foregroundStyle(.orange)
                 Button("恢复原网络代理设置") { control.restoreSystem() }.disabled(control.busy || model.busy)
             } else if let service = control.systemService {
-                Text("已配置网络服务：\(service.name)。切换到其他网络服务时，先恢复原设置，再连接到新服务。")
+                Text("已配置网络服务：\(service.name)。")
                     .font(.callout).foregroundStyle(.secondary)
                 if !control.busy && !control.systemPACIsEffective {
-                    Label("macOS 尚未使用此次配置的 PAC 地址。刚连接时系统可能还在更新；若切换了网络，可先恢复原设置，再连接当前网络服务。", systemImage: "exclamationmark.circle")
+                    Label("当前网络尚未使用这份 PAC。若刚切换网络，可以重新接入当前网络。", systemImage: "exclamationmark.circle")
                         .font(.callout).foregroundStyle(.orange)
+                    Button("接入当前网络") { model.reconnectPrimaryNetwork() }
+                        .buttonStyle(ClayActionButtonStyle()).disabled(!model.running || model.busy)
                 }
                 HStack {
                     if control.followsRoutingMode {
@@ -110,17 +219,19 @@ struct PACDashboard: View {
     }
 
     private var policy: some View {
-        card("默认策略与测试", icon: "scope") {
+        card("局域网与默认策略", icon: "scope") {
             HStack {
                 Picker("未命中规则", selection: $control.policy.defaultDecision) {
                     ForEach(PACDecision.allCases, id: \.self) { Text(label($0)).tag($0) }
                 }.fixedSize()
                 Spacer()
-                Toggle("本地和私有地址直连", isOn: $control.policy.bypassLocal)
+                Toggle("本地和私有地址直连", isOn: $control.policy.bypassLocal).toggleStyle(ClaySwitchStyle())
             }
             Text("同一目标命中多条时以第一条为准。回环地址始终直连；本地和私有地址的默认动作可以由显式规则覆盖。")
                 .font(.caption).foregroundStyle(.secondary)
-            TextField("输入域名、IP 或完整 URL，测试会走哪条规则", text: $preview).textFieldStyle(.roundedBorder)
+            TextField("预览 PAC：输入域名、IP 或完整 URL", text: $preview).textFieldStyle(.roundedBorder)
+            Text("此预览检查 PAC 域名和网段规则，不包含内核的应用或大陆规则。")
+                .font(.caption).foregroundStyle(.secondary)
             if !preview.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { previewResult }
         }
     }
@@ -255,7 +366,6 @@ struct PACDashboard: View {
         VStack(alignment: .leading, spacing: 12) {
             Label(title, systemImage: icon).font(.headline)
             content()
-        }.padding(15).frame(maxWidth: .infinity, alignment: .leading)
-            .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 13))
+        }.clayCard()
     }
 }

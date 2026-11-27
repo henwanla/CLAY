@@ -166,6 +166,17 @@ private enum Page: String, CaseIterable, Identifiable {
     case overview = "概览", connections = "连接", pac = "PAC 规则", nodes = "节点", subscriptions = "订阅", diagnostics = "诊断", settings = "设置"
     var id: Self { self }
     var icon: String { switch self { case .overview: return "square.grid.2"; case .connections: return "arrow.left.arrow.right"; case .pac: return "arrow.triangle.branch"; case .nodes: return "point.3.connected.trianglepath.dotted"; case .subscriptions: return "link"; case .diagnostics: return "waveform.path.ecg"; case .settings: return "gearshape" } }
+    var subtitle: String {
+        switch self {
+        case .overview: return "查看流量、连接状态和当前节点"
+        case .connections: return "查看经过代理的连接、命中规则和流量"
+        case .pac: return "配置系统代理、分流与应用规则"
+        case .nodes: return "管理分组、测试延时和切换节点"
+        case .subscriptions: return "管理节点来源与订阅更新"
+        case .diagnostics: return "查看测速结果和迁移记录"
+        case .settings: return "管理本机代理内核"
+        }
+    }
 }
 
 private final class DashboardNavigation: ObservableObject {
@@ -173,9 +184,9 @@ private final class DashboardNavigation: ObservableObject {
 }
 
 #if CLAY_DOCUMENTATION
-@MainActor func documentationDashboard(model: Workspace, connections: Bool) -> some View {
+@MainActor func documentationDashboard(model: Workspace, section: String) -> some View {
     let navigation = DashboardNavigation()
-    navigation.page = connections ? .connections : .overview
+    navigation.page = ["connections": Page.connections, "nodes": .nodes, "routing": .pac][section] ?? .overview
     return Dashboard(model: model, pac: model.pac, navigation: navigation).detailPane
 }
 #endif
@@ -192,17 +203,30 @@ private struct Dashboard: View {
     @State private var subscriptionName = ""
     @State private var subscriptionURL = ""
     @State private var nodeSearch = ""
-    private let clay = Color(red: 0.86, green: 0.40, blue: 0.23)
+    @State private var groupDraft: GroupDraft?
+    private let clay = clayAccent
+
+    private struct GroupDraft: Identifiable {
+        let id = UUID()
+        let original: UUID?
+        var name: String
+        var members: Set<UUID>
+    }
 
     var body: some View {
         NavigationSplitView {
             VStack(alignment: .leading, spacing: 13) {
                 HStack(spacing: 10) {
-                    Image(systemName: "cube.fill").font(.title2).foregroundStyle(clay)
-                    Text("CLAY").font(.system(size: 25, weight: .bold, design: .rounded)).tracking(2)
-                }.padding(.leading, 13).padding(.top, 12)
+                    Image(systemName: "cube.fill").font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.white).frame(width: 34, height: 34)
+                        .background(clay.gradient, in: RoundedRectangle(cornerRadius: 10))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("CLAY").font(.system(size: 20, weight: .bold, design: .rounded)).tracking(1.6)
+                        Text("代理工作台").font(.caption).foregroundStyle(.secondary)
+                    }
+                }.padding(.leading, 14).padding(.top, 16)
                 List(selection: $navigation.page) {
-                    ForEach(Page.allCases) { item in Label(item.rawValue, systemImage: item.icon).tag(item) }
+                    ForEach(Page.allCases) { item in Label(item.rawValue, systemImage: item.icon).padding(.vertical, 4).tag(item) }
                 }.listStyle(.sidebar)
                 Label(model.menuStatus, systemImage: connectionSymbol)
                     .font(.caption).foregroundStyle(connectionColor).padding(13)
@@ -211,15 +235,24 @@ private struct Dashboard: View {
             .tint(clay)
             .sheet(isPresented: $model.presentImport, onDismiss: { input = "" }) { importSheet }
             .sheet(isPresented: $model.presentSubscription, onDismiss: { subscriptionURL = ""; subscriptionName = "" }) { subscriptionSheet }
+            .sheet(item: $groupDraft) { _ in groupEditor }
     }
 
     fileprivate var detailPane: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                HStack { Text((page ?? .overview).rawValue).font(.largeTitle.bold()); Spacer(); controls }
-                VStack(alignment: .leading, spacing: 4) {
-                    Label(model.menuStatus, systemImage: connectionSymbol)
-                        .font(.callout.weight(.semibold)).foregroundStyle(connectionColor)
+                HStack(alignment: .center, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text((page ?? .overview).rawValue).font(.system(size: 32, weight: .bold))
+                        Text((page ?? .overview).subtitle).font(.callout).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    controls
+                }
+                HStack {
+                    Label(model.menuStatus, systemImage: connectionSymbol).font(.callout.weight(.semibold))
+                        .foregroundStyle(connectionColor).padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(connectionColor.opacity(0.1), in: Capsule())
                     if model.status != model.menuStatus {
                         Text(model.status).font(.callout).foregroundStyle(.secondary).accessibilityIdentifier("session-status")
                     }
@@ -236,7 +269,12 @@ private struct Dashboard: View {
                 case .settings: settings
                 }
             }.padding(27).frame(maxWidth: 1050, alignment: .topLeading).frame(maxWidth: .infinity)
-        }.background(Color(nsColor: .windowBackgroundColor)).tint(clay)
+        }.background {
+            Color(nsColor: .windowBackgroundColor).overlay(alignment: .top) {
+                LinearGradient(colors: [clay.opacity(0.08), .clear], startPoint: .topLeading, endPoint: .bottomTrailing)
+                    .frame(height: 280).allowsHitTesting(false)
+            }
+        }.tint(clay)
     }
     private var connectionSymbol: String {
         if pac.needsRecovery || pac.messageIsError { return "exclamationmark.triangle.fill" }
@@ -254,15 +292,17 @@ private struct Dashboard: View {
         HStack(spacing: 10) {
             if model.busy || pac.busy { ProgressView().controlSize(.small) }
             if model.running {
-                Button("停止代理") { model.stop() }.disabled(model.busy || pac.busy)
+                Button { model.stop() } label: { Label("停止代理", systemImage: "stop.circle") }
+                    .controlSize(.large).disabled(model.busy || pac.busy)
             } else {
                 Button("仅启动本机代理") { model.start() }
                     .help("启动回环代理端口供应用手动连接；不修改 macOS 网络设置。")
                     .disabled(!model.canStartManual)
             }
             if pac.systemService == nil || pac.needsRecovery || !model.running {
-                Button("连接 macOS") { model.connectSystem() }
-                    .buttonStyle(.borderedProminent)
+                Button { model.connectSystem() } label: { Label("连接 macOS", systemImage: "bolt.horizontal.circle.fill") }
+                    .buttonStyle(ClayActionButtonStyle())
+                    .controlSize(.large)
                     .help("让使用 macOS 系统代理的应用跟随当前流量模式。")
                     .disabled(!model.canConnectSystem)
             }
@@ -321,12 +361,9 @@ private struct Dashboard: View {
         VStack(alignment: .leading, spacing: 16) {
             TrafficDashboard(model: model)
             panel("流量模式", symbol: "arrow.triangle.branch") {
-                Picker("流量模式", selection: Binding<CoreRoutingMode?>(get: { model.routingConfirmed ? model.routingMode : nil },
-                    set: { if let mode = $0 { model.selectRoutingMode(mode) } })) {
-                    ForEach(CoreRoutingMode.allCases) { mode in Text(mode.label).tag(Optional(mode)) }
-                }.pickerStyle(.segmented).labelsHidden().disabled(model.busy)
+                RouteModePicker(model: model)
                 Text(routingExplanation).font(.callout).foregroundStyle(.secondary)
-                if model.routingConfirmed && model.routingMode == .rule && model.runningRules.map({ $0 != pac.policy }) == true {
+                if model.routingConfirmed && model.routingMode == .rule && model.hasUnappliedRoutes {
                     Text("规则有未应用的改动。重启代理后会载入新规则；自定义 PAC 仍可从 PAC 页面单独更新。")
                         .font(.callout).foregroundStyle(.orange)
                 }
@@ -357,14 +394,14 @@ private struct Dashboard: View {
     private var routingExplanation: String {
         guard model.routingConfirmed else { return model.status }
         switch model.routingMode {
-        case .rule: return "进入本机代理的流量按「PAC 规则」中的规则及未命中行为分流。"
+        case .rule: return "进入本机代理的流量按应用、域名、网段及默认策略分流。"
         case .global: return "进入本机代理的流量全部走当前节点。"
         case .direct: return "进入本机代理的流量直接连接目标，不走当前节点。"
         }
     }
     private var nodes: some View {
         let query = nodeSearch.trimmingCharacters(in: .whitespacesAndNewlines)
-        let visibleNodes = model.nodes.filter { node in
+        let visibleNodes = model.orderedNodes.filter { node in
             query.isEmpty || [node.name, node.protocolName, node.protocolDisplayName, node.transport, node.security].contains { $0.localizedCaseInsensitiveContains(query) }
         }
         return LazyVStack(alignment: .leading, spacing: 13) {
@@ -377,6 +414,7 @@ private struct Dashboard: View {
                 Text("支持 VMess、VLESS、Shadowsocks、Trojan 和 Hysteria2 分享链接，也可以导入兼容的 V2Ray/Xray 或 Clash 配置及订阅。").foregroundStyle(.secondary)
                 Button("管理订阅") { page = .subscriptions }
             } else {
+                nodeGroupControls
                 HStack {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                     TextField("搜索节点名称或协议", text: $nodeSearch).textFieldStyle(.roundedBorder)
@@ -384,25 +422,126 @@ private struct Dashboard: View {
                 }
                 if visibleNodes.isEmpty { Text("没有匹配的节点。").foregroundStyle(.secondary) }
             }
-            ForEach(visibleNodes) { n in
-                let current = model.routingConfirmed && model.active == n.id
-                HStack(spacing: 13) {
-                    Image(systemName: current ? "largecircle.fill.circle" : "circle").foregroundStyle(current ? clay : .secondary)
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 6) {
-                            if let number = model.nodeNumber(n.id) { Text("#\(number)").font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
-                            Text(n.name).font(.headline).lineLimit(1)
-                        }
-                        Text("\(n.protocolDisplayName) · \(n.transport) · \(n.security)").font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    if let probe = model.probes[n.id] { Text(probe.text).font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
-                    Button("选择") { model.select(n) }.disabled(model.busy || current)
-                }.padding(12).background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 10))
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 294), spacing: 12)], spacing: 12) {
+                ForEach(visibleNodes) { node in nodeCard(node) }
             }
             importReport
         }
     }
+
+    private func nodeCard(_ node: NodeProfile) -> some View {
+        let current = model.routingConfirmed && model.active == node.id
+        let isGroupSelection = model.currentGroup.map { model.groupNode($0)?.id == node.id }
+        let probe = model.probes[node.id]
+        let latencyTint: Color = probe?.milliseconds.map { $0 < 150 ? .green : $0 < 450 ? .orange : .red }
+            ?? (probe == nil ? .secondary : .red)
+        return VStack(alignment: .leading, spacing: 11) {
+            HStack(spacing: 8) {
+                Image(systemName: current ? "checkmark.circle.fill" : "point.topleft.down.to.point.bottomright.curvepath")
+                    .font(.callout.weight(.semibold)).foregroundStyle(current ? clay : .secondary)
+                Text(node.name).font(.headline).lineLimit(1).help(node.name)
+                Spacer(minLength: 2)
+                Text(probe?.text ?? "未测速").font(.caption.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(latencyTint).padding(.horizontal, 7).padding(.vertical, 4)
+                    .background(latencyTint.opacity(0.09), in: Capsule())
+            }
+            HStack(spacing: 5) {
+                if let number = model.nodeNumber(node.id) { Text("#\(number)").monospacedDigit() }
+                Text(node.protocolDisplayName)
+                Text("· \(node.transport) · \(node.security)").lineLimit(1)
+            }.font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Button { model.measure([node]) } label: { Label("测速", systemImage: "timer") }.disabled(!model.canMeasure)
+                Spacer()
+                if current && isGroupSelection != false { Label("当前节点", systemImage: "checkmark").font(.caption.weight(.semibold)).foregroundStyle(clay) }
+                else { Button("选择") { model.select(node) }.buttonStyle(ClayActionButtonStyle(secondary: true)).disabled(model.busy) }
+            }
+        }.clayCard(selected: current)
+    }
+    private var nodeGroupControls: some View {
+        panel("节点分组与测速", symbol: "point.3.connected.trianglepath.dotted") {
+            HStack {
+                Picker("范围", selection: Binding(get: { model.selectedGroup }, set: model.chooseGroup)) {
+                    Text("全部节点").tag(UUID?.none)
+                    ForEach(model.groups) { group in Text(group.name).lineLimit(1).tag(Optional(group.id)) }
+                }.frame(maxWidth: 230)
+                Button("新建分组…") { groupDraft = GroupDraft(original: nil, name: "", members: []) }
+                if let group = model.currentGroup {
+                    Button("编辑…") {
+                        groupDraft = GroupDraft(original: group.id, name: group.name, members: Set(model.members(of: group).map(\.id)))
+                    }
+                }
+                Spacer()
+                Picker("排序", selection: $model.nodeOrder) {
+                    ForEach(Workspace.NodeOrder.allCases) { Text($0.rawValue).tag($0) }
+                }.fixedSize()
+            }
+            HStack {
+                Button { model.measure(model.scopedNodes, compare: true) } label: {
+                    Label("批量测速 · \(model.scopedNodes.count)", systemImage: "gauge.with.dots.needle.67percent")
+                }.buttonStyle(ClayActionButtonStyle())
+                    .disabled(!model.canMeasure || model.scopedNodes.isEmpty)
+                if let progress = model.probeProgress {
+                    Button("停止测速") { model.cancelProbe() }
+                    ProgressView(value: Double(progress.completed), total: Double(progress.total))
+                        .labelsHidden().frame(maxWidth: 100)
+                    Text("\(progress.automatic ? "自动测速" : "测速") \(progress.completed)/\(progress.total)")
+                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                } else if !model.probeMessage.isEmpty {
+                    Text(model.probeMessage).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Toggle("自动测速与切换", isOn: Binding(get: { model.automaticEnabled }, set: model.setAutomatic))
+                    .toggleStyle(ClaySwitchStyle()).fixedSize()
+            }
+            Text(model.running ? "测速通过节点请求 gstatic.com；批量检测仅覆盖当前范围，不受搜索筛选影响。" :
+                    "启动本机代理后可测速，无需接管 macOS 系统代理。")
+                .font(.caption).foregroundStyle(.secondary)
+            if model.automaticEnabled {
+                Text("每 5 分钟检查当前范围。节点不可用或有明显更快的选择时才切换；直连模式暂停自动检测。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            if !model.groupMessage.isEmpty { Text(model.groupMessage).font(.caption).foregroundStyle(.orange) }
+        }
+    }
+
+    private var groupEditor: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            Text(groupDraft?.original == nil ? "新建节点分组" : "编辑节点分组").font(.title2.bold())
+            TextField("组名", text: Binding(get: { groupDraft?.name ?? "" }, set: { groupDraft?.name = $0 }))
+            Text("节点可同时属于多个组。订阅分组保存在本机，手动导入的分组在本次打开期间有效。")
+                .font(.callout).foregroundStyle(.secondary)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 9) {
+                    ForEach(Array(model.nodes.enumerated()), id: \.element.id) { i, node in
+                        Toggle("#\(i + 1) · \(node.name)", isOn: Binding(
+                            get: { groupDraft?.members.contains(node.id) ?? false },
+                            set: { checked in
+                                if checked { groupDraft?.members.insert(node.id) }
+                                else { groupDraft?.members.remove(node.id) }
+                            }))
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4)
+            }.frame(height: 210)
+            if !model.groupMessage.isEmpty { Text(model.groupMessage).foregroundStyle(.orange) }
+            HStack {
+                if let id = groupDraft?.original {
+                    Button("删除分组", role: .destructive) {
+                        model.removeGroup(id)
+                        if model.groupMessage.isEmpty { groupDraft = nil }
+                    }
+                }
+                Spacer()
+                Button("取消") { groupDraft = nil }.keyboardShortcut(.cancelAction)
+                Button("保存") {
+                    if let draft = groupDraft, model.saveGroup(id: draft.original, name: draft.name, nodeIDs: draft.members) { groupDraft = nil }
+                }.keyboardShortcut(.defaultAction).disabled(groupDraft.map {
+                    $0.members.isEmpty || $0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                } ?? true)
+            }
+        }.padding(23).frame(width: 560)
+    }
+
     private var subscriptions: some View {
         VStack(alignment: .leading, spacing: 13) {
             HStack {
@@ -442,8 +581,7 @@ private struct Dashboard: View {
                 Text("探测会通过选中的节点请求 gstatic.com 的 204 检测地址。延迟表示该请求用时，无法单凭它判断代理服务故障的具体原因。")
                     .foregroundStyle(.secondary)
                 HStack {
-                    Button("探测当前节点") { if let n = model.chosen { model.measure([n]) } }.disabled(!model.running || model.busy)
-                    Button("批量探测") { model.measure(model.nodes, compare: true) }.disabled(!model.running || model.busy || model.nodes.isEmpty)
+                    Button("到节点页测速") { page = .nodes }
                     Spacer()
                     Button("复制脱敏报告") { model.copySummary() }.disabled(model.nodes.isEmpty)
                 }
@@ -537,6 +675,74 @@ private struct Dashboard: View {
         VStack(alignment: .leading, spacing: 10) {
             Label(title, systemImage: symbol).font(.headline)
             content()
-        }.padding(16).frame(maxWidth: .infinity, alignment: .leading).background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 13))
+        }.clayCard()
+    }
+}
+
+extension View {
+    func clayCard(selected: Bool = false) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 14)
+        return self.padding(15).frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(nsColor: .controlBackgroundColor), in: shape)
+            .overlay { shape.strokeBorder(selected ? clayAccent.opacity(0.55) : Color.primary.opacity(0.09)) }
+    }
+}
+
+private let clayAccent = Color(red: 0.72, green: 0.29, blue: 0.16)
+
+struct ClayActionButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.controlSize) private var size
+    var secondary = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.font(.callout.weight(.semibold))
+            .foregroundStyle(secondary ? Color.primary : .white)
+            .padding(.horizontal, size == .large ? 13 : 10).padding(.vertical, size == .large ? 8 : 6)
+            .background(secondary ? Color.primary.opacity(0.06) : clayAccent, in: RoundedRectangle(cornerRadius: 7))
+            .opacity(!isEnabled ? 0.45 : configuration.isPressed ? 0.76 : 1)
+            .contentShape(RoundedRectangle(cornerRadius: 7))
+    }
+}
+
+struct ClaySwitchStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Button { configuration.isOn.toggle() } label: {
+            HStack(spacing: 6) {
+                configuration.label.font(.callout.weight(.medium))
+                Image(systemName: configuration.isOn ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(configuration.isOn ? clayAccent : .secondary)
+            }
+            .padding(.horizontal, 7).padding(.vertical, 5)
+            .background(Color.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 7))
+            .contentShape(RoundedRectangle(cornerRadius: 7))
+        }.buttonStyle(.plain).accessibilityValue(configuration.isOn ? "已开启" : "已关闭")
+    }
+}
+
+struct RouteModePicker: View {
+    @ObservedObject var model: Workspace
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(CoreRoutingMode.allCases) { mode in
+                let selected = model.routingConfirmed && model.routingMode == mode
+                Button { model.selectRoutingMode(mode) } label: {
+                    Label(mode.label, systemImage: symbol(mode)).font(.callout.weight(.semibold))
+                        .frame(maxWidth: .infinity).padding(.vertical, 8)
+                        .foregroundStyle(selected ? clayAccent : Color.secondary)
+                        .background(selected ? clayAccent.opacity(0.13) : Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+                        .contentShape(RoundedRectangle(cornerRadius: 8))
+                }.buttonStyle(.plain).accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }.disabled(model.busy)
+    }
+
+    private func symbol(_ mode: CoreRoutingMode) -> String {
+        switch mode {
+        case .rule: return "arrow.triangle.branch"
+        case .global: return "globe"
+        case .direct: return "arrow.right"
+        }
     }
 }

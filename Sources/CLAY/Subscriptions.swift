@@ -20,6 +20,20 @@ struct SubscriptionCatalog: Codable {
 
     var entries: [Entry] = []
     var selected: UUID?
+    // Optional for compatibility with catalogs written before node groups.
+    var nodeGroups: [UUID: [NodeGroup]]?
+}
+
+struct NodeGroup: Codable, Equatable, Identifiable {
+    struct Member: Codable, Hashable {
+        let digest: String
+        let occurrence: Int
+    }
+
+    let id: UUID
+    var name: String
+    var members: Set<Member>
+    var automatic: Bool
 }
 
 /// The catalog contains credentials in both the URL and downloaded body. Only

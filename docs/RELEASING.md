@@ -1,6 +1,6 @@
 # CLAY 打包与发布 / Release process
 
-桌面公开包面向 Apple Silicon、Windows x64 和 Ubuntu 24.04 x86-64，不分发 Mihomo。各包保留 CLAY 的 MIT 许可和 Yams/libyaml 的上游许可。本机 macOS 试用包可内置独立的 Mihomo，须保留 GPL 许可证和固定版本的源码入口。GitHub Release 不替代操作系统签名、公证或真实桌面验收。
+桌面公开包面向 Apple Silicon、Windows x64 和 Ubuntu 24.04 x86-64，不分发 Mihomo。各包保留 CLAY 的 MIT 许可和 Yams/libyaml 的上游许可。macOS 包单独携带已固定校验的大陆 IP 快照及其归属和许可文件。本机 macOS 试用包可内置独立的 Mihomo，须保留 GPL 许可证和固定版本的源码入口。GitHub Release 不替代操作系统签名、公证或真实桌面验收。
 
 ## 版本验证
 

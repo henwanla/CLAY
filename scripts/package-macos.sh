@@ -17,7 +17,7 @@ else
 fi
 version="$(cat VERSION)"
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ && "$(uname -m)" == arm64 ]] || { echo 'A numeric VERSION and Apple silicon build host are required.' >&2; exit 1; }
-build_number=10
+build_number=11
 scripts/swift-local.sh build -c release
 builddir="$(scripts/swift-local.sh build -c release --show-bin-path)"
 stage="$(mktemp -d "$root/.build/package.XXXXXX")"
@@ -28,6 +28,8 @@ install -m 755 "$builddir/CLAY" "$app/Contents/MacOS/CLAY"
 install -m 644 Vendor/Yams/LICENSE "$app/Contents/Resources/LICENSE-Yams.txt"
 install -m 644 Vendor/Yams/LICENSE-libyaml "$app/Contents/Resources/LICENSE-libyaml.txt"
 install -m 644 LICENSE "$app/Contents/Resources/LICENSE-CLAY.txt"
+mkdir -p "$app/Contents/Resources/GeoIP"
+install -m 644 Sources/CLAYCore/GeoIP/{cn.dat,LICENSE.txt,README.md} "$app/Contents/Resources/GeoIP/"
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -74,7 +76,8 @@ if $public; then
   mv "$app" "$stage/content/"
   install -m 644 README.md README.en.md LICENSE CHANGELOG.md "$stage/content/"
   mkdir -p "$stage/content/docs/screenshots"
-  install -m 644 docs/screenshots/macos-{overview,connections}.png "$stage/content/docs/screenshots/"
+  install -m 644 docs/macOS-同行反馈与验收.md "$stage/content/docs/"
+  install -m 644 docs/screenshots/macos-{overview,connections,nodes,routing}.png "$stage/content/docs/screenshots/"
   (cd "$stage/content" && /usr/bin/zip -q -X -r "$stage/$archive" .)
   mv -f "$stage/$archive" "$target/$archive"
   (cd "$target" && shasum -a 256 "$archive" > "$archive.sha256")

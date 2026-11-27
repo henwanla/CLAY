@@ -16,19 +16,25 @@ private final class NoSystemPACBackend: SystemPACBackend {
 
 private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
     static let service = SystemPACService(id: "fixture", name: "Fixture Network", isPrimary: true)
+    static let secondService = SystemPACService(id: "second", name: "Second Network", isPrimary: true)
     static let urlKey = "ProxyAutoConfigURLString"
     static let baseline: [String: Any] = ["HTTPEnable": 1, "HTTPProxy": "proxy.example.test", "ExceptionsList": ["localhost"]]
 
     var denyAuthorization = false
     var withholdEffectiveState = false
     var delayApply = false
+    var secondIsPrimary = false
     private(set) var attempts = 0
     private(set) var persisted = baseline
     private(set) var activeURL: String?
+    private(set) var secondActiveURL: String?
+    private(set) var secondPersisted = baseline
     private(set) var applies = 0
     var observeApply: ((String?, String?) -> Void)?
 
-    var matchesBaseline: Bool { NSDictionary(dictionary: persisted).isEqual(to: Self.baseline) }
+    var matchesBaseline: Bool {
+        NSDictionary(dictionary: persisted).isEqual(to: Self.baseline) && NSDictionary(dictionary: secondPersisted).isEqual(to: Self.baseline)
+    }
 
     func withLocked<T>(interactive: Bool, _ body: (any SystemPACSession) throws -> T) throws -> T {
         guard interactive else { throw CheckFailed("system PAC expected a foreground action") }
@@ -37,27 +43,40 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
         return try body(self)
     }
 
-    func services() -> [SystemPACService] { [Self.service] }
-    func preferences(serviceID: String) throws -> [String: Any]? { serviceID == Self.service.id ? persisted : nil }
+    func services() -> [SystemPACService] { secondIsPrimary ? [Self.secondService] : [Self.service] }
+    func preferences(serviceID: String) throws -> [String: Any]? {
+        if serviceID == Self.service.id { return persisted }
+        if serviceID == Self.secondService.id { return secondPersisted }
+        return nil
+    }
     func commit(_ values: [String: Any], serviceID: String) throws {
-        guard serviceID == Self.service.id else { throw CheckFailed("fixture did not select its primary network service") }
-        persisted = values
+        if serviceID == Self.service.id { persisted = values }
+        else if serviceID == Self.secondService.id { secondPersisted = values }
+        else { throw CheckFailed("fixture did not select an available network service") }
     }
     func apply() throws {
         let next = persisted[Self.urlKey] as? String
         observeApply?(activeURL, next)
-        if !delayApply { activeURL = next }
+        if !delayApply { propagate() }
         applies += 1
     }
-    func propagate() { activeURL = persisted[Self.urlKey] as? String }
-    func activePACURLs(serviceID: String) -> Set<String> { serviceID == Self.service.id ? Set([activeURL].compactMap { $0 }) : [] }
-    func effectivePACURLs() -> Set<String> { withholdEffectiveState ? [] : Set([activeURL].compactMap { $0 }) }
+    func propagate() { activeURL = persisted[Self.urlKey] as? String; secondActiveURL = secondPersisted[Self.urlKey] as? String }
+    func activePACURLs(serviceID: String) -> Set<String> {
+        Set([serviceID == Self.service.id ? activeURL : secondActiveURL].compactMap { $0 })
+    }
+    func effectivePACURLs() -> Set<String> { withholdEffectiveState ? [] : activePACURLs(serviceID: secondIsPrimary ? Self.secondService.id : Self.service.id) }
 }
 
 @main struct WorkspaceChecks {
     @MainActor static func main() async {
         do {
             let args = CommandLine.arguments
+            if args.count == 4, args[1] == "--process-fixture", let proxy = UInt16(args[3]) {
+                let tunnel = try openTunnel(proxy: proxy, origin: args[2], host: "route.example.test")
+                defer { close(tunnel) }
+                try checkTunnel(tunnel, response: "node1")
+                return
+            }
             try SubscriptionStorageChecks.run()
             if args.count == 2, args[1] == "--storage-only" { return }
             guard args.count == 6, let first = UInt16(args[4]), let second = UInt16(args[5]), first != second else {
@@ -70,7 +89,8 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
             let suite = "CLAYWorkspaceChecks-\(UUID())"
             guard let preferences = UserDefaults(suiteName: suite) else { throw CheckFailed("could not isolate preferences") }
             defer { preferences.removePersistentDomain(forName: suite) }
-            let model = Workspace(store: store, pac: PACControl(manager: manager, preferences: preferences), preferences: preferences)
+            let model = Workspace(store: store, pac: PACControl(manager: manager, preferences: preferences), preferences: preferences,
+                                  probeDelay: { _, _, _ in 42 })
             let engine = URL(filePath: args[2])
             try model.trustEngine(engine, persist: false)
             do {
@@ -85,6 +105,8 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
             try await checkBundledRecovery(engine: engine, origin: args[1], directory: directory.appendingPathComponent("engine-selection"))
             try await checkSystemConnection(engine: engine, origin: args[1], directory: directory.appendingPathComponent("system-connect"))
             try await checkNodeSwitch(engine: engine, origin: args[1], ports: [first, second])
+            try await checkGroupRouting(engine: engine, origin: args[1], ports: [first, second])
+            try await checkGroupProbes(engine: engine, origin: args[1], ports: [first, second], directory: directory.appendingPathComponent("group"))
             print("PASS running listener stays available through refresh and failure; stop and offline reload use the last successful list")
             print("PASS background health monitor notices exit of the owned Mihomo and clears its listener without a window")
             print("PASS local PAC published with the live proxy port and was removed before the proxy listener")
@@ -195,6 +217,7 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
         guard let source = model.selectedSubscription else { throw CheckFailed("known subscription was not selected") }
         try require(model.nodes.map(\.name) == ["local"], "initial nodes were not installed")
         try require(model.subscriptions.map(\.count) == [1], "subscription summary is missing its initial count")
+        try require(model.saveGroup(id: nil, name: "Fixture cohort", nodeIDs: Set(model.nodes.map(\.id))), "could not save an encrypted subscription group")
 
         model.start()
         try await wait("Mihomo readiness") { model.running || !model.busy }
@@ -203,6 +226,8 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
         }
         try require(canConnect(to: localPort), "owned proxy socket is not listening")
         try await wait("initial telemetry") { model.telemetry != nil }
+        model.measure(model.scopedNodes)
+        try await wait("initial latency") { model.probes.count == 1 }
         try require(!proxyFetch(origin, through: listener), "global mode did not use the selected fixture node")
         model.selectRoutingMode(.rule)
         try await wait("rule mode") { !model.busy }
@@ -246,9 +271,12 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
         try await wait("PAC listener shutdown") { model.pac.localURL == nil && !canConnect(to: endpointPort) }
         try require(model.telemetry == nil, "stop retained the previous session's telemetry")
         try require(!model.sourceChangePending && model.nodes.map(\.name) == ["replaced"], "stop did not apply the last successful refresh")
+        try require(model.probes.isEmpty && model.scopedNodes.map(\.name) == ["replaced"], "refresh retained stale latency or lost group membership after rename")
 
         let reloaded = Workspace(store: store, pac: model.pac, preferences: preferences)
         try require(reloaded.selectedSubscription == source && reloaded.nodes.map(\.name) == ["replaced"], "a new workspace did not load the last successful subscription from disk")
+        try require(reloaded.selectedGroup != nil && reloaded.scopedNodes.map(\.name) == ["replaced"],
+                    "a restart did not restore the encrypted subscription group and selection")
         let manager = FileManager.default
         let file = directory.appendingPathComponent("subscriptions.json")
         let dirMode = try manager.attributesOfItem(atPath: directory.path)[.posixPermissions] as? Int
@@ -306,7 +334,7 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
             try require(fixture.persisted["ProxyAutoConfigEnable"] as? Int == 1 && fixture.persisted["HTTPEnable"] as? Int == 0,
                         "system PAC was not enabled in the mock settings")
             try require(model.pac.followsRoutingMode && model.pac.activePolicy == nil, "Connect macOS did not delegate routing to Mihomo")
-            try await checkPACScript(endpoint, policy: .standard, proxyPort: proxyPort)
+            try await checkPACScript(endpoint, policy: PACControl.followPolicy, proxyPort: proxyPort)
             model.selectRoutingMode(.global)
             try await wait("global mode with system proxy") { !model.busy }
             try require(model.routingMode == .global && !proxyFetch(origin, through: listener)
@@ -383,6 +411,23 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
             model.connectSystem()
             try await checkAttachedAndStop()
             try require(fixture.applies == 6, "enable, replace and restore must apply exactly once")
+
+            model.connectSystem()
+            try await wait("first service before handoff") { !model.busy && !model.pac.busy && model.pac.systemPACIsEffective }
+            let beforeHandoff = model.proxyAddress
+            let firstPID = try ownedEnginePID()
+            fixture.secondIsPrimary = true
+            model.checkHealth()
+            try require(!model.pac.systemPACIsEffective && model.pac.systemService == WorkspacePACFixture.service,
+                        "network change was mistaken for an effective system proxy")
+            model.reconnectPrimaryNetwork()
+            try await wait("explicit network handoff") { !model.pac.busy && model.pac.systemPACIsEffective }
+            let afterPID = try ownedEnginePID()
+            try require(fixture.activeURL == nil && fixture.secondActiveURL == model.pac.localURL?.absoluteString &&
+                        model.pac.systemService == WorkspacePACFixture.secondService && model.proxyAddress == beforeHandoff && firstPID == afterPID,
+                        "handoff did not restore the old service before attaching the new one on the same listener")
+            try require(model.stop() && fixture.matchesBaseline && fixture.secondActiveURL == nil,
+                        "stop after handoff did not restore the new service")
         } catch {
             fixture.denyAuthorization = false
             fixture.delayApply = false
@@ -392,6 +437,7 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
         await model.shutdown()
         print("PASS system connect launches or reuses Mihomo, authorization refusal preserves manual access, and stop restores mocked settings first")
         print("PASS system PAC delegates non-local targets to the core, preserves custom PAC and handles delayed PAC propagation")
+        print("PASS network handoff restores the former service, attaches the new primary and preserves the listener")
     }
 
     private static func checkPACScript(_ endpoint: URL, policy: PACPolicy, proxyPort: Int) async throws {
@@ -452,6 +498,8 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
         let core = try await CoreSession.start(engine: engine, nodes: nodes, active: nodes[0],
                                                expectedFingerprint: EngineIdentity.fingerprint(engine), mode: .global)
         defer { core.stopAndWait() }
+        let latency = try await core.delay(nodes[1], target: URL(string: origin + "/clay-latency")!)
+        try require(latency >= 0, "real Mihomo delay endpoint did not measure the selected upstream")
         let old = try openTunnel(proxy: UInt16(core.proxyPort), origin: origin)
         defer { close(old) }
         try checkTunnel(old, response: "node1")
@@ -464,13 +512,137 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
         try checkTunnel(new, response: "node2")
     }
 
+    @MainActor private static func checkGroupRouting(engine: URL, origin: String, ports: [UInt16]) async throws {
+        let nodes = fixtureNodes(ports: ports)
+        let group = CoreRoutingPlan.Group(id: UUID(), members: [nodes[1].id, nodes[0].id])
+        let policy = PACPolicy(rules: try PACPolicy.importRules("DOMAIN,route.example.test,PROXY"), defaultDecision: .direct, bypassLocal: true)
+        let pin = try EngineIdentity.fingerprint(engine)
+        let route = "route.example.test"
+        func request(_ session: CoreSession, marker: String) throws {
+            let fd = try openTunnel(proxy: UInt16(session.proxyPort), origin: origin, host: route)
+            defer { close(fd) }
+            try checkTunnel(fd, response: marker)
+        }
+        let core = try await CoreSession.start(engine: engine, nodes: nodes, active: nodes[0], expectedFingerprint: pin,
+                                               mode: .rule, policy: policy, routing: .init(groups: [group], proxyGroup: group.id, bypassMainland: true))
+        defer { core.stopAndWait() }
+        try require(FileManager.default.fileExists(atPath: core.directory.appendingPathComponent("GeoIP.dat").path), "CN snapshot was not installed before launch")
+        try request(core, marker: "node2")
+        try await core.setRoutingMode(.global)
+        try request(core, marker: "node1")
+        try await core.setRoutingMode(.rule)
+        let old = try openTunnel(proxy: UInt16(core.proxyPort), origin: origin, host: route)
+        defer { close(old) }
+        try checkTunnel(old, response: "node2")
+        try await core.switchTo(nodes[0], group: group.id)
+        try requireClosed(old, after: "group switch")
+        try request(core, marker: "node1")
+        core.stopAndWait()
+
+        let fixtureDir = FileManager.default.temporaryDirectory.appendingPathComponent("clay-process-check-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: fixtureDir) }
+        let bundle = fixtureDir.appendingPathComponent("Fixture Browser.app")
+        let helper = bundle.appendingPathComponent("Contents/Frameworks/Fixture Helper.app/Contents/MacOS/Fixture Helper")
+        try FileManager.default.createDirectory(at: helper.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: URL(fileURLWithPath: CommandLine.arguments[0]), to: helper)
+        guard let bundlePath = CoreAppRoute.canonicalPath(bundle) else { throw CheckFailed("could not resolve bundle fixture") }
+        let app = CoreAppRoute(name: "Fixture", path: bundlePath, includesBundleHelpers: true, target: .selected)
+        try require(app.isValid, "test executable path cannot be used as a process rule")
+        let appCore = try await CoreSession.start(engine: engine, nodes: nodes, active: nodes[0], expectedFingerprint: pin,
+            mode: .rule, policy: policy, routing: .init(groups: [group], proxyGroup: group.id, applications: [app]))
+        defer { appCore.stopAndWait() }
+        try request(appCore, marker: "node2")
+        let child = Process()
+        child.executableURL = helper
+        child.arguments = ["--process-fixture", origin, String(appCore.proxyPort)]
+        try child.run(); child.waitUntilExit()
+        try require(child.terminationStatus == 0, "app bundle helper did not match the application rule")
+        print("PASS rule target uses the group, Global uses current node, and app rule overrides the group for a bundle helper")
+    }
+
+    @MainActor private static func checkGroupProbes(engine: URL, origin: String, ports: [UInt16], directory: URL) async throws {
+        let suite = "CLAYGroupChecks-\(UUID())"
+        guard let preferences = UserDefaults(suiteName: suite) else { throw CheckFailed("could not isolate group preferences") }
+        defer { preferences.removePersistentDomain(forName: suite) }
+        let store = SubscriptionStore(directory: directory.appendingPathComponent("catalog"), keyStore: TestSubscriptionKeyStore())
+        let manager = SystemPACManager(backend: NoSystemPACBackend(), journalDirectory: directory.appendingPathComponent("pac"))
+        var measured: [String] = []
+        var delays = ["node1": 210, "node2": 40]
+        let model = Workspace(store: store, pac: PACControl(manager: manager, preferences: preferences), preferences: preferences,
+                              automaticInterval: .seconds(1)) { _, node, _ in
+            measured.append(node.name)
+            let value = delays[node.name]
+            // Simulate an in-flight request completing even after cancellation.
+            await Task.detached { try? await Task.sleep(for: .milliseconds(500)) }.value
+            guard let value else { throw SessionError.probeFailed }
+            return value
+        }
+        let extra = "vless://4624a73a-98ce-43e7-8868-4deba224779c@127.0.0.1:1234#unselected"
+        try require(model.applyImport((ports.enumerated().map { fixtureLink(port: $0.element, name: "node\($0.offset + 1)") } + [extra]).joined(separator: "\n")), "could not import group fixtures")
+        try model.trustEngine(engine, persist: false)
+        let first = model.nodes[0], second = model.nodes[1]
+        try require(model.saveGroup(id: nil, name: "Test group", nodeIDs: [first.id, second.id]), "group creation failed")
+        model.start()
+        try await wait("group probe listener") { model.running && !model.busy }
+        do {
+            model.measure(model.scopedNodes, compare: true)
+            try require(model.probeProgress?.total == 2 && !model.busy, "probe progress reused the global busy state")
+            model.select(second)
+            try await wait("manual selection while probing") { model.active == second.id && !model.busy }
+            model.selectRoutingMode(.rule)
+            try await wait("rule mode while probing") { model.routingMode == .rule && !model.busy }
+            try await wait("probe completion") { model.probeProgress == nil }
+            model.nodeOrder = .latency
+            try require(model.orderedNodes.map(\.id) == [second.id, first.id] && Set(measured) == ["node1", "node2"],
+                        "group sort or probe escaped the requested scope")
+            model.select(first)
+            try await wait("baseline selection") { model.active == first.id && !model.busy }
+            model.selectRoutingMode(.global)
+            try await wait("global mode for connection check") { model.routingMode == .global && !model.busy }
+            guard let proxy = model.proxyAddress.flatMap({ URL(string: $0)?.port }).flatMap(UInt16.init(exactly:)) else {
+                throw CheckFailed("probe fixture has no listener")
+            }
+            let old = try openTunnel(proxy: proxy, origin: origin)
+            defer { close(old) }
+            try checkTunnel(old, response: "node1")
+            model.setAutomatic(true)
+            try await wait("auto selection") { model.active == second.id && !model.busy }
+            try requireClosed(old, after: "automatic switch")
+            delays = [:]
+            try await wait("automatic batch with all failures") { model.probeMessage.contains("0/2") }
+            try require(model.active == second.id, "failed automatic round changed the selected node")
+            model.setAutomatic(false)
+            delays = ["node1": 35, "node2": 140]
+            model.setAutomatic(true)
+            try await wait("automatic attempt before manual override") { model.probeProgress?.automatic == true }
+            model.select(first)
+            try await wait("manual override") { model.active == first.id && !model.busy }
+            model.setAutomatic(false)
+            model.measure(model.scopedNodes)
+            try require(model.stop() && model.probeProgress == nil, "stopping was blocked by a batch")
+            try require(model.applyImport(extra), "new profile could not replace stopped profile")
+            try await Task.sleep(for: .milliseconds(600))
+            try require(model.probes.isEmpty && model.nodes.count == 1, "canceled latency result leaked into the new profile")
+        } catch { await model.shutdown(); throw error }
+        await model.shutdown()
+        print("PASS group latency is asynchronous, sorted, bounded to members, can be canceled, and automatic switching drains old connections")
+    }
+
+    private static func fixtureLink(port: UInt16, name: String) -> String {
+        "vless://4624a73a-98ce-43e7-8868-4deba224779c@127.0.0.1:\(port)?type=tcp#\(name)"
+    }
+
+    private static func fixtureNodes(ports: [UInt16]) -> [NodeProfile] {
+        ProfileImporter.read(ports.enumerated().map { fixtureLink(port: $0.element, name: "node\($0.offset + 1)") }.joined(separator: "\n")).profiles
+    }
+
     private static func requireClosed(_ descriptor: Int32, after change: String) throws {
         var byte: UInt8 = 0
         let received = recv(descriptor, &byte, 1, 0)
         try require(received == 0 || (received == -1 && errno == ECONNRESET), "an established connection survived the confirmed \(change)")
     }
 
-    private static func openTunnel(proxy: UInt16, origin: String) throws -> Int32 {
+    private static func openTunnel(proxy: UInt16, origin: String, host: String = "127.0.0.1") throws -> Int32 {
         guard let endpoint = URL(string: origin), endpoint.host == "127.0.0.1", let port = endpoint.port else {
             throw CheckFailed("expected a loopback fixture")
         }
@@ -483,7 +655,7 @@ private final class WorkspacePACFixture: SystemPACBackend, SystemPACSession {
             try require(setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, UInt32(MemoryLayout.size(ofValue: noSigPipe))) == 0,
                         "could not disable SIGPIPE for probe")
             try require(connectLoopback(descriptor, to: proxy), "could not reach the mixed listener")
-            let authority = "127.0.0.1:\(port)"
+            let authority = "\(host):\(port)"
             try sendProbe("CONNECT \(authority) HTTP/1.1\r\nHost: \(authority)\r\n\r\n", through: descriptor)
             let header = try readHeader(descriptor)
             try require(header.hasPrefix("HTTP/1.1 200 "), "mixed listener did not create a TCP tunnel")

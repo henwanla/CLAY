@@ -44,7 +44,7 @@ struct TrafficDashboard: View {
                 }.font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 Text("只统计经过 CLAY 内核的流量；PAC 直连和其他应用自己的代理不计入。")
                     .font(.caption).foregroundStyle(.secondary)
-            }.padding(16).background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 13))
+            }.clayCard()
         }
     }
 
@@ -88,8 +88,7 @@ struct TrafficDashboard: View {
             Label { Text(title) } icon: { Image(systemName: icon).foregroundStyle(color) }
                 .font(.caption).foregroundStyle(.secondary)
             Text(value).font(.system(.title2, design: .rounded, weight: .semibold).monospacedDigit()).lineLimit(1).minimumScaleFactor(0.65)
-        }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
-            .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 13))
+        }.clayCard()
     }
 }
 
@@ -173,6 +172,6 @@ struct ConnectionDashboard: View {
             }.font(.caption.monospacedDigit()).fixedSize(horizontal: true, vertical: false)
             Button { model.closeConnection(row.id) } label: { Image(systemName: "xmark.circle") }
                 .help("关闭此连接").accessibilityLabel("关闭此连接").disabled(!canClose)
-        }.padding(12).background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
+        }.clayCard()
     }
 }

@@ -1,6 +1,13 @@
 # 更新记录 / Changelog
 
-## 开发中 / Unreleased
+## 0.3.6 · 桌面预览 / Desktop preview
+
+- macOS 将单节点和批量测速放进节点页。批量测试异步更新、支持取消和按延时排序，可手动编组并在组内自动测速与切换。
+- macOS Nodes adds single and batch latency tests with live progress, cancellation, sorting, manual groups, and automatic switching within a group.
+- macOS 规则模式增加分组出口、应用规则和大陆 IP 绕过。概览、节点和路由采用统一面板样式，中英文 README 加入节点及路由截图。
+- macOS Rule mode adds proxy groups, application rules, and mainland IP bypass. Overview, Nodes, and Routing share a new dashboard style, with screenshots in both READMEs.
+- macOS 切换 Wi-Fi 或有线网络后，可以在「PAC 规则」点「接入当前网络」。CLAY 会先恢复原网络的设置并保留当前代理进程。
+- After switching Wi-Fi or Ethernet, use the reconnect action under PAC Rules. CLAY restores the old network's settings before attaching to the current network and keeps the running proxy.
 
 - Android Relay 真正切换节点或流量模式时会关闭内核跟踪的旧连接，避免原来的直连隧道在切换到全局后继续传输。重复选择当前项不断流。
 - Android Relay closes existing tracked connections when the node or mode changes. Reselecting the current route leaves connections open.

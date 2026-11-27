@@ -32,6 +32,7 @@ import SwiftUI
     @Published private(set) var messageIsError = false
 
     private static let preferenceKey = "clay.pac-policy.v1"
+    static let followPolicy = PACPolicy(rules: [], defaultDecision: .proxy, bypassLocal: false)
     private let preferences: UserDefaults
     private let manager: SystemPACManager
     private var server: PACServer?
@@ -100,7 +101,7 @@ import SwiftUI
         // Custom PAC can still decide on a route before the request reaches it.
         let draft: PACPolicy? = followsMode ? nil : policy
         let script: String
-        do { script = try (draft ?? .standard).makeScript(proxyPort: port) }
+        do { script = try (draft ?? Self.followPolicy).makeScript(proxyPort: port) }
         catch { display(error.localizedDescription, error: true); return }
         let id = UUID()
         generation = id; busy = true

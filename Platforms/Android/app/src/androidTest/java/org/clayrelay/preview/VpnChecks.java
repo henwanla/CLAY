@@ -84,6 +84,7 @@ final class VpnChecks {
             require(fetch("198.51.100.42", 18080).endsWith(proof + "-A"), "system TCP uses first node");
             require(fetch(IPV6_FIXTURE, ipv6).endsWith(proof + "-A"), "global IPv6 TCP uses the first node instead of the reachable origin");
             if (!fault.isEmpty()) return verifyFailure(test, activity, fault, direct, ipv6, proof);
+            TrafficChecks.await(test, activity, VpnPanel.ID_TRAFFIC, true);
             PendingIntent stop = currentNotificationStop(activity);
             ClayVpnService.Snapshot[] oldTile = new ClayVpnService.Snapshot[1];
             test.runOnMainSync(() -> {
@@ -142,6 +143,7 @@ final class VpnChecks {
             test.runOnMainSync(activity::finish);
             for (int i = 0; i < 40 && !activity.isDestroyed(); i++) SystemClock.sleep(50);
             require(activity.isDestroyed(), "foreground Activity destroyed");
+            TrafficChecks.cleared(test, activity, VpnPanel.ID_TRAFFIC);
             require(fetch("198.51.100.42", 18080).endsWith(proof + "-B"), "VPN stays up after Activity closes");
             require(fetch(IPV6_FIXTURE, ipv6).endsWith(proof + "-B"), "background VPN continues to route IPv6 through the node");
             require(stop.equals(currentNotificationStop(activity)), "the same session retains its stop action after node and mode changes");

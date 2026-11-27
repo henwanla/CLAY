@@ -71,6 +71,7 @@ final class RelayChecks {
             NodePickerChecks.choose(test, activity, RelayPanel.ID_NODE, 1, "Fixture-A");
             test.runOnMainSync(() -> activity.findViewById(RelayPanel.ID_START).performClick());
             String status = await(test, activity, RelayPanel.ID_APPLY, RelayPanel.ID_STATUS, "relay ready");
+            TrafficChecks.await(test, activity, RelayPanel.ID_TRAFFIC, false);
             Matcher address = Pattern.compile("127\\.0\\.0\\.1:([0-9]{1,5})").matcher(status);
             require(address.find(), "reported loopback address");
             int port = Integer.parseInt(address.group(1));
@@ -86,6 +87,7 @@ final class RelayChecks {
                     "proxy rejects wrong credentials");
             require(fetch(local, port, origin.getLocalPort(), password, "direct forwarding").contains(marker),
                     "authenticated HTTP traffic forwarded");
+            TrafficChecks.await(test, activity, RelayPanel.ID_TRAFFIC, true);
             // Change the draft source to an invalid manual input while the cached session runs.
             test.runOnMainSync(() -> activity.findViewById(SubscriptionPanel.ID_MANUAL).performClick());
             select(test, activity, 2, 1);
@@ -108,6 +110,7 @@ final class RelayChecks {
             test.runOnMainSync(() -> activity.findViewById(RelayPanel.ID_STOP).performClick());
             require(await(test, activity, RelayPanel.ID_START, RelayPanel.ID_STATUS, "stop finished")
                     .equals(activity.getString(R.string.relay_stopped)), "stopped cleanly");
+            TrafficChecks.cleared(test, activity, RelayPanel.ID_TRAFFIC);
             require(activity.getNoBackupFilesDir().listFiles((dir, name) -> name.startsWith("clay-relay-")).length == 0,
                     "private runtime directory removed");
             try (Socket attempt = new Socket()) {
@@ -129,6 +132,7 @@ final class RelayChecks {
             });
             require(await(test, activity, RelayPanel.ID_APPLY, RelayPanel.ID_STATUS, "manual relay ready")
                     .contains("127.0.0.1:"), "manual node input still starts Relay");
+            TrafficChecks.await(test, activity, RelayPanel.ID_TRAFFIC, false);
             test.runOnMainSync(() -> activity.findViewById(RelayPanel.ID_STOP).performClick());
             require(await(test, activity, RelayPanel.ID_START, RelayPanel.ID_STATUS, "manual relay stopped")
                     .equals(activity.getString(R.string.relay_stopped)), "manual session stopped cleanly");

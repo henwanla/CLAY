@@ -22,7 +22,7 @@ import java.net.InetAddress;
 final class VpnPanel {
     static final int CONSENT = 590, NOTICES = 592;
     static final int ID_START = 0x5120, ID_STOP = 0x5121, ID_APPLY = 0x5122, ID_STATE = 0x5123,
-            ID_DNS = 0x5124, ID_NODE = 0x5125, ID_MODE = 0x5126;
+            ID_DNS = 0x5124, ID_NODE = 0x5125, ID_MODE = 0x5126, ID_TRAFFIC = 0x5127;
     private static final String[] MODES = {"rule", "global", "direct"};
     private static final int[] MODE_TEXT = {R.string.relay_rule, R.string.relay_global, R.string.relay_direct};
     private final Handler main = new Handler(Looper.getMainLooper());
@@ -34,8 +34,9 @@ final class VpnPanel {
     private final Spinner mode;
     private final Button start, apply, stop;
     private final TextView status;
+    private final SessionTrafficView traffic;
     private ClayVpnService.Snapshot last;
-    private boolean asks, askedNotifications;
+    private boolean asks, askedNotifications, foreground;
     private ClayVpnService.Draft pending;
 
     VpnPanel(Activity activity, LinearLayout card, NodeInput source, EditText rules, CheckBox direct, CheckBox bypass) {
@@ -59,6 +60,8 @@ final class VpnPanel {
         status.setId(ID_STATE); status.setSaveEnabled(false);
         status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         card.addView(status);
+        traffic = new SessionTrafficView(activity, ID_TRAFFIC);
+        card.addView(traffic);
         start.setOnClickListener(v -> start());
         apply.setOnClickListener(v -> ClayVpnService.apply(picker.selected(), MODES[mode.getSelectedItemPosition()]));
         stop.setOnClickListener(v -> ClayVpnService.stopFromPanel());
@@ -69,8 +72,9 @@ final class VpnPanel {
     private final Runnable tick = new Runnable() {
         @Override public void run() { render(); main.postDelayed(this, 250); }
     };
+    void setForeground(boolean visible) { foreground = visible; render(); }
     void hidePicker() { picker.hide(); }
-    void destroy() { main.removeCallbacks(tick); picker.destroy(); discard(); }
+    void destroy() { main.removeCallbacks(tick); traffic.destroy(); picker.destroy(); discard(); }
 
     private void render() {
         ClayVpnService.Snapshot next = ClayVpnService.state();
@@ -80,6 +84,7 @@ final class VpnPanel {
         dns.setEnabled(!asks && !next.busy && !connected);
         apply.setEnabled(!next.busy && connected);
         stop.setEnabled(ClayVpnService.canStop());
+        traffic.setSource(foreground ? ClayVpnService.trafficSource() : null);
         if (next == last) return;
         last = next;
         if (connected) {

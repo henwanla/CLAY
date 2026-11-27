@@ -40,6 +40,7 @@ final class RelaySession implements AutoCloseable {
     }
     private volatile Process child;
     private volatile File directory;
+    private volatile TrafficSource traffic;
     private int proxy, control;
     private String secret, password;
     private String[] ids;
@@ -134,6 +135,7 @@ final class RelaySession implements AutoCloseable {
                     State state = refresh();
                     if (state.node != node || !state.mode.equals(mode) || !authenticates()) throw new IOException();
                     if (!config.delete()) throw new IOException();
+                    traffic = new TrafficSource(control, secret);
                     return state;
                 } catch (IOException | JSONException warmingUp) { SystemClock.sleep(90); }
             }
@@ -185,6 +187,54 @@ final class RelaySession implements AutoCloseable {
                 && ipv6.length() == 1 && VpnTransport.IPV6_TUN_CIDR.equals(ipv6.getString(0));
     }
 
+    TrafficSource trafficSource() { return traffic; }
+
+    static final class Traffic {
+        final long upTotal, downTotal, upRate, downRate;
+        Traffic(JSONObject row) throws JSONException {
+            upTotal = count(row, "upTotal"); downTotal = count(row, "downTotal");
+            upRate = count(row, "up"); downRate = count(row, "down");
+        }
+
+        private static long count(JSONObject row, String key) throws JSONException {
+            Object count = row.get(key);
+            if ((count instanceof Integer || count instanceof Long) && ((Number) count).longValue() >= 0) {
+                return ((Number) count).longValue();
+            }
+            throw new JSONException("invalid traffic counter");
+        }
+    }
+
+    /** Bound to one running core. Sampling does not queue behind route or stop actions. */
+    static final class TrafficSource {
+        private final int control;
+        private final String secret;
+
+        private TrafficSource(int control, String secret) { this.control = control; this.secret = secret; }
+
+        Traffic read() {
+            HttpURLConnection http = null;
+            try {
+                http = (HttpURLConnection) new URL("http", HOST, control, "/traffic").openConnection(Proxy.NO_PROXY);
+                http.setInstanceFollowRedirects(false);
+                // Mihomo sends a fresh row about a second after the request.
+                http.setConnectTimeout(500); http.setReadTimeout(2300);
+                http.setRequestProperty("Authorization", "Bearer " + secret);
+                if (http.getResponseCode() != 200) return null;
+                try (InputStream input = http.getInputStream(); ByteArrayOutputStream line = new ByteArrayOutputStream()) {
+                    // /traffic is an open-ended stream. Only read the first bounded row.
+                    for (int value; line.size() < 512 && (value = input.read()) >= 0;) {
+                        if (value == '\n') return new Traffic(new JSONObject(new String(line.toByteArray(), StandardCharsets.UTF_8)));
+                        line.write(value);
+                    }
+                }
+            } catch (IOException | JSONException ignored) {
+                // Traffic is optional and errors can contain controller details.
+            } finally { if (http != null) http.disconnect(); }
+            return null;
+        }
+    }
+
     private JSONObject request(String method, String path, JSONObject object) throws Exception {
         HttpURLConnection http = (HttpURLConnection) new URL("http", HOST, control, path).openConnection(Proxy.NO_PROXY);
         try {
@@ -230,6 +280,7 @@ final class RelaySession implements AutoCloseable {
     }
 
     @Override public void close() throws IOException {
+        traffic = null;
         secret = null; password = null; ids = null; labels = null;
         if (child != null) {
             child.destroy();

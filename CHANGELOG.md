@@ -2,6 +2,8 @@
 
 ## 开发中 / Unreleased
 
+- Android VPN 和 Relay 前台面板显示当前内核的累计上传、下载和近一秒速率。退到后台时暂停读取，不保存流量历史。
+- Android VPN and Relay show session upload and download totals and one-second rates in the foreground. The app pauses sampling in the background and keeps no traffic history.
 - Android VPN 使用 TCP 专用节点时，系统可对设定的 IPv4 或 IPv6 DNS 改用 TCP，继续遵守规则和全局模式。不改变其他 UDP 流量的路由。
 - Android VPN can retry DNS over TCP at the configured IPv4 or IPv6 resolver when using a TCP-only node. The query follows Rule or Global mode, and other UDP traffic keeps its existing routing.
 

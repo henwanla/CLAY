@@ -59,6 +59,9 @@ public final class ClayVpnService extends VpnService {
     }
 
     static Snapshot state() { return snapshot; }
+    static RelaySession.TrafficSource trafficSource() {
+        return owner == null || owner.ending || snapshot.busy || snapshot.node == 0 ? null : owner.engine.trafficSource();
+    }
     private static void publish(Snapshot next) {
         snapshot = next;
         ClayVpnTile.refresh(next);

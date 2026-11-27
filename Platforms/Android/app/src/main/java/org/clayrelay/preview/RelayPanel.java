@@ -19,7 +19,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 final class RelayPanel {
     static final int ID_NODE = 0x5110, ID_MODE = 0x5111, ID_START = 0x5112,
-            ID_APPLY = 0x5113, ID_STOP = 0x5114, ID_STATUS = 0x5115, ID_SHOW = 0x5116, ID_CREDENTIALS = 0x5117;
+            ID_APPLY = 0x5113, ID_STOP = 0x5114, ID_STATUS = 0x5115, ID_SHOW = 0x5116, ID_CREDENTIALS = 0x5117,
+            ID_TRAFFIC = 0x5118;
     private static final String[] MODES = {"rule", "global", "direct"};
     private static final AtomicBoolean CLEANED = new AtomicBoolean();
     private final RelaySession session = new RelaySession();
@@ -33,8 +34,9 @@ final class RelayPanel {
     private final CheckBox direct, bypass;
     private final Button start, apply, stop, show;
     private final TextView status, credentials;
+    private final SessionTrafficView traffic;
     private RelaySession.State ready;
-    private boolean busy, hasSession, destroyed;
+    private boolean busy, hasSession, destroyed, foreground;
 
     RelayPanel(Activity activity, LinearLayout card, NodeInput nodes, EditText rules, CheckBox direct, CheckBox bypass) {
         this.activity = activity; this.nodes = nodes; this.rules = rules;
@@ -59,6 +61,8 @@ final class RelayPanel {
         status.setId(ID_STATUS); status.setSaveEnabled(false);
         status.setAccessibilityLiveRegion(View.ACCESSIBILITY_LIVE_REGION_POLITE);
         card.addView(status);
+        traffic = new SessionTrafficView(activity, ID_TRAFFIC);
+        card.addView(traffic);
         show = button(card, ID_SHOW, R.string.relay_show);
         credentials = new TextView(activity);
         credentials.setId(ID_CREDENTIALS); credentials.setSaveEnabled(false);
@@ -112,8 +116,11 @@ final class RelayPanel {
         apply.setEnabled(!busy && hasSession && session.running());
         stop.setEnabled(!busy && hasSession);
         show.setVisibility(!busy && ready != null ? View.VISIBLE : View.GONE);
+        updateTraffic();
     }
 
+    private void updateTraffic() { traffic.setSource(foreground && ready != null && !busy ? session.trafficSource() : null); }
+    void setForeground(boolean visible) { foreground = visible; updateTraffic(); }
     void hidePicker() { picker.hide(); }
 
     void hideCredentials() {
@@ -176,6 +183,7 @@ final class RelayPanel {
 
     void destroy() {
         destroyed = true;
+        traffic.destroy();
         picker.destroy();
         main.removeCallbacks(watch);
         status.setText("");

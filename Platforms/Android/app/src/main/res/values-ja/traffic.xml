@@ -1,0 +1,6 @@
+<resources>
+    <string name="session_traffic_waiting">セッションの通信量を取得中…</string>
+    <string name="session_traffic_unavailable">セッションの通信量を一時的に取得できません。</string>
+    <string name="session_traffic_totals">セッション合計 · 送信 %1$s · 受信 %2$s</string>
+    <string name="session_traffic_rates">直近1秒 · 送信 %1$s/s · 受信 %2$s/s</string>
+</resources>

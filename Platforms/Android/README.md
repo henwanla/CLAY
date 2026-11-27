@@ -112,6 +112,12 @@ python3 Platforms/Android/smoke-portable.py \
 
 In Relay and VPN, **Select node** lists local display names, protocols, and transports. The first compatible node is selected by default. While connected, choose from the active session's list and tap **Apply node and mode**. Editing pasted input or selecting another cache affects the next session. The node picker is protected from screenshots; the ordinary preview and system tile omit names.
 
+### 会话流量 / Session traffic
+
+VPN 和 Relay 在确认启动后，约每两秒从本地内核读取一次累计上传、下载以及最近一秒的速率。统计的是经过该内核的流量，不是设备总流量；换节点或模式仍沿用同一会话累计值，停止后清空面板。App 退到后台时暂停采样，已建立的 VPN 不受影响。读数不保存，也不进入快捷设置、通知或日志。
+
+After VPN or Relay confirms the session, the foreground panel samples totals and the last one-second rates from the local core about every two seconds. These are core counters, not device-wide usage. Changing nodes or routing modes keeps the same session totals. Stopping clears the panel, and sampling pauses in the background without stopping the VPN. Readings stay off disk, out of the system tile and notification, and out of logs.
+
 ### VPN 技术预览 / VPN technical preview
 
 另一个 ARM64 调试 APK（Android 8.0+，包名 `org.clayrelay.vpn`）可和离线版及本机代理版共存。先选择订阅缓存或粘贴节点，填入可选规则和一个可信 DNS 的 IPv4 或 IPv6 字面地址，选择节点与模式，点「启动 VPN」并确认 Android 系统提示。关闭界面后由前台服务继续运行，可在通知、快捷设置磁贴或应用内停止。通知显示隧道正在启动、切换、运行或停止，不显示节点、订阅或地址；旧通知的停止操作不会影响重启后的会话。隧道运行不代表远端节点可达。节点和模式从内核读回，变更时会结束现有连接。规则更新需重新启动会话。

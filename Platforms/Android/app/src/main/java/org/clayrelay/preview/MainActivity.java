@@ -102,9 +102,15 @@ public final class MainActivity extends Activity {
         list.requestFocus();
     }
 
+    @Override protected void onResume() {
+        super.onResume();
+        if (relay != null) relay.setForeground(true);
+        if (vpn != null) vpn.setForeground(true);
+    }
+
     @Override protected void onPause() {
-        if (relay != null) { relay.hideCredentials(); relay.hidePicker(); }
-        if (vpn != null) vpn.hidePicker();
+        if (relay != null) { relay.setForeground(false); relay.hideCredentials(); relay.hidePicker(); }
+        if (vpn != null) { vpn.setForeground(false); vpn.hidePicker(); }
         super.onPause();
     }
 

@@ -10,7 +10,6 @@ import (
 	"io"
 	"net"
 	"net/netip"
-	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -21,6 +20,7 @@ import (
 	"github.com/metacubex/gvisor/pkg/tcpip/header"
 	"github.com/metacubex/gvisor/pkg/tcpip/link/channel"
 	"github.com/metacubex/gvisor/pkg/tcpip/network/ipv4"
+	"github.com/metacubex/gvisor/pkg/tcpip/network/ipv6"
 	"github.com/metacubex/gvisor/pkg/tcpip/stack"
 	"github.com/metacubex/gvisor/pkg/tcpip/transport/tcp"
 	"github.com/metacubex/gvisor/pkg/tcpip/transport/udp"
@@ -76,9 +76,12 @@ func proxyFixtureFor(t *testing.T, reply string, endpoint netip.AddrPort, accept
 				if data[len(prefix)] != 1 {
 					return
 				}
-				addr := endpoint.Addr().As4()
-				target := append(binary.BigEndian.AppendUint16(nil, endpoint.Port()), 1)
-				target = append(target, addr[:]...)
+				kind := byte(1)
+				if endpoint.Addr().Is6() {
+					kind = 3
+				}
+				target := append(binary.BigEndian.AppendUint16(nil, endpoint.Port()), kind)
+				target = append(target, endpoint.Addr().AsSlice()...)
 				data = make([]byte, len(target))
 				if _, err := io.ReadFull(conn, data); err != nil || !bytes.Equal(data, target) {
 					return
@@ -133,20 +136,28 @@ func respondUDP(conn net.Conn, reply string) {
 }
 
 func newPeer(t *testing.T, id uint64) (*stack.Stack, context.Context, func()) {
+	return newPeerFor(t, id, labNetwork4)
+}
+
+func newPeerFor(t *testing.T, id uint64, network netip.Prefix) (*stack.Stack, context.Context, func()) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	local := channel.New(64, mtu, "")
-	peer := stack.New(stack.Options{NetworkProtocols: []stack.NetworkProtocolFactory{ipv4.NewProtocol},
+	networkFactory, family, subnet := ipv4.NewProtocol, header.IPv4ProtocolNumber, header.IPv4EmptySubnet
+	if network.Addr().Is6() {
+		networkFactory, family, subnet = ipv6.NewProtocol, header.IPv6ProtocolNumber, header.IPv6EmptySubnet
+	}
+	peer := stack.New(stack.Options{NetworkProtocols: []stack.NetworkProtocolFactory{networkFactory},
 		TransportProtocols: []stack.TransportProtocolFactory{tcp.NewProtocol, udp.NewProtocol}})
 	if err := peer.CreateNIC(1, local); err != nil {
 		t.Fatal(err)
 	}
-	addr := tcpip.AddrFrom4([4]byte{198, 18, 0, 1})
-	if err := peer.AddProtocolAddress(1, tcpip.ProtocolAddress{Protocol: header.IPv4ProtocolNumber,
-		AddressWithPrefix: tcpip.AddressWithPrefix{Address: addr, PrefixLen: 30}}, stack.AddressProperties{}); err != nil {
+	addr := tcpip.AddrFromSlice(network.Addr().AsSlice())
+	if err := peer.AddProtocolAddress(1, tcpip.ProtocolAddress{Protocol: family,
+		AddressWithPrefix: tcpip.AddressWithPrefix{Address: addr, PrefixLen: network.Bits()}}, stack.AddressProperties{}); err != nil {
 		t.Fatal(err)
 	}
-	peer.SetRouteTable([]tcpip.Route{{Destination: header.IPv4EmptySubnet, NIC: 1}})
+	peer.SetRouteTable([]tcpip.Route{{Destination: subnet, NIC: 1}})
 	done1, done2 := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(done1)
@@ -170,7 +181,7 @@ func newPeer(t *testing.T, id uint64) (*stack.Stack, context.Context, func()) {
 				continue
 			}
 			pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{Payload: buffer.MakeWithData(bytes.Clone(out[:n]))})
-			local.InjectInbound(header.IPv4ProtocolNumber, pkt)
+			local.InjectInbound(family, pkt)
 			pkt.DecRef()
 		}
 	}()
@@ -188,11 +199,24 @@ func newPeer(t *testing.T, id uint64) (*stack.Stack, context.Context, func()) {
 
 func fetch(t *testing.T, peer *stack.Stack, ctx context.Context, dest [4]byte, port int, want string) {
 	t.Helper()
+	fetchTarget(t, peer, ctx, netip.AddrPortFrom(netip.AddrFrom4(dest), uint16(port)), want)
+}
+
+func dialTarget(ctx context.Context, peer *stack.Stack, target netip.AddrPort) (*gonet.TCPConn, error) {
+	family := header.IPv4ProtocolNumber
+	if target.Addr().Is6() {
+		family = header.IPv6ProtocolNumber
+	}
+	return gonet.DialContextTCP(ctx, peer, tcpip.FullAddress{NIC: 1, Addr: tcpip.AddrFromSlice(target.Addr().AsSlice()), Port: target.Port()}, family)
+}
+
+func fetchTarget(t *testing.T, peer *stack.Stack, ctx context.Context, target netip.AddrPort, want string) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	conn, err := gonet.DialContextTCP(ctx, peer, tcpip.FullAddress{NIC: 1, Addr: tcpip.AddrFrom4(dest), Port: uint16(port)}, header.IPv4ProtocolNumber)
+	conn, err := dialTarget(ctx, peer, target)
 	if err != nil {
-		t.Fatalf("dial synthetic TCP target port %s: %v", strconv.Itoa(port), err)
+		t.Fatalf("dial synthetic TCP target port %d: %v", target.Port(), err)
 	}
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
@@ -267,20 +291,20 @@ func TestModesAndRestart(t *testing.T) {
 }
 
 func TestStopClosesActiveTCP(t *testing.T) {
-	checkFlowRetirement(t, false)
+	checkFlowRetirement(t, false, demoEndpoint)
 }
 
 func TestLabSwitchClosesActiveTCP(t *testing.T) {
-	checkFlowRetirement(t, true)
+	checkFlowRetirement(t, true, netip.MustParseAddrPort("203.0.113.37:40443"))
 }
 
-func checkFlowRetirement(t *testing.T, switchRoute bool) {
+func TestLabIPv6SwitchClosesActiveTCP(t *testing.T) {
+	checkFlowRetirement(t, true, netip.MustParseAddrPort("[2001:db8::37]:40443"))
+}
+
+func checkFlowRetirement(t *testing.T, switchRoute bool, target netip.AddrPort) {
 	t.Helper()
 	disconnected := make(chan error, 1)
-	target := demoEndpoint
-	if switchRoute {
-		target = netip.MustParseAddrPort("203.0.113.37:40443")
-	}
 	var accepted atomic.Uint64
 	port := proxyFixtureFor(t, "open", target, &accepted, disconnected)
 	var id uint64
@@ -294,11 +318,22 @@ func checkFlowRetirement(t *testing.T, switchRoute bool) {
 		t.Fatal(err)
 	}
 	defer stop(id)
-	peer, ctx, closePeer := newPeer(t, id)
+	network, alternate := labNetwork4, demoEndpoint.Addr()
+	foreignHeader := make([]byte, header.IPv6MinimumSize)
+	foreignHeader[0] = 0x60
+	if target.Addr().Is6() {
+		network, alternate = labNetwork6, netip.MustParseAddr("2001:db8::42")
+		foreignHeader = make([]byte, header.IPv4MinimumSize)
+		foreignHeader[0], foreignHeader[3] = 0x45, header.IPv4MinimumSize
+	}
+	if protocol(foreignHeader) == 0 || offer(id, foreignHeader) {
+		t.Fatal("session accepted a packet outside its address family")
+	}
+	peer, ctx, closePeer := newPeerFor(t, id, network)
 	defer closePeer()
 	if switchRoute {
 		for _, forbidden := range []netip.AddrPort{
-			netip.AddrPortFrom(demoEndpoint.Addr(), target.Port()),
+			netip.AddrPortFrom(alternate, target.Port()),
 			netip.AddrPortFrom(target.Addr(), demoEndpoint.Port()),
 		} {
 			assertLabRejects(t, peer, ctx, forbidden)
@@ -309,8 +344,7 @@ func checkFlowRetirement(t *testing.T, switchRoute bool) {
 	}
 	dialCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	conn, err := gonet.DialContextTCP(dialCtx, peer, tcpip.FullAddress{NIC: 1,
-		Addr: tcpip.AddrFrom4(target.Addr().As4()), Port: target.Port()}, header.IPv4ProtocolNumber)
+	conn, err := dialTarget(dialCtx, peer, target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,7 +390,7 @@ func checkFlowRetirement(t *testing.T, switchRoute bool) {
 	if switchRoute {
 		// Keep the same peer, stack, and session. The new flow must receive the
 		// new upstream's marker, even while the old TCP socket is still open here.
-		fetch(t, peer, ctx, target.Addr().As4(), int(target.Port()), "via-next")
+		fetchTarget(t, peer, ctx, target, "via-next")
 	}
 }
 
@@ -364,8 +398,7 @@ func assertLabRejects(t *testing.T, peer *stack.Stack, ctx context.Context, targ
 	t.Helper()
 	dialCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	conn, err := gonet.DialContextTCP(dialCtx, peer, tcpip.FullAddress{NIC: 1,
-		Addr: tcpip.AddrFrom4(target.Addr().As4()), Port: target.Port()}, header.IPv4ProtocolNumber)
+	conn, err := dialTarget(dialCtx, peer, target)
 	if err == nil {
 		defer conn.Close()
 		_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
@@ -385,9 +418,10 @@ func TestLabTargetScope(t *testing.T) {
 	}{
 		{"198.51.100.42:18080", true}, {"10.20.30.40:65535", true},
 		{"0.1.2.3:80", false}, {"127.0.0.1:80", false}, {"169.254.1.1:80", false},
-		{"198.18.0.1:80", false}, {"198.18.0.2:80", false}, {"224.0.0.1:80", false},
-		{"240.1.2.3:80", false}, {"203.0.113.37:0", false}, {"[2001:db8::1]:80", false},
-		{"[::ffff:203.0.113.37]:80", false},
+		{"198.18.0.1:80", false}, {"198.18.0.2:80", false}, {"198.18.0.3:80", false}, {"224.0.0.1:80", false},
+		{"240.1.2.3:80", false}, {"203.0.113.37:0", false}, {"[2001:db8::1]:80", true}, {"[fd00::7]:443", true},
+		{"[::ffff:203.0.113.37]:80", false}, {"[::203.0.113.37]:80", false}, {"[::1]:80", false}, {"[::]:80", false},
+		{"[fe80::1]:80", false}, {"[ff02::1]:80", false}, {"[2001:db8::1%en0]:80", false}, {"[fdfe:dcba:9876::3]:80", false},
 	} {
 		if got := validLabTarget(netip.MustParseAddrPort(example.endpoint)); got != example.valid {
 			t.Errorf("validLabTarget(%q) = %t, want %t", example.endpoint, got, example.valid)
@@ -425,9 +459,9 @@ func TestClosedAndRejectsUnsupportedInput(t *testing.T) {
 		stop(id)
 		t.Fatal("config accepted an unsupported WebSocket header")
 	}
-	ipv6 := make([]byte, 40)
-	ipv6[0] = 0x60
-	if protocol(ipv6) != 0 {
-		t.Fatal("IPv6 allowed by IPv4-only bridge")
+	badIPv6 := make([]byte, 60)
+	badIPv6[0], badIPv6[5] = 0x60, 21
+	if protocol(badIPv6) != 0 {
+		t.Fatal("IPv6 header accepted the wrong payload length")
 	}
 }

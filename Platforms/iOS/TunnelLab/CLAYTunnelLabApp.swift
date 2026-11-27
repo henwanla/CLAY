@@ -109,7 +109,7 @@ private struct TunnelLabView: View {
                                 Text(LocalizedStringKey("lab.update." + outcome.rawValue))
                                     .accessibilityAddTraits(.updatesFrequently)
                             }
-                            if connection.liveTarget == LabContract.demoTarget {
+                            if connection.liveTarget?.isDemo == true {
                                 Button("lab.probe") {
                                     guard let live = connection.liveTarget else { return }
                                     let id = UUID()
@@ -176,7 +176,7 @@ private struct TunnelLabView: View {
             if connection.active {
                 if let live = connection.liveTarget {
                     LabeledContent("lab.target.live") {
-                        Text(verbatim: "\(live.address):\(live.port)").font(.body.monospaced()).privacySensitive()
+                        Text(verbatim: live.displayEndpoint).font(.body.monospaced()).privacySensitive()
                     }
                 } else if connection.readingTarget {
                     ProgressView("lab.target.reading")
@@ -188,11 +188,11 @@ private struct TunnelLabView: View {
                 Text("lab.target.reconnect").foregroundStyle(.secondary)
             } else {
                 Group {
-                    LabeledContent("lab.target.ipv4") {
-                        TextField("lab.target.ipv4", text: $targetAddress)
+                    LabeledContent("lab.target.address") {
+                        TextField("lab.target.address", text: $targetAddress)
                             .autocorrectionDisabled()
                             .textInputAutocapitalization(.never)
-                            .keyboardType(.numbersAndPunctuation)
+                            .keyboardType(.asciiCapable)
                             .focused($targetEditing, equals: .address)
                             .multilineTextAlignment(.trailing)
                     }
@@ -209,13 +209,18 @@ private struct TunnelLabView: View {
                 if target == nil {
                     Label("lab.target.invalid", systemImage: "exclamationmark.circle")
                 }
-                Button("lab.target.reset") {
-                    targetAddress = LabContract.demoTarget.address
-                    targetPort = String(LabContract.demoTarget.port)
-                }
-                .disabled(connection.busy || target == LabContract.demoTarget)
+                demoButton("lab.target.demo.ipv4", for: LabContract.demoTarget)
+                demoButton("lab.target.demo.ipv6", for: LabContract.demoTarget6)
             }
         }
+    }
+
+    private func demoButton(_ label: LocalizedStringKey, for demo: LabContract.Target) -> some View {
+        Button(label) {
+            targetAddress = demo.address
+            targetPort = String(demo.port)
+        }
+        .disabled(connection.busy || target == demo)
     }
 
     private var statusLabel: LocalizedStringKey {

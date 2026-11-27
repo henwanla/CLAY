@@ -297,6 +297,7 @@ type session struct {
 	cancel context.CancelFunc
 	link   *packetLink
 	stack  tun.Stack
+	family tcpip.NetworkProtocolNumber
 	lab    *labTunnel
 }
 
@@ -320,7 +321,7 @@ func start(data []byte, chosen, mode int) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	live, err := makeSession(transportHandler{handler})
+	live, err := makeSession(transportHandler{handler}, header.IPv4ProtocolNumber)
 	if err != nil {
 		return 0, err
 	}
@@ -335,11 +336,17 @@ func init() {
 	log.SetLevel(log.SILENT)
 }
 
-func makeSession(handler tun.Handler) (*session, error) {
+func makeSession(handler tun.Handler, family tcpip.NetworkProtocolNumber) (*session, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	link := &packetLink{channel.New(128, mtu, "")}
+	options := tun.Options{MTU: mtu}
+	if family == header.IPv6ProtocolNumber {
+		options.Inet6Address = []netip.Prefix{labNetwork6}
+	} else {
+		options.Inet4Address = []netip.Prefix{labNetwork4}
+	}
 	g, err := tun.NewStack("gvisor", tun.StackOptions{
-		Context: ctx, Tun: link, TunOptions: tun.Options{MTU: mtu, Inet4Address: []netip.Prefix{netip.MustParsePrefix("198.18.0.1/30")}},
+		Context: ctx, Tun: link, TunOptions: options,
 		UDPTimeout: 30 * time.Second, ICMPTimeout: time.Second, Handler: handler, Logger: log.SingLogger,
 	})
 	if err != nil {
@@ -353,7 +360,7 @@ func makeSession(handler tun.Handler) (*session, error) {
 		link.Close()
 		return nil, err
 	}
-	return &session{ctx: ctx, cancel: cancel, link: link, stack: g}, nil
+	return &session{ctx: ctx, cancel: cancel, link: link, stack: g, family: family}, nil
 }
 
 // The engine mutex is held by callers inserting or removing sessions.
@@ -400,12 +407,19 @@ func protocol(packet []byte) tcpip.NetworkProtocolNumber {
 	if len(packet) < header.IPv4MinimumSize || len(packet) > mtu {
 		return 0
 	}
-	// This technical preview accepts IPv4 only. Do not silently emit IPv6 traffic.
-	if packet[0]>>4 != 4 || int(packet[0]&15)*4 < header.IPv4MinimumSize || int(packet[0]&15)*4 > len(packet) ||
-		int(binary.BigEndian.Uint16(packet[2:4])) != len(packet) {
-		return 0
+	switch packet[0] >> 4 {
+	case 4:
+		if size := int(packet[0]&15) * 4; size >= header.IPv4MinimumSize && size <= len(packet) &&
+			int(binary.BigEndian.Uint16(packet[2:4])) == len(packet) {
+			return header.IPv4ProtocolNumber
+		}
+	case 6:
+		if len(packet) >= header.IPv6MinimumSize &&
+			int(binary.BigEndian.Uint16(packet[4:6])) == len(packet)-header.IPv6MinimumSize {
+			return header.IPv6ProtocolNumber
+		}
 	}
-	return header.IPv4ProtocolNumber
+	return 0
 }
 
 func offer(id uint64, packet []byte) bool {
@@ -415,7 +429,7 @@ func offer(id uint64, packet []byte) bool {
 	}
 	engine.Lock()
 	defer engine.Unlock()
-	if engine.live == nil || engine.live.id != id {
+	if engine.live == nil || engine.live.id != id || engine.live.family != ip {
 		return false
 	}
 	pkt := stack.NewPacketBuffer(stack.PacketBufferOptions{Payload: buffer.MakeWithData(packet)})
@@ -441,7 +455,7 @@ func receive(id uint64, out []byte, wait time.Duration) int {
 		view := pkt.ToView()
 		pkt.DecRef()
 		data := view.AsSlice()
-		if protocol(data) != 0 && len(data) <= len(out) {
+		if protocol(data) == live.family && len(data) <= len(out) {
 			n := copy(out, data)
 			view.Release()
 			if live.ctx.Err() != nil {

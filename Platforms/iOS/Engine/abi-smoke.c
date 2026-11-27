@@ -30,11 +30,14 @@ int main(void) {
         "\"type\":\"vless\",\"server\":\"127.0.0.1\",\"port\":18080,"
         "\"uuid\":\"56dc6c3e-8793-4d37-a363-f9f19db29c6d\"}],\"rules\":[\"MATCH,CLAY\"]}";
     const int32_t labSize = (int32_t)(sizeof(lab) - 1);
-    const uint32_t destination = UINT32_C(0xC633642A); // 198.51.100.42
-    CHECK(clay_engine_start_lab(lab, labSize, 2, destination, 18080) == 0);
-    CHECK(clay_engine_start_lab(lab, labSize, 0, destination, 0) == 0);
-    CHECK(clay_engine_start_lab(lab, labSize, 0, UINT32_C(0x7f000001), 18080) == 0);
-    const uint64_t id = clay_engine_start_lab(lab, labSize, 0, destination, 18080);
+    uint8_t destination[] = {198, 51, 100, 42};
+    uint8_t loopback[] = {127, 0, 0, 1};
+    uint8_t destination6[16] = {0x20, 0x01, 0x0d, 0xb8, [15] = 0x42};
+    CHECK(clay_engine_start_lab(lab, labSize, 2, destination, 4, 18080) == 0);
+    CHECK(clay_engine_start_lab(lab, labSize, 0, destination, 4, 0) == 0);
+    CHECK(clay_engine_start_lab(lab, labSize, 0, loopback, 4, 18080) == 0);
+    CHECK(clay_engine_start_lab(lab, labSize, 0, destination6, 15, 18080) == 0);
+    const uint64_t id = clay_engine_start_lab(lab, labSize, 0, destination, 4, 18080);
     CHECK(id > previous);
     CHECK(clay_engine_replace_lab(previous, lab, labSize, 1) < 0);
     CHECK(clay_engine_replace_lab(id, lab, labSize, 2) < 0);
@@ -42,6 +45,14 @@ int main(void) {
     CHECK(clay_engine_read(id, packet, sizeof(packet), 10) == 0);
     clay_engine_stop(id);
     CHECK(clay_engine_replace_lab(id, lab, labSize, 0) < 0);
+    const uint64_t id6 = clay_engine_start_lab(lab, labSize, 0, destination6, 16, 18080);
+    CHECK(id6 > id);
+    uint8_t foreign[] = {0x45, 0, 0, 20, [19] = 0};
+    CHECK(clay_engine_offer(id6, foreign, sizeof(foreign)) < 0);
+    CHECK(clay_engine_replace_lab(id6, lab, labSize, 1) == 0);
+    CHECK(clay_engine_read(id6, packet, sizeof(packet), 10) == 0);
+    clay_engine_stop(id6);
+    CHECK(clay_engine_read(id6, packet, sizeof(packet), 10) < 0);
     puts("CLAY packet engine C ABI check passed");
     return 0;
 }

@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 @main enum LabContractChecks {
@@ -49,7 +50,7 @@ import Foundation
         precondition(!accepts(invalid, fromProvider: false))
 
         let custom = LabContract.Target(address: "203.0.113.37", port: "40443")!
-        precondition(custom.encodedAddress == 0xCB007125)
+        precondition(custom.bytes == [203, 0, 113, 37] && custom.family == AF_INET)
         let customRequest = packet(source: device, target: custom.bytes, port: custom.port)
         let customReply = packet(source: custom.bytes, target: device, port: custom.port, outgoing: false)
         precondition(LabContract.accepts(customRequest, target: custom, fromProvider: false))
@@ -58,8 +59,10 @@ import Foundation
         precondition(!LabContract.accepts(request, target: custom, fromProvider: false))
         precondition(!LabContract.accepts(packet(source: device, target: custom.bytes), target: custom, fromProvider: false))
         precondition(!accepts(customRequest, fromProvider: false))
-        for address in ["0.1.2.3", "127.0.0.1", "169.254.1.1", "198.18.0.1", "198.18.0.2",
-                        "224.0.0.1", "240.1.2.3", "2001:db8::1", "example.invalid", "192.0.2.01", "192..2.1"] {
+        for address in ["0.1.2.3", "127.0.0.1", "169.254.1.1", "198.18.0.1", "198.18.0.2", "198.18.0.3",
+                        "224.0.0.1", "240.1.2.3", "example.invalid", "192.0.2.01", "192..2.1", "::", "::1",
+                        "ff02::1", "fe80::1", "2001:db8::1%en0", "[2001:db8::1]", "fdfe:dcba:9876::3",
+                        "::ffff:192.0.2.1", "::192.0.2.1", "2001::db8::1", "2001:db8::42\0ignored"] {
             precondition(LabContract.Target(address: address, port: "443") == nil)
         }
         for port in ["0", "65536", "-1", "+1", " 80", "080", "８０", ""] {
@@ -78,6 +81,39 @@ import Foundation
         invalidTarget[invalidTarget.count - 2] = 0
         invalidTarget[invalidTarget.count - 1] = 0
         precondition(LabContract.readTarget(invalidTarget) == nil)
+
+        let demo6 = LabContract.demoTarget6
+        let custom6 = LabContract.Target(address: "2001:0DB8:0:0:0:0:0:37", port: "40443")!
+        precondition(custom6.family == AF_INET6 && custom6.address == "2001:db8::37" && !custom6.isDemo)
+        precondition(demo6.isDemo && demo6.displayEndpoint == "[2001:db8::42]:18080")
+        precondition(LabContract.Target(address: "fd00::beef", port: "65535") != nil)
+        precondition(LabContract.readTarget(LabContract.targetReply(custom6)) == custom6)
+        precondition(LabContract.readTarget(LabContract.targetReply(custom6).dropLast()) == nil)
+        precondition(!LabContract.accepts(request, target: custom6, fromProvider: false))
+        let device6: [UInt8] = [0xfd, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]
+        func packet6(_ source: [UInt8], _ dest: [UInt8], port: UInt16 = 40443, outgoing: Bool = true) -> Data {
+            let tcp = packet(source: device, target: target, port: port, outgoing: outgoing).dropFirst(20)
+            return Data([0x60, 0, 0, 0, 0, 20, 6, 64] + source + dest) + tcp
+        }
+        let request6 = packet6(device6, custom6.bytes)
+        let response6 = packet6(custom6.bytes, device6, outgoing: false)
+        func accepts6(_ data: Data, output: Bool = false) -> Bool {
+            LabContract.accepts(data, target: custom6, fromProvider: output)
+        }
+        precondition(accepts6(request6) && accepts6(response6, output: true))
+        precondition(!accepts6(response6) && !accepts6(request6, output: true))
+        precondition(!accepts6(packet6(device6, demo6.bytes)))
+        precondition(!accepts6(packet6(demo6.bytes, custom6.bytes)))
+        precondition(!accepts6(packet6(device6, custom6.bytes, port: 443)))
+        precondition(!accepts6(request6.dropLast()))
+        var invalid6 = request6
+        for nextHeader: UInt8 in [0, 17, 43, 44, 60] { // Extension, UDP, routing, fragment and destination headers.
+            invalid6[6] = nextHeader
+            precondition(!accepts6(invalid6))
+        }
+        invalid6 = request6
+        invalid6[52] = 0xF0
+        precondition(!accepts6(invalid6))
 
         let revision = LabContract.revision()
         let payload = Data(repeating: 0x7B, count: LabContract.maximumProfile)

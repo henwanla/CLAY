@@ -4,7 +4,7 @@ import Network
 enum LabProbe {
     static func run(for target: LabContract.Target) async -> Bool {
         // The fixture marker must never be sent to a user-entered endpoint.
-        guard target == LabContract.demoTarget, let port = NWEndpoint.Port(rawValue: target.port) else { return false }
+        guard target.isDemo, let port = NWEndpoint.Port(rawValue: target.port) else { return false }
         return await withCheckedContinuation { continuation in
             Attempt(address: target.address, port: port, completion: continuation).start()
         }

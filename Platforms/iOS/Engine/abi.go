@@ -24,13 +24,19 @@ func clay_engine_start(data *C.uint8_t, size C.int32_t, chosen C.int32_t, mode C
 }
 
 //export clay_engine_start_lab
-func clay_engine_start_lab(data *C.uint8_t, size C.int32_t, mode C.int32_t, destination C.uint32_t, port C.uint16_t) C.uint64_t {
+func clay_engine_start_lab(data *C.uint8_t, size C.int32_t, mode C.int32_t, destination *C.uint8_t, destinationSize C.int32_t, port C.uint16_t) C.uint64_t {
+	if destination == nil || (destinationSize != 4 && destinationSize != 16) {
+		return 0
+	}
+	ip, ok := netip.AddrFromSlice(unsafe.Slice((*byte)(unsafe.Pointer(destination)), int(destinationSize)))
+	if !ok {
+		return 0
+	}
 	profile := copyLabProfile(data, size)
 	if profile == nil {
 		return 0
 	}
 	defer zeroProfile(profile)
-	ip := netip.AddrFrom4([4]byte{byte(destination >> 24), byte(destination >> 16), byte(destination >> 8), byte(destination)})
 	id, _ := startLab(profile, int(mode), netip.AddrPortFrom(ip, uint16(port)))
 	return C.uint64_t(id)
 }

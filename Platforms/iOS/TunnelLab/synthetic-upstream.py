@@ -7,7 +7,8 @@ import socketserver
 import uuid
 
 
-TARGET = bytes([1, 0x46, 0xA0, 1, 198, 51, 100, 42])  # TCP, 18080, IPv4, TEST-NET-2
+ADDRESSES = {1: ipaddress.IPv4Address("198.51.100.42").packed,
+             3: ipaddress.IPv6Address("2001:db8::42").packed}
 PROBE = b"CLAY-VPN-PROBE/1"
 REPLY = b"\x00\x00CLAY-LAB-OK/1"
 
@@ -21,7 +22,13 @@ class Request(socketserver.BaseRequestHandler):
                 if (len(header) != 18 or header[0] != 0 or
                         not hmac.compare_digest(header[1:17], self.server.account.bytes)):
                     return
-                if len(data.read(header[17])) != header[17] or data.read(len(TARGET)) != TARGET:
+                if len(data.read(header[17])) != header[17]:
+                    return
+                target = data.read(4)
+                if len(target) != 4 or target[:3] != bytes([1, 0x46, 0xA0]):  # TCP to port 18080 only.
+                    return
+                address = ADDRESSES.get(target[3])
+                if address is None or data.read(len(address)) != address:
                     return
                 if data.read(len(PROBE)) == PROBE:
                     self.request.sendall(REPLY)

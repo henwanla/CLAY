@@ -35,19 +35,28 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
             }
             let source = profile.bytes.assumingMemoryBound(to: UInt8.self)
             // Go copies input before returning. Only the chosen node crosses IPC.
-            let id = clay_engine_start_lab(UnsafeMutablePointer(mutating: source), Int32(profile.length), mode.int32Value,
-                                           target.encodedAddress, target.port)
+            let id = target.bytes.withUnsafeBufferPointer { address in
+                clay_engine_start_lab(UnsafeMutablePointer(mutating: source), Int32(profile.length), mode.int32Value,
+                                      UnsafeMutablePointer(mutating: address.baseAddress!), Int32(address.count), target.port)
+            }
             guard id != 0 else {
                 completionHandler(LabContract.Failure.setup)
                 return
             }
             self.state = .applying(id, target, completionHandler)
-            let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: LabContract.remoteAddress)
-            let ipv4 = NEIPv4Settings(addresses: [LabContract.interfaceAddress], subnetMasks: [LabContract.hostMask])
-            ipv4.includedRoutes = [NEIPv4Route(destinationAddress: target.address, subnetMask: LabContract.hostMask)]
-            settings.ipv4Settings = ipv4
+            let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress:
+                target.family == AF_INET ? LabContract.remoteAddress : LabContract.remoteAddress6)
+            if target.family == AF_INET {
+                let ipv4 = NEIPv4Settings(addresses: [LabContract.interfaceAddress], subnetMasks: [LabContract.hostMask])
+                ipv4.includedRoutes = [NEIPv4Route(destinationAddress: target.address, subnetMask: LabContract.hostMask)]
+                settings.ipv4Settings = ipv4
+            } else {
+                let ipv6 = NEIPv6Settings(addresses: [LabContract.interfaceAddress6], networkPrefixLengths: [LabContract.hostPrefix6])
+                ipv6.includedRoutes = [NEIPv6Route(destinationAddress: target.address, networkPrefixLength: LabContract.hostPrefix6)]
+                settings.ipv6Settings = ipv6
+            }
             settings.mtu = NSNumber(value: LabContract.mtu)
-            // No default route, DNS override, proxy settings, or IPv6 routes.
+            // No default route, DNS override, proxy settings, or routes in the other family.
             self.setTunnelNetworkSettings(settings) { [weak self] error in
                 self?.commands.async { [weak self] in self?.finishApplying(id, success: error == nil) }
             }
@@ -130,7 +139,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                 self.systemReadPending = false
                 if let target = self.target(for: id) {
                     for (packet, family) in zip(packets, protocols).prefix(64)
-                        where family.int32Value == AF_INET && LabContract.accepts(packet, target: target, fromProvider: false) {
+                        where family.int32Value == target.family && LabContract.accepts(packet, target: target, fromProvider: false) {
                         packet.withUnsafeBytes { bytes in
                             guard let address = bytes.bindMemory(to: UInt8.self).baseAddress else { return }
                             _ = clay_engine_offer(id, UnsafeMutablePointer(mutating: address), Int32(bytes.count))
@@ -157,7 +166,7 @@ final class PacketTunnelProvider: NEPacketTunnelProvider {
                     return
                 }
                 if let packet, LabContract.accepts(packet, target: target, fromProvider: true),
-                   !self.packetFlow.writePackets([packet], withProtocols: [NSNumber(value: AF_INET)]) {
+                   !self.packetFlow.writePackets([packet], withProtocols: [NSNumber(value: target.family)]) {
                     self.end(id, because: .packetWriteFailed)
                     return
                 }

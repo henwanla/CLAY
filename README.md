@@ -105,7 +105,7 @@ Linux 有可下载的 [Ubuntu 24.04 x86-64 GTK 桌面预览](Platforms/Linux/REA
 
 [Android VPN 技术预览](Platforms/Android/README.md#vpn-技术预览--vpn-technical-preview)是独立的调试 APK，支持 IPv4／IPv6 系统接管、前台服务、节点和模式切换，也可从快捷设置磁贴打开 CLAY 或停止 VPN。通知显示连接阶段，且不公开节点、订阅或地址；旧通知不能停止重启后的会话。本机代理和 VPN 都支持[手动刷新 HTTPS 订阅并加密缓存节点](Platforms/Android/README.md#订阅--subscriptions)。在 Android 15 模拟器上已验证双栈 TCP、使用 IPv4 或 IPv6 DNS 的系统解析、节点切换、IP 规则和部分 TCP 端口的 HTTP/TLS 域名规则；仍需验证真机、切网和加密 DNS。暂未提供公开 VPN 安装包。
 
-[iOS / iPadOS](Platforms/iOS/README.md)提供离线节点检查和单独的 CLAY 隧道实验。实验支持加密订阅缓存、指定一个 IPv4/TCP 测试端点及连接中切换节点和模式。它只接管一个 IPv4 地址，尚待签名真机验证。
+[iOS / iPadOS](Platforms/iOS/README.md)提供离线节点检查和单独的 CLAY 隧道实验。实验支持加密订阅缓存、指定一个 IPv4 或 IPv6 TCP 测试端点，以及连接中切换节点和模式。每次只接管所选地址并转发所选端口；不会修改系统 DNS 或默认路由。尚待签名真机验证。
 
 [参与开发](CONTRIBUTING.md) · [架构调研](docs/架构调研.md) · [验收记录](docs/验收记录.md) · [打包及发布](docs/RELEASING.md) · [安全维护](docs/安全维护.md)
 

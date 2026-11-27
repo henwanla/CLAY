@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/metacubex/gvisor/pkg/tcpip/header"
 	tun "github.com/metacubex/sing-tun"
 	"github.com/metacubex/sing/common/buf"
 	"github.com/metacubex/sing/common/bufio"
@@ -21,13 +22,19 @@ import (
 
 const labProfileLimit = 128 * 1024
 
-var labOrigin = netip.MustParseAddr("198.18.0.1")
-var labPeer = netip.MustParseAddr("198.18.0.2")
+var labNetwork4 = netip.MustParsePrefix("198.18.0.1/30")
+var labNetwork6 = netip.MustParsePrefix("fdfe:dcba:9876::1/126")
+var compatibleIPv4 = netip.MustParsePrefix("::/96")
 
 func validLabTarget(target netip.AddrPort) bool {
 	ip := target.Addr()
-	return ip.Is4() && ip.IsGlobalUnicast() && ip != labOrigin && ip != labPeer &&
-		ip.As4()[0] != 0 && ip.As4()[0] < 224 && target.Port() != 0
+	if target.Port() == 0 || ip.Zone() != "" || !ip.IsGlobalUnicast() {
+		return false
+	}
+	if ip.Is4() {
+		return !labNetwork4.Contains(ip) && ip.As4()[0] != 0 && ip.As4()[0] < 224
+	}
+	return !ip.Is4In6() && !compatibleIPv4.Contains(ip) && !labNetwork6.Contains(ip)
 }
 
 // One scoped TCP endpoint is routed through the selected node in either mode.
@@ -104,8 +111,12 @@ func startLab(data []byte, mode int, target netip.AddrPort) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	lab := &labTunnel{route: route, target: target}
-	live, err := makeSession(lab)
+	network, family := labNetwork4, header.IPv4ProtocolNumber
+	if target.Addr().Is6() {
+		network, family = labNetwork6, header.IPv6ProtocolNumber
+	}
+	lab := &labTunnel{route: route, target: target, origin: network.Addr()}
+	live, err := makeSession(lab, family)
 	if err != nil {
 		lab.install(nil)
 		return 0, err
@@ -146,6 +157,7 @@ type labTunnel struct {
 	mu     sync.Mutex
 	route  *labRoute
 	target netip.AddrPort // immutable for the lifetime of the tunnel
+	origin netip.Addr
 }
 
 func (lab *labTunnel) install(route *labRoute) {
@@ -176,7 +188,7 @@ func (lab *labTunnel) install(route *labRoute) {
 
 func (lab *labTunnel) NewConnection(_ context.Context, conn net.Conn, m M.Metadata) error {
 	defer conn.Close()
-	if m.Source.Fqdn != "" || m.Source.Addr.Unmap() != labOrigin || m.Destination.Fqdn != "" ||
+	if m.Source.Fqdn != "" || m.Source.Addr.Unmap() != lab.origin || m.Destination.Fqdn != "" ||
 		m.Destination.Addr.Unmap() != lab.target.Addr() || m.Destination.Port != lab.target.Port() {
 		return nil
 	}
@@ -199,7 +211,7 @@ func (lab *labTunnel) NewConnection(_ context.Context, conn net.Conn, m M.Metada
 
 	ctx, cancel := context.WithTimeout(route.ctx, C.DefaultTCPTimeout)
 	remote, err := route.proxy.DialContext(ctx, &C.Metadata{NetWork: C.TCP, Type: C.TUN,
-		SrcIP: labOrigin, SrcPort: m.Source.Port, DstIP: lab.target.Addr(), DstPort: lab.target.Port()})
+		SrcIP: lab.origin, SrcPort: m.Source.Port, DstIP: lab.target.Addr(), DstPort: lab.target.Port()})
 	cancel()
 	if err != nil {
 		return nil

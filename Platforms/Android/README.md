@@ -51,6 +51,10 @@ ADB="$ANDROID_HOME/platform-tools/adb" bash Platforms/Android/smoke-apk.sh --rel
   .build/android-apk/CLAY-Android-arm64-relay-test.apk
 ```
 
+Relay 验收需要宿主的 Python 3 和 OpenSSL，以及能通过 `10.0.2.2` 访问宿主回环的独立模拟器。它使用合成账号和临时证书，在同一个监听端口上逐个验证 HTTP CONNECT、SOCKS5 及两者的 TLS 形式，确认错误密码和错误证书指纹不会回落到直连。该验收只覆盖 Relay 的 TCP 转发，VPN 和实体设备另验。
+
+The Relay smoke test needs Python 3 and OpenSSL on the host and a disposable Android emulator that can reach host loopback at `10.0.2.2`. It switches between authenticated HTTP CONNECT and SOCKS5, both with and without TLS, on the same local listener. A wrong password or pin cannot reach the direct origin. This verifies Relay TCP forwarding; VPN and physical devices have separate checks.
+
 ### 订阅 / Subscriptions
 
 本机代理和 VPN 都可以在「订阅」中填写名称与 HTTPS 地址，点击下载并保存。选择「下次连接使用缓存节点」后，节点检查和下次启动使用该缓存；「使用粘贴的节点」切回粘贴的内容。手动刷新成功后，再点一次「下次连接使用缓存节点」选用新版本。已运行的会话不会因刷新、删除或切换输入而改变；若要使用新节点列表，先停止再启动。

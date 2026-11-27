@@ -164,6 +164,7 @@ import Darwin
         XCTAssertTrue(result.issues.isEmpty)
         XCTAssertEqual(result.profiles.map(\.security), ["none", "tls", "none"])
         XCTAssertEqual(result.profiles.map(\.name), ["HTTP", "HTTPS", "SOCKS5"])
+        XCTAssertEqual(result.profiles.map(\.protocolDisplayName), ["HTTP CONNECT", "HTTP CONNECT", "SOCKS5"])
         let http = try fields(result.profiles[1])
         XCTAssertEqual(http["password"] as? String, "pa:ss")
         XCTAssertEqual(http["sni"] as? String, "tls.example.test")

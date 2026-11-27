@@ -151,7 +151,7 @@ private struct StatusMenu: View {
 
     private func nodeMenuTitle(_ node: NodeProfile) -> String {
         guard let number = model.nodeNumber(node.id) else { return "未选" }
-        return "#\(number) · \(node.protocolName.uppercased())"
+        return "#\(number) · \(node.protocolDisplayName)"
     }
 
     private func showDashboard(_ page: Page? = nil) {
@@ -341,7 +341,7 @@ private struct Dashboard: View {
                     Spacer()
                     Button(pac.modeLabel) { page = .pac }
                 }
-                if model.routingConfirmed, let n = model.chosen { Text("\(n.protocolName.uppercased()) · \(n.transport) · \(n.security)").foregroundStyle(.secondary) }
+                if model.routingConfirmed, let n = model.chosen { Text("\(n.protocolDisplayName) · \(n.transport) · \(n.security)").foregroundStyle(.secondary) }
                 if let proxy = model.proxyAddress {
                     HStack { Text(proxy).monospaced().textSelection(.enabled); Button("复制") { model.copy(proxy) } }
                     Text("HTTP 和 SOCKS5 共用这个端口，可填入需要手动配置的应用。")
@@ -365,7 +365,7 @@ private struct Dashboard: View {
     private var nodes: some View {
         let query = nodeSearch.trimmingCharacters(in: .whitespacesAndNewlines)
         let visibleNodes = model.nodes.filter { node in
-            query.isEmpty || [node.name, node.protocolName, node.transport, node.security].contains { $0.localizedCaseInsensitiveContains(query) }
+            query.isEmpty || [node.name, node.protocolName, node.protocolDisplayName, node.transport, node.security].contains { $0.localizedCaseInsensitiveContains(query) }
         }
         return LazyVStack(alignment: .leading, spacing: 13) {
             HStack { Button("粘贴导入") { model.presentImport = true }.disabled(model.running || model.busy)
@@ -393,7 +393,7 @@ private struct Dashboard: View {
                             if let number = model.nodeNumber(n.id) { Text("#\(number)").font(.caption.monospacedDigit()).foregroundStyle(.secondary) }
                             Text(n.name).font(.headline).lineLimit(1)
                         }
-                        Text("\(n.protocolName.uppercased()) · \(n.transport) · \(n.security)").font(.caption).foregroundStyle(.secondary)
+                        Text("\(n.protocolDisplayName) · \(n.transport) · \(n.security)").font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
                     if let probe = model.probes[n.id] { Text(probe.text).font(.caption.monospacedDigit()).foregroundStyle(.secondary) }

@@ -4,6 +4,8 @@
 
 - 可从 Clash 内联配置导入 HTTP CONNECT 和 SOCKS5 TCP 上游，支持身份认证和 TLS，也可粘贴普通 SOCKS5 链接。
 - Import HTTP CONNECT and SOCKS5 TCP upstreams from inline Clash profiles, with authentication and TLS. Plain SOCKS5 links can also be pasted.
+- Android、iOS 和 macOS 的节点界面正确显示 HTTP CONNECT 和 SOCKS5，Android 节点选择器也标明 TLS。Android Relay 模拟器验收确认错误密码或证书指纹不会回落到直连。
+- Android, iOS, and macOS show the HTTP CONNECT and SOCKS5 protocol names. Android marks TLS in the node picker, and its Relay emulator tests confirm that a wrong password or pin cannot fall back to direct.
 - Android VPN 预览接管 IPv6，连同 IPv4 走当前节点及规则、全局或直连模式；全局模式下，失效的代理路径不会回落到 IPv6 直连。
 - The Android VPN preview routes IPv6 alongside IPv4 with node switching and Rule, Global, or Direct mode. A failed proxy path does not fall back to direct IPv6 in Global mode.
 - 规则预览、PAC 脚本和内核规则支持 IPv6 网段。Android VPN 拒绝节点不支持的代理 UDP 流量，明确设置为直连的规则照常工作。

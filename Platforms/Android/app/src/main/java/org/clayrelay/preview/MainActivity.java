@@ -231,7 +231,7 @@ public final class MainActivity extends Activity {
         Map<String, Integer> counts = new LinkedHashMap<>();
         for (int i = 0; i < nodes.length(); i++) {
             JSONObject entry = nodes.getJSONObject(i);
-            String protocol = entry.getString("protocol"), transport = entry.getString("transport"), security = entry.getString("security");
+            String protocol = entry.getString("label"), transport = entry.getString("transport"), security = entry.getString("security");
             String key = protocol + "/" + transport + "/" + security;
             Integer count = counts.get(key);
             counts.put(key, count == null ? 1 : count + 1);
@@ -241,7 +241,7 @@ public final class MainActivity extends Activity {
             String[] types = group.getKey().split("/", -1);
             if (types.length != 3) continue;
             summary.append('\n').append(getString(R.string.nodes_summary_row,
-                    protocolLabel(types[0]), transportLabel(types[1]), securityLabel(types[2]), group.getValue()));
+                    types[0], transportLabel(types[1]), securityLabel(types[2]), group.getValue()));
         }
         JSONObject issues = report.getJSONObject("issues");
         Iterator<String> keys = issues.keys();
@@ -250,18 +250,6 @@ public final class MainActivity extends Activity {
             summary.append('\n').append(getString(R.string.nodes_issue_row, issueLabel(key), issues.getInt(key)));
         }
         return summary.toString();
-    }
-
-    private String protocolLabel(String protocol) {
-        switch (protocol) {
-            case "vless": return "VLESS";
-            case "vmess": return "VMess";
-            case "ss": return "Shadowsocks";
-            case "trojan": return "Trojan";
-            case "hysteria2": return "Hysteria2";
-            case "tuic": return "TUIC";
-            default: return "—";
-        }
     }
 
     private String transportLabel(String transport) {

@@ -23,19 +23,22 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 final class RelayChecks {
-    static void run(Instrumentation test, Activity activity, ShadowsocksFixture fixture) throws Exception {
+    static void run(Instrumentation test, Activity activity, ShadowsocksFixture fixture, String forwarding) throws Exception {
         InetAddress local = InetAddress.getByAddress(new byte[] {127, 0, 0, 1});
         String marker = UUID.randomUUID().toString();
+        AtomicInteger originConnections = new AtomicInteger();
         try (ServerSocket origin = new ServerSocket(0, 2, local)) {
             Thread server = new Thread(() -> {
                 while (!origin.isClosed()) {
                     try (Socket peer = origin.accept()) {
+                        originConnections.incrementAndGet();
                         peer.setSoTimeout(3000);
                         InputStream in = peer.getInputStream();
                         byte[] suffix = {13, 10, 13, 10};
@@ -129,7 +132,72 @@ final class RelayChecks {
             test.runOnMainSync(() -> activity.findViewById(RelayPanel.ID_STOP).performClick());
             require(await(test, activity, RelayPanel.ID_START, RelayPanel.ID_STATUS, "manual relay stopped")
                     .equals(activity.getString(R.string.relay_stopped)), "manual session stopped cleanly");
+            verifyUpstreams(test, activity, local, origin.getLocalPort(), originConnections, forwarding);
         }
+    }
+
+    private static void verifyUpstreams(Instrumentation test, Activity activity, InetAddress local, int origin,
+                                        AtomicInteger direct, String fixture) throws Exception {
+        require(fixture != null && fixture.matches("(?:[0-9]{1,5},){4}(?:[a-f0-9]{24},){3}[a-f0-9]{64}"),
+                "loopback forwarding fixture supplied by smoke-apk.sh --relay");
+        String[] input = fixture.split(",");
+        // Four working upstreams, then invalid credentials and invalid pins for both protocols.
+        int[] endpoints = {0, 1, 2, 3, 0, 1, 2, 3};
+        String wrongPin = (input[7].startsWith("a") ? "b" : "a") + input[7].substring(1);
+        JSONArray nodes = new JSONArray();
+        for (int i = 0; i < endpoints.length; i++) {
+            int endpoint = endpoints[i];
+            JSONObject node = new JSONObject().put("type", endpoint % 2 == 0 ? "http" : "socks5")
+                    .put("name", "Loopback-" + (i + 1)).put("server", "10.0.2.2").put("port", Integer.parseInt(input[endpoint]))
+                    .put("username", input[5]).put("password", i == 4 || i == 5 ? "fixture-wrong-password" : input[6]);
+            if (endpoint >= 2) node.put("tls", true).put("fingerprint", i >= 6 ? wrongPin : input[7]);
+            nodes.put(node);
+        }
+        String source = new JSONObject().put("proxies", nodes).toString();
+        test.runOnMainSync(() -> {
+            ((EditText) activity.findViewById(MainActivity.ID_NODE_INPUT)).setText(source);
+            ((Spinner) activity.findViewById(RelayPanel.ID_MODE)).setSelection(1);
+        });
+        NodePickerChecks.choose(test, activity, RelayPanel.ID_NODE, 1, "HTTP CONNECT");
+        test.runOnMainSync(() -> activity.findViewById(RelayPanel.ID_START).performClick());
+        String status = await(test, activity, RelayPanel.ID_APPLY, RelayPanel.ID_STATUS, "forwarding session ready");
+        Matcher address = Pattern.compile("127\\.0\\.0\\.1:([0-9]{1,5})").matcher(status);
+        require(address.find(), "forwarding session loopback address");
+        int port = Integer.parseInt(address.group(1));
+        test.runOnMainSync(() -> activity.findViewById(RelayPanel.ID_SHOW).performClick());
+        String credentials = await(test, activity, RelayPanel.ID_APPLY, RelayPanel.ID_CREDENTIALS, "forwarding session credentials");
+        Matcher password = Pattern.compile("[a-f0-9]{64}").matcher(credentials);
+        require(password.find() && !status.contains(password.group()), "forwarding session credentials remain hidden in status");
+        int before = direct.get();
+        for (int i = 0; i < endpoints.length; i++) {
+            int number = i + 1;
+            if (i != 0) {
+                int endpoint = endpoints[i];
+                String label = (endpoint % 2 == 0 ? "HTTP CONNECT" : "SOCKS5") + (endpoint >= 2 ? " / TCP / TLS" : " / TCP");
+                NodePickerChecks.choose(test, activity, RelayPanel.ID_NODE, number, label);
+                test.runOnMainSync(() -> activity.findViewById(RelayPanel.ID_APPLY).performClick());
+                status = await(test, activity, RelayPanel.ID_APPLY, RelayPanel.ID_STATUS, "confirm forwarding node " + number);
+            }
+            require(status.contains("127.0.0.1:" + port) && status.contains(number + " · " + activity.getString(R.string.relay_global)),
+                    "forwarding node confirmed in the same Global session");
+            require(!status.contains(input[5]) && !status.contains(input[6]) && !status.contains("10.0.2.2"),
+                    "forwarding status omits upstream address and credentials");
+            // Allow Mihomo's five-second dial retry budget to finish on expected failures.
+            String response = fetch(local, port, origin, password.group(), "forwarding node " + number, i < 4 ? 5000 : 9000);
+            if (i < 4) require(response.equals(input[4] + "-" + number), "selected upstream answered: " + number);
+            else require(response.startsWith("HTTP/1.1 5"), "invalid authentication or pin rejected: " + number);
+            require(direct.get() == before, "Global forwarded traffic never contacted the direct origin");
+        }
+        NodePickerChecks.choose(test, activity, RelayPanel.ID_NODE, 1, "HTTP CONNECT");
+        test.runOnMainSync(() -> activity.findViewById(RelayPanel.ID_APPLY).performClick());
+        await(test, activity, RelayPanel.ID_APPLY, RelayPanel.ID_STATUS, "switch back to a working node");
+        require(fetch(local, port, origin, password.group(), "recovered forwarding").equals(input[4] + "-1") && direct.get() == before,
+                "same listener recovers when a working node is selected");
+        test.runOnMainSync(() -> activity.findViewById(RelayPanel.ID_STOP).performClick());
+        require(await(test, activity, RelayPanel.ID_START, RelayPanel.ID_STATUS, "forwarding session stopped")
+                .equals(activity.getString(R.string.relay_stopped)), "forwarding session stopped cleanly");
+        require(activity.getNoBackupFilesDir().listFiles((dir, name) -> name.startsWith("clay-relay-")).length == 0,
+                "forwarding session removed its private runtime directory");
     }
 
     private static void select(Instrumentation test, Activity activity, int node, int mode) {
@@ -191,8 +259,12 @@ final class RelayChecks {
     }
 
     private static String fetch(InetAddress address, int proxy, int origin, String password, String step) {
+        return fetch(address, proxy, origin, password, step, 5000);
+    }
+
+    private static String fetch(InetAddress address, int proxy, int origin, String password, String step, int timeout) {
         try (Socket client = new Socket()) {
-            client.connect(new InetSocketAddress(address, proxy), 1200); client.setSoTimeout(5000);
+            client.connect(new InetSocketAddress(address, proxy), 1200); client.setSoTimeout(timeout);
             String auth = password == null ? "" : "Proxy-Authorization: Basic " + android.util.Base64.encodeToString(
                     ("clay:" + password).getBytes(StandardCharsets.US_ASCII), android.util.Base64.NO_WRAP) + "\r\n";
             byte[] query = ("GET http://127.0.0.1:" + origin + "/test HTTP/1.1\r\nHost: 127.0.0.1:" + origin +

@@ -20,6 +20,21 @@ public struct NodeProfile: Identifiable {
     public let protocolName: String
     public let transport: String
     public let security: String
+    /// A controlled label for UI summaries; never the imported node name.
+    public var protocolDisplayName: String {
+        switch protocolName {
+        case "vmess": return "VMess"
+        case "vless": return "VLESS"
+        case "ss": return "Shadowsocks"
+        case "trojan": return "Trojan"
+        case "hysteria2": return "Hysteria2"
+        case "tuic": return "TUIC"
+        case "http": return "HTTP CONNECT"
+        case "socks5": return "SOCKS5"
+        default: return "—"
+        }
+    }
+
     public var localName: String { "node-" + id.uuidString.lowercased() }
     let options: [String: Any]
 

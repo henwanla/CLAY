@@ -20,17 +20,7 @@ struct OfflineSummary {
         var byProtocol: [String: Int] = [:]
         for profile in result.profiles {
             // Keep only a controlled display label; node names, addresses and credentials are discarded.
-            let name: String
-            switch profile.protocolName {
-            case "vmess": name = "VMess"
-            case "vless": name = "VLESS"
-            case "ss": name = "Shadowsocks"
-            case "trojan": name = "Trojan"
-            case "hysteria2": name = "Hysteria2"
-            case "tuic": name = "TUIC"
-            default: continue
-            }
-            byProtocol[name, default: 0] += 1
+            byProtocol[profile.protocolDisplayName, default: 0] += 1
         }
         accepted = result.profiles.count
         protocols = byProtocol.sorted { $0.key < $1.key }.map { ProtocolCount(name: $0.key, count: $0.value) }

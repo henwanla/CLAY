@@ -74,7 +74,8 @@ public func preview(
             let report = ProfileImporter.read(source)
             // Names are user-provided and can themselves contain a password or URL.
             result = ["nodes": report.profiles.map {
-                ["protocol": $0.protocolName, "transport": $0.transport, "security": $0.security]
+                ["protocol": $0.protocolName, "label": $0.protocolDisplayName,
+                 "transport": $0.transport, "security": $0.security]
             }, "issues": Dictionary(uniqueKeysWithValues: report.issues.map { ($0.key.rawValue, $0.value) })]
         case 1:
             if let target = decode(target, targetCount, max: 16_384) {
@@ -101,8 +102,8 @@ private func pickerLabel(_ profile: NodeProfile) -> String {
         !CharacterSet.controlCharacters.contains($0) && !CharacterSet.newlines.contains($0)
     }.prefix(48)
     let title = String(String.UnicodeScalarView(safe)).trimmingCharacters(in: .whitespacesAndNewlines)
-    let kind = profile.protocolName == "ss" ? "Shadowsocks" : profile.protocolName.uppercased()
-    let detail = "\(kind) / \(profile.transport.uppercased())"
+    let protection = ["tls", "reality"].contains(profile.security) ? " / \(profile.security.uppercased())" : ""
+    let detail = "\(profile.protocolDisplayName) / \(profile.transport.uppercased())\(protection)"
     return title.isEmpty || profile.name.contains("://") ? detail : "\(title) · \(detail)"
 }
 

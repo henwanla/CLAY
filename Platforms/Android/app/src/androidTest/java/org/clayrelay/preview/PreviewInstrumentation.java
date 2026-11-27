@@ -40,9 +40,9 @@ public final class PreviewInstrumentation extends Instrumentation {
             activity = startActivitySync(intent);
             exercise(activity);
             require((activity.findViewById(SubscriptionPanel.ID_ADD) != null) == online, "subscription UI restricted to online flavors");
-            if (fixture != null) RelayChecks.run(this, activity, fixture);
+            if (fixture != null) RelayChecks.run(this, activity, fixture, arguments == null ? null : arguments.getString("relayFixture"));
             String vpnReport = BuildFlavor.VPN ? VpnChecks.run(this, activity, arguments) + "\n" : "";
-            report.putString("stream", "\nCLAY_ANDROID_PREVIEW_PASS\n" + (BuildFlavor.RELAY ? "CLAY_ANDROID_RELAY_PASS\n" : "")
+            report.putString("stream", "\nCLAY_ANDROID_PREVIEW_PASS\n" + (BuildFlavor.RELAY ? "CLAY_ANDROID_RELAY_PASS\nCLAY_ANDROID_RELAY_FORWARDING_PASS\n" : "")
                     + (online ? "CLAY_ANDROID_SUBSCRIPTIONS_PASS\n" : "") + vpnReport);
             result = Activity.RESULT_OK;
         } catch (Exception | AssertionError e) {
@@ -94,6 +94,17 @@ public final class PreviewInstrumentation extends Instrumentation {
         String ssSummary = await(activity, MainActivity.ID_NODE_RUN, MainActivity.ID_NODE_RESULT);
         require(ssSummary.contains("AEAD 2022") && !ssSummary.contains(key) && !ssSummary.contains(encoded),
                 "Shadowsocks 2022 Activity preview and redaction");
+
+        String forwarding = "{\"proxies\":[{\"type\":\"http\",\"name\":\"hidden-node\",\"server\":\"example.test\",\"port\":8080," +
+                "\"username\":\"hidden-user\",\"password\":\"hidden-value\"},{\"type\":\"socks5\",\"server\":\"example.test\",\"port\":1080}]}";
+        runOnMainSync(() -> {
+            edit(activity, MainActivity.ID_NODE_INPUT).setText(forwarding);
+            button(activity, MainActivity.ID_NODE_RUN).performClick();
+        });
+        String forwardingSummary = await(activity, MainActivity.ID_NODE_RUN, MainActivity.ID_NODE_RESULT);
+        require(forwardingSummary.contains("HTTP CONNECT") && forwardingSummary.contains("SOCKS5") &&
+                !forwardingSummary.contains("example.test") && !forwardingSummary.contains("hidden-"),
+                "forwarding summaries label both protocols and omit node data");
 
         runOnMainSync(() -> {
             edit(activity, MainActivity.ID_PAC_RULES).setText("DOMAIN-SUFFIX,example.test,PROXY\nDOMAIN,host.example.test,DIRECT");

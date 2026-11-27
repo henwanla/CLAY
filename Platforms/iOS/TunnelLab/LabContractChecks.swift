@@ -28,6 +28,32 @@ import Foundation
         precondition(!accepts(packet(source: device, target: [198, 51, 100, 43]), fromProvider: false))
         precondition(!accepts(packet(source: [192, 0, 2, 10], target: target), fromProvider: false))
         precondition(!accepts(Data(request.dropLast()), fromProvider: false))
+        func datagram(_ packet: Data, family: Int32) -> Data {
+            let header = family == AF_INET ? 20 : 40
+            var udp = Data(packet.prefix(header + 8))
+            udp.append(contentsOf: [1, 2, 3])
+            if family == AF_INET {
+                udp[3] = UInt8(udp.count)
+                udp[9] = 17
+            } else {
+                udp[5] = UInt8(udp.count - header)
+                udp[6] = 17
+            }
+            udp[header + 4] = 0
+            udp[header + 5] = UInt8(udp.count - header)
+            return udp
+        }
+        let udp4 = datagram(request, family: AF_INET)
+        precondition(accepts(udp4, fromProvider: false))
+        precondition(accepts(datagram(response, family: AF_INET), fromProvider: true))
+        precondition(!accepts(udp4, fromProvider: true))
+        precondition(!accepts(datagram(packet(source: device, target: target, port: 443), family: AF_INET), fromProvider: false))
+        var brokenUDP = udp4
+        brokenUDP[25] = 8 // Claimed UDP length omits payload.
+        precondition(!accepts(brokenUDP, fromProvider: false))
+        brokenUDP = udp4
+        brokenUDP[6] = 0x20
+        precondition(!accepts(brokenUDP, fromProvider: false))
         var invalid = request
         invalid[0] = 0x60
         precondition(!accepts(invalid, fromProvider: false))
@@ -106,8 +132,16 @@ import Foundation
         precondition(!accepts6(packet6(demo6.bytes, custom6.bytes)))
         precondition(!accepts6(packet6(device6, custom6.bytes, port: 443)))
         precondition(!accepts6(request6.dropLast()))
+        let udp6 = datagram(request6, family: AF_INET6)
+        precondition(accepts6(udp6) && accepts6(datagram(response6, family: AF_INET6), output: true))
+        precondition(!accepts6(udp6, output: true) && !accepts6(udp6.dropLast()))
+        precondition(!accepts6(datagram(packet6(device6, demo6.bytes), family: AF_INET6)))
+        brokenUDP = udp6
+        brokenUDP[40] = 0
+        brokenUDP[41] = 0
+        precondition(!accepts6(brokenUDP))
         var invalid6 = request6
-        for nextHeader: UInt8 in [0, 17, 43, 44, 60] { // Extension, UDP, routing, fragment and destination headers.
+        for nextHeader: UInt8 in [0, 17, 43, 44, 60] { // TCP-shaped data cannot claim UDP or an extension header.
             invalid6[6] = nextHeader
             precondition(!accepts6(invalid6))
         }

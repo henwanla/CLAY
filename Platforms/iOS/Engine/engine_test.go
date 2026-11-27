@@ -47,6 +47,12 @@ func proxyFixture(t *testing.T, reply string, disconnectChecks ...chan error) in
 
 func proxyFixtureFor(t *testing.T, reply string, endpoint netip.AddrPort, accepted *atomic.Uint64, disconnectChecks ...chan error) int {
 	t.Helper()
+	return proxyFixtureTransport(t, reply, endpoint, netip.MustParseAddrPort("198.51.100.53:53"), accepted, disconnectChecks...)
+}
+
+func proxyFixtureTransport(t *testing.T, reply string, endpoint, datagramTarget netip.AddrPort,
+	accepted *atomic.Uint64, disconnectChecks ...chan error) int {
+	t.Helper()
 	ln, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +76,7 @@ func proxyFixtureFor(t *testing.T, reply string, endpoint netip.AddrPort, accept
 					return
 				}
 				if data[len(prefix)] == 3 {
-					respondUDP(conn, reply)
+					respondUDP(conn, reply, datagramTarget, disconnectChecks)
 					return
 				}
 				if data[len(prefix)] != 1 {
@@ -102,10 +108,14 @@ func proxyFixtureFor(t *testing.T, reply string, endpoint netip.AddrPort, accept
 	return ln.Addr().(*net.TCPAddr).Port
 }
 
-// VLESS XUDP fixture: answers only a single synthetic payload to the reserved
-// IPv4 address and port. It never forwards traffic to a network destination.
-func respondUDP(conn net.Conn, reply string) {
-	target, _ := hex.DecodeString("02003501c6336435")
+// VLESS XUDP fixture: answers only a single synthetic payload at the specified
+// target. It never forwards traffic to a network destination.
+func respondUDP(conn net.Conn, reply string, endpoint netip.AddrPort, disconnectChecks []chan error) {
+	kind := byte(1)
+	if endpoint.Addr().Is6() {
+		kind = 3
+	}
+	target := append([]byte{2, byte(endpoint.Port() >> 8), byte(endpoint.Port()), kind}, endpoint.Addr().AsSlice()...)
 	read := func(size int) []byte {
 		data := make([]byte, size)
 		if _, err := io.ReadFull(conn, data); err != nil {
@@ -117,12 +127,13 @@ func respondUDP(conn net.Conn, reply string) {
 	if length == nil {
 		return
 	}
-	n := binary.BigEndian.Uint16(length)
-	if n != 12 && n != 20 {
+	n := int(binary.BigEndian.Uint16(length))
+	head := len(target) + 4
+	if n != head && n != head+8 {
 		return
 	}
-	frame := read(int(n))
-	if frame == nil || !bytes.Equal(frame[:12], append([]byte{0, 0, 1, 1}, target...)) {
+	frame := read(n)
+	if frame == nil || !bytes.Equal(frame[:head], append([]byte{0, 0, 1, 1}, target...)) {
 		return
 	}
 	length = read(2)
@@ -130,9 +141,12 @@ func respondUDP(conn net.Conn, reply string) {
 		string(read(len("packet-proof"))) != "packet-proof" {
 		return
 	}
-	wire := append([]byte{0, 0, 0, 12, 0, 0, 2, 1}, target...)
+	wire := append([]byte{0, 0, byte(head >> 8), byte(head), 0, 0, 2, 1}, target...)
 	wire = append(wire, 0, byte(len(reply)))
-	_, _ = conn.Write(append(wire, reply...))
+	if _, err := conn.Write(append(wire, reply...)); err == nil && len(disconnectChecks) == 1 {
+		_, err = conn.Read(make([]byte, 1))
+		disconnectChecks[0] <- err
+	}
 }
 
 func newPeer(t *testing.T, id uint64) (*stack.Stack, context.Context, func()) {
@@ -231,12 +245,27 @@ func fetchTarget(t *testing.T, peer *stack.Stack, ctx context.Context, target ne
 
 func fetchUDP(t *testing.T, peer *stack.Stack, want string) {
 	t.Helper()
-	target := tcpip.FullAddress{NIC: 1, Addr: tcpip.AddrFrom4([4]byte{198, 51, 100, 53}), Port: 53}
-	conn, err := gonet.DialUDP(peer, nil, &target, header.IPv4ProtocolNumber)
+	conn := dialLabUDP(t, peer, netip.MustParseAddrPort("198.51.100.53:53"))
+	defer conn.Close()
+	exchangeLabUDP(t, conn, want)
+}
+
+func dialLabUDP(t *testing.T, peer *stack.Stack, target netip.AddrPort) *gonet.UDPConn {
+	t.Helper()
+	family := header.IPv4ProtocolNumber
+	if target.Addr().Is6() {
+		family = header.IPv6ProtocolNumber
+	}
+	address := tcpip.FullAddress{NIC: 1, Addr: tcpip.AddrFromSlice(target.Addr().AsSlice()), Port: target.Port()}
+	conn, err := gonet.DialUDP(peer, nil, &address, family)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	return conn
+}
+
+func exchangeLabUDP(t *testing.T, conn *gonet.UDPConn, want string) {
+	t.Helper()
 	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
 	if _, err := io.WriteString(conn, "packet-proof"); err != nil {
 		t.Fatal(err)
@@ -244,7 +273,7 @@ func fetchUDP(t *testing.T, peer *stack.Stack, want string) {
 	out := make([]byte, mtu)
 	n, err := conn.Read(out)
 	if err != nil || string(out[:n]) != want {
-		t.Fatalf("UDP through VLESS did not return expected marker: %v", err)
+		t.Fatalf("UDP did not return the selected node's marker: %v", err)
 	}
 }
 
@@ -300,6 +329,79 @@ func TestLabSwitchClosesActiveTCP(t *testing.T) {
 
 func TestLabIPv6SwitchClosesActiveTCP(t *testing.T) {
 	checkFlowRetirement(t, true, netip.MustParseAddrPort("[2001:db8::37]:40443"))
+}
+
+func TestLabSwitchClosesActiveUDP(t *testing.T) {
+	for _, target := range []netip.AddrPort{netip.MustParseAddrPort("203.0.113.37:40443"), netip.MustParseAddrPort("[2001:db8::37]:40443")} {
+		t.Run(target.Addr().String(), func(t *testing.T) {
+			closed1, closed2 := make(chan error, 1), make(chan error, 1)
+			var dials atomic.Uint64
+			first := proxyFixtureTransport(t, "udp-one", target, target, &dials, closed1)
+			second := proxyFixtureTransport(t, "udp-two", target, target, nil, closed2)
+			id, err := startLab(labFixture(t, first), 0, target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer stop(id)
+			network, alternate := labNetwork4, netip.MustParseAddr("203.0.113.38")
+			if target.Addr().Is6() {
+				network, alternate = labNetwork6, netip.MustParseAddr("2001:db8::38")
+			}
+			peer, _, closePeer := newPeerFor(t, id, network)
+			defer closePeer()
+			for _, forbidden := range []netip.AddrPort{netip.AddrPortFrom(alternate, target.Port()),
+				netip.AddrPortFrom(target.Addr(), target.Port()+1)} {
+				conn := dialLabUDP(t, peer, forbidden)
+				requireNoLabUDPReply(t, conn)
+				_ = conn.Close()
+			}
+			if dials.Load() != 0 {
+				t.Fatal("out-of-scope datagram reached the upstream")
+			}
+			conn := dialLabUDP(t, peer, target)
+			defer conn.Close()
+			exchangeLabUDP(t, conn, "udp-one")
+			if !replaceLab(id, labFixture(t, second), 1) {
+				t.Fatal("lab refused a valid replacement")
+			}
+			awaitLabUDPClose(t, closed1)
+			// Same application-side socket and port after changing nodes.
+			exchangeLabUDP(t, conn, "udp-two")
+			disabled := normalizedFixtures(t, map[string]any{"name": "udp-off", "type": "vless", "server": "127.0.0.1",
+				"port": first, "uuid": "56dc6c3e-8793-4d37-a363-f9f19db29c6d", "udp": false})
+			if !replaceLab(id, disabled, 0) {
+				t.Fatal("lab refused a TCP-only node")
+			}
+			awaitLabUDPClose(t, closed2)
+			requireNoLabUDPReply(t, conn)
+			if dials.Load() != 1 {
+				t.Fatal("a TCP-only node attempted to open a UDP upstream")
+			}
+		})
+	}
+}
+
+func requireNoLabUDPReply(t *testing.T, c *gonet.UDPConn) {
+	t.Helper()
+	_ = c.SetDeadline(time.Now().Add(300 * time.Millisecond))
+	if _, err := io.WriteString(c, "packet-proof"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Read(make([]byte, mtu)); err == nil {
+		t.Fatal("unexpected datagram response")
+	}
+}
+
+func awaitLabUDPClose(t *testing.T, closed <-chan error) {
+	t.Helper()
+	select {
+	case err := <-closed:
+		if timeout, ok := err.(net.Error); err == nil || (ok && timeout.Timeout()) {
+			t.Fatal("upstream did not close after UDP route switch")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("old UDP association did not close")
+	}
 }
 
 func checkFlowRetirement(t *testing.T, switchRoute bool, target netip.AddrPort) {
@@ -432,7 +534,7 @@ func TestLabTargetScope(t *testing.T) {
 func labFixture(t *testing.T, port int) []byte {
 	t.Helper()
 	return normalizedFixtures(t, map[string]any{"name": "lab", "type": "vless", "server": "127.0.0.1", "port": port,
-		"uuid": "56dc6c3e-8793-4d37-a363-f9f19db29c6d"})
+		"uuid": "56dc6c3e-8793-4d37-a363-f9f19db29c6d", "udp": true})
 }
 
 func TestClosedAndRejectsUnsupportedInput(t *testing.T) {

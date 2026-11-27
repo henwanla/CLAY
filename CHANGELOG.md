@@ -8,8 +8,8 @@
 - Rule previews, PAC scripts, and engine rules support IPv6 CIDR. Android VPN drops proxied UDP traffic when the selected node lacks UDP support; explicit Direct rules still work.
 - Android VPN 的 DNS 输入可填写一个 IPv4 或 IPv6 地址，系统解析仍按当前节点和规则转发。
 - Android VPN accepts one IPv4 or IPv6 DNS address. System lookups still follow the active node and routing policy.
-- iOS 隧道实验可选择 IPv4 或 IPv6 TCP 端点。宿主回环验证了 IPv6 转发和在线切换 VLESS 节点；签名真机验证待完成。
-- The iOS Tunnel Lab can use an IPv4 or IPv6 TCP endpoint. Host loopback tests cover IPv6 forwarding and live VLESS node switching; signed device testing is still pending.
+- iOS 隧道实验可为一个 IPv4 或 IPv6 端点转发 TCP 与节点支持的 UDP。宿主回环验证了换节点、关闭旧 UDP 会话和拒绝范围外数据包；签名真机验证待完成。
+- The iOS Tunnel Lab forwards TCP and supported UDP for one IPv4 or IPv6 endpoint. Host loopback tests cover node switching, retiring old UDP sessions, and out-of-scope packet rejection; signed device testing is still pending.
 - Windows 和 Linux 开发版可在连接前检查规则文件，输入域名、IP 或 URL 可离线预览命中的规则。
 - Windows and Linux development builds check local rule files and preview a domain, IP address, or URL offline before connecting.
 - Windows 和 Linux 开发版按文件内容识别指定的官方 Mihomo，自动填写预期 SHA-256；选错文件时会说明处理方式。

@@ -19,9 +19,9 @@
 "Not a proxy outbound" = "Not a proxy outbound";
 "lab.title" = "CLAY Tunnel Lab";
 "lab.scope" = "Test route only";
-"lab.scope.description" = "While connected, iOS sends all traffic for the selected IP address to the Lab. Only the selected TCP port is forwarded. DNS settings and routes to other destinations are unchanged. Starting the Lab may pause another VPN.";
+"lab.scope.description" = "While connected, iOS sends all traffic for the selected IP address to the Lab. It forwards TCP on the selected port, and UDP if the node supports it. DNS settings and routes to other destinations are unchanged. Starting the Lab may pause another VPN.";
 "lab.target.address" = "Destination IPv4 or IPv6";
-"lab.target.tcpPort" = "TCP port";
+"lab.target.port" = "TCP / UDP port";
 "lab.target.live" = "Active endpoint";
 "lab.target.reading" = "Checking the active endpoint…";
 "lab.target.unknown" = "The tunnel has not confirmed its endpoint.";
@@ -40,7 +40,7 @@
 "lab.status" = "System VPN status";
 "lab.start" = "Start test tunnel";
 "lab.stop" = "Stop test tunnel";
-"lab.probe" = "Send test packet";
+"lab.probe" = "Send TCP test packet";
 "lab.probePassed" = "The active route returned the test response.";
 "lab.probeFailed" = "No test response. Check the fixture and the active route.";
 "lab.connected" = "Connected";

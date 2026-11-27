@@ -19,9 +19,9 @@
 "Not a proxy outbound" = "プロキシのアウトバウンドではありません";
 "lab.title" = "CLAY トンネルラボ";
 "lab.scope" = "テスト経路のみ";
-"lab.scope.description" = "接続中、iOS は選択した IP アドレス宛ての通信をすべてテストトンネルに渡します。転送するのは指定した TCP ポートのみです。DNS の設定や他の宛先への経路は変更しません。開始時に別の VPN が停止することがあります。";
+"lab.scope.description" = "接続中、iOS は選択した IP アドレス宛ての通信をすべてテストトンネルに渡します。転送するのは指定したポートの TCP と、ノードが対応している場合の UDP です。DNS の設定や他の宛先への経路は変更しません。開始時に別の VPN が停止することがあります。";
 "lab.target.address" = "宛先 IPv4 または IPv6";
-"lab.target.tcpPort" = "TCP ポート";
+"lab.target.port" = "TCP / UDP ポート";
 "lab.target.live" = "接続中の宛先";
 "lab.target.reading" = "接続中の宛先を確認中…";
 "lab.target.unknown" = "トンネルから宛先の確認が取れていません。";
@@ -40,7 +40,7 @@
 "lab.status" = "システム VPN の状態";
 "lab.start" = "テストトンネルを開始";
 "lab.stop" = "テストトンネルを停止";
-"lab.probe" = "テストパケットを送信";
+"lab.probe" = "TCP テストパケットを送信";
 "lab.probePassed" = "現在の経路からテスト応答を受信しました。";
 "lab.probeFailed" = "テスト応答がありません。テストサーバーと現在の経路を確認してください。";
 "lab.connected" = "接続済み";

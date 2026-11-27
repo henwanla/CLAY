@@ -249,6 +249,29 @@ func TestImportedProtocols(t *testing.T) {
 			})
 		}
 	})
+	t.Run("lab-live-udp-across-protocols", func(t *testing.T) {
+		target := netip.AddrPortFrom(udpTarget, 53)
+		id, err := startLab(normalizedFixtures(t, nodes[0]), 0, target)
+		if err != nil {
+			t.Fatal("lab rejected first imported datagram profile")
+		}
+		defer stop(id)
+		peer, _, closePeer := newPeer(t, id)
+		defer closePeer()
+		conn := dialLabUDP(t, peer, target)
+		defer conn.Close()
+		for index, check := range variants {
+			if !check.udp {
+				continue
+			}
+			t.Run(check.label, func(t *testing.T) {
+				if index > 0 && !replaceLab(id, normalizedFixtures(t, nodes[index]), index%2) {
+					t.Fatal("lab rejected datagram replacement")
+				}
+				exchangeLabUDP(t, conn, check.label)
+			})
+		}
+	})
 	for _, check := range []struct {
 		label, key, value string
 		index             int

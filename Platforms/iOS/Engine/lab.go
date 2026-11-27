@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"net"
 	"net/netip"
 	"sync"
@@ -10,10 +11,8 @@ import (
 
 	"github.com/metacubex/gvisor/pkg/tcpip/header"
 	tun "github.com/metacubex/sing-tun"
-	"github.com/metacubex/sing/common/buf"
 	"github.com/metacubex/sing/common/bufio"
 	M "github.com/metacubex/sing/common/metadata"
-	N "github.com/metacubex/sing/common/network"
 
 	"github.com/metacubex/mihomo/adapter"
 	"github.com/metacubex/mihomo/component/dialer"
@@ -37,7 +36,7 @@ func validLabTarget(target netip.AddrPort) bool {
 	return !ip.Is4In6() && !compatibleIPv4.Contains(ip) && !labNetwork6.Contains(ip)
 }
 
-// One scoped TCP endpoint is routed through the selected node in either mode.
+// One scoped endpoint is routed through the selected node in either mode.
 // A node replacement cannot change that endpoint or send it directly.
 func parseLab(data []byte, mode int, target netip.AddrPort) (*labRoute, error) {
 	if len(data) > labProfileLimit || (mode != 0 && mode != 1) {
@@ -63,7 +62,8 @@ func parseLab(data []byte, mode int, target netip.AddrPort) (*labRoute, error) {
 		cancel()
 		return nil, errProfile
 	}
-	return &labRoute{proxy: proxy, ctx: ctx, cancel: cancel, flows: make(map[*labFlow]bool)}, nil
+	return &labRoute{proxy: proxy, ctx: ctx, cancel: cancel, flows: make(map[*labFlow]bool),
+		datagrams: make(map[uint16]*labDatagrams)}, nil
 }
 
 type labPacketDialer struct {
@@ -141,11 +141,12 @@ func replaceLab(id uint64, data []byte, mode int) bool {
 }
 
 type labRoute struct {
-	proxy  C.Proxy
-	ctx    context.Context
-	cancel context.CancelFunc
-	flows  map[*labFlow]bool // guarded by labTunnel.mu
-	users  sync.WaitGroup
+	proxy     C.Proxy
+	ctx       context.Context
+	cancel    context.CancelFunc
+	flows     map[*labFlow]bool        // guarded by labTunnel.mu
+	datagrams map[uint16]*labDatagrams // one flow per client port, guarded by labTunnel.mu
+	users     sync.WaitGroup
 }
 
 type labFlow struct {
@@ -164,10 +165,15 @@ func (lab *labTunnel) install(route *labRoute) {
 	lab.mu.Lock()
 	old := lab.route
 	lab.route = route
-	var sockets []net.Conn
+	var sockets []io.Closer
 	if old != nil {
 		for flow := range old.flows {
 			sockets = append(sockets, flow.local)
+			if flow.remote != nil {
+				sockets = append(sockets, flow.remote)
+			}
+		}
+		for _, flow := range old.datagrams {
 			if flow.remote != nil {
 				sockets = append(sockets, flow.remote)
 			}
@@ -186,10 +192,14 @@ func (lab *labTunnel) install(route *labRoute) {
 	go func() { old.users.Wait(); _ = old.proxy.Close() }()
 }
 
+func (lab *labTunnel) inScope(m M.Metadata) bool {
+	return m.Source.Fqdn == "" && m.Source.Addr.Unmap() == lab.origin && m.Source.Port != 0 &&
+		m.Destination.Fqdn == "" && m.Destination.AddrPort() == lab.target
+}
+
 func (lab *labTunnel) NewConnection(_ context.Context, conn net.Conn, m M.Metadata) error {
 	defer conn.Close()
-	if m.Source.Fqdn != "" || m.Source.Addr.Unmap() != lab.origin || m.Destination.Fqdn != "" ||
-		m.Destination.Addr.Unmap() != lab.target.Addr() || m.Destination.Port != lab.target.Port() {
+	if !lab.inScope(m) {
 		return nil
 	}
 	lab.mu.Lock()
@@ -230,8 +240,5 @@ func (lab *labTunnel) NewConnection(_ context.Context, conn net.Conn, m M.Metada
 
 func (*labTunnel) PrepareConnection(string, M.Socksaddr, M.Socksaddr, tun.DirectRouteContext, time.Duration) (tun.DirectRouteDestination, error) {
 	return nil, tun.ErrDrop
-}
-func (*labTunnel) NewPacket(_ context.Context, _ netip.AddrPort, data *buf.Buffer, _ M.Metadata, _ func(N.PacketConn) N.PacketWriter) {
-	data.Release()
 }
 func (*labTunnel) NewError(context.Context, error) {}

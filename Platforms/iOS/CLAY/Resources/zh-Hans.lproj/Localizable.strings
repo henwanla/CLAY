@@ -19,9 +19,9 @@
 "Not a proxy outbound" = "不是代理出站";
 "lab.title" = "CLAY 隧道实验";
 "lab.scope" = "仅测试路由";
-"lab.scope.description" = "连接期间，iOS 会将发往所选 IP 地址的所有流量交给实验隧道。只转发所选 TCP 端口。DNS 设置和其他目标的路由保持不变。启动实验可能暂停其他 VPN。";
+"lab.scope.description" = "连接期间，iOS 会将发往所选 IP 地址的所有流量交给实验隧道。只转发所选端口的 TCP，以及节点支持的 UDP。DNS 设置和其他目标的路由保持不变。启动实验可能暂停其他 VPN。";
 "lab.target.address" = "目标 IPv4 或 IPv6";
-"lab.target.tcpPort" = "TCP 端口";
+"lab.target.port" = "TCP／UDP 端口";
 "lab.target.live" = "当前端点";
 "lab.target.reading" = "正在确认当前端点…";
 "lab.target.unknown" = "隧道尚未确认当前端点。";
@@ -40,7 +40,7 @@
 "lab.status" = "系统 VPN 状态";
 "lab.start" = "启动测试隧道";
 "lab.stop" = "停止测试隧道";
-"lab.probe" = "发送测试包";
+"lab.probe" = "发送 TCP 测试包";
 "lab.probePassed" = "当前运行的线路返回了测试响应。";
 "lab.probeFailed" = "没有收到测试响应。请检查测试服务和当前线路。";
 "lab.connected" = "已连接";

@@ -163,28 +163,39 @@ enum LabContract {
     }
 
     static func accepts(_ data: Data, target: Target, fromProvider: Bool) -> Bool {
-        guard (40...mtu).contains(data.count) else { return false }
+        guard (28...mtu).contains(data.count) else { return false }
         return data.withUnsafeBytes { bytes in
-            let header: Int, source: Range<Int>, destination: Range<Int>, device: [UInt8]
+            let header: Int, transport: UInt8, source: Range<Int>, destination: Range<Int>, device: [UInt8]
             switch (target.family, bytes[0] >> 4) {
             case (AF_INET, 4):
                 header = Int(bytes[0] & 15) * 4
                 let fragment = UInt16(bytes[6]) << 8 | UInt16(bytes[7])
-                guard header >= 20, fragment & 0x3FFF == 0, bytes[9] == 6,
+                guard header >= 20, fragment & 0xBFFF == 0,
                       (Int(bytes[2]) << 8 | Int(bytes[3])) == bytes.count else { return false }
+                transport = bytes[9]
                 (source, destination, device) = (12..<16, 16..<20, device4)
             case (AF_INET6, 6):
                 header = 40
-                // TCP must follow the base header. Extension headers and fragments are outside the Lab.
-                guard bytes[6] == 6, (Int(bytes[4]) << 8 | Int(bytes[5])) == bytes.count - header else { return false }
+                // Extension headers and fragments are outside the Lab.
+                guard (Int(bytes[4]) << 8 | Int(bytes[5])) == bytes.count - header else { return false }
+                transport = bytes[6]
                 (source, destination, device) = (8..<24, 24..<40, device6)
             default: return false
             }
-            guard header + 20 <= bytes.count else { return false }
+            switch transport {
+            case 6:
+                guard header + 20 <= bytes.count else { return false }
+                let tcpHeader = Int(bytes[header + 12] >> 4) * 4
+                guard tcpHeader >= 20, header + tcpHeader <= bytes.count else { return false }
+            case 17:
+                guard header + 8 <= bytes.count,
+                      (Int(bytes[header + 4]) << 8 | Int(bytes[header + 5])) == bytes.count - header else { return false }
+            default: return false
+            }
             let portOffset = header + (fromProvider ? 0 : 2)
-            let tcpHeader = Int(bytes[header + 12] >> 4) * 4
-            guard tcpHeader >= 20, header + tcpHeader <= bytes.count,
-                  UInt16(bytes[portOffset]) << 8 | UInt16(bytes[portOffset + 1]) == target.port else { return false }
+            let localOffset = header + (fromProvider ? 2 : 0)
+            guard UInt16(bytes[portOffset]) << 8 | UInt16(bytes[portOffset + 1]) == target.port,
+                  bytes[localOffset] != 0 || bytes[localOffset + 1] != 0 else { return false }
             return bytes[source].elementsEqual(fromProvider ? target.bytes : device) &&
                 bytes[destination].elementsEqual(fromProvider ? device : target.bytes)
         }

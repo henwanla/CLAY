@@ -1,0 +1,22 @@
+--- a/transport/tuic/v5/packet.go
++++ b/transport/tuic/v5/packet.go
+@@ -32 +32 @@
+-	closed    bool
++	closed    atomic.Bool
+@@ -39 +39 @@
+-		q.closed = true
++		q.closed.Store(true)
+@@ -56 +55,0 @@
+-		q.inputConn = nil
+@@ -87 +86 @@
+-	if q.inputConn != nil {
++	if !q.closed.Load() && q.inputConn != nil {
+@@ -99 +98 @@
+-	if inputConn := q.inputConn; inputConn != nil { // copy inputConn avoid be nil in for loop
++	if inputConn := q.inputConn; !q.closed.Load() && inputConn != nil {
+@@ -119 +118 @@
+-	if inputConn := q.inputConn; inputConn != nil { // copy inputConn avoid be nil in for loop
++	if inputConn := q.inputConn; !q.closed.Load() && inputConn != nil {
+@@ -142 +141 @@
+-	if q.closed {
++	if q.closed.Load() {

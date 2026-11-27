@@ -196,8 +196,8 @@ private struct TunnelLabView: View {
                             .focused($targetEditing, equals: .address)
                             .multilineTextAlignment(.trailing)
                     }
-                    LabeledContent("lab.target.tcpPort") {
-                        TextField("lab.target.tcpPort", text: $targetPort)
+                    LabeledContent("lab.target.port") {
+                        TextField("lab.target.port", text: $targetPort)
                             .keyboardType(.numberPad)
                             .focused($targetEditing, equals: .port)
                             .multilineTextAlignment(.trailing)

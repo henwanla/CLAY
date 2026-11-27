@@ -134,7 +134,8 @@ extension CoreTests {
         let script = try policy.makeScript(proxyPort: 1070)
         let first = try await PACServer.start(script: script)
         defer { first.stop() }
-        let second = try await PACServer.start(script: "function FindProxyForURL(url, host) { return 'DIRECT'; }")
+        let alternate = PACPolicy(rules: [], defaultDecision: .proxy, bypassLocal: true)
+        let second = try await PACServer.start(script: alternate.makeScript(proxyPort: 1080))
         defer { second.stop() }
         try pacExpect(first.url.host == "127.0.0.1" && first.url.port != nil && first.url.pathExtension == "pac", "PAC URL was not scoped to loopback")
         try pacExpect(first.url.path != second.url.path && first.url.port != second.url.port, "listener path or port was reused")
@@ -144,6 +145,11 @@ extension CoreTests {
         try pacExpect(parts.count == 2 && parts[1] == script, "HTTP body differs from the generated script")
         try pacExpect(parts[0].hasPrefix("HTTP/1.1 200 OK") && parts[0].contains("Content-Type: application/x-ns-proxy-autoconfig") && parts[0].contains("Cache-Control: no-store"), "HTTP PAC headers")
         try testNativePAC(parts[1])
+        let matchingHost = URL(string: "http://sub.example.test/")!
+        try pacExpectNativeRoute(try pacLoadNativeURL(first.url, target: matchingHost), type: kCFProxyTypeNone)
+        try pacExpectNativeRoute(try pacLoadNativeURL(first.url, target: URL(string: "https://[2001:db8:1::42]/")!), type: kCFProxyTypeNone)
+        try pacExpectNativeRoute(try pacLoadNativeURL(first.url, target: URL(string: "https://proxy.test/")!), type: kCFProxyTypeHTTPS, port: 1070)
+        try pacExpectNativeRoute(try pacLoadNativeURL(second.url, target: matchingHost), type: kCFProxyTypeHTTP, port: 1080)
         let head = try pacRequest(first.url, "HEAD \(path) HTTP/1.0\r\n\r\n")
         try pacExpect(head.hasPrefix("HTTP/1.1 200 OK") && head.hasSuffix("\r\n\r\n") && head.contains("Content-Length: \(script.utf8.count)"), "HEAD should not return the script body")
         try pacExpect(try pacRequest(first.url, "GET / HTTP/1.0\r\n\r\n").hasPrefix("HTTP/1.1 404"), "root path exposed")
@@ -155,6 +161,7 @@ extension CoreTests {
         let refused = (try? pacRequest(first.url, "GET \(path) HTTP/1.0\r\n\r\n")) == nil
         try pacExpect(refused, "stopped listener still responds")
         try pacExpect(try pacRequest(second.url, "GET \(second.url.path) HTTP/1.0\r\n\r\n").hasPrefix("HTTP/1.1 200"), "stopping one listener stopped the other")
+        try pacExpectNativeRoute(try pacLoadNativeURL(second.url, target: matchingHost), type: kCFProxyTypeHTTP, port: 1080)
     }
 
     private func testNativePAC(_ script: String) throws {
@@ -187,6 +194,53 @@ private struct PACCheckFailure: LocalizedError {
 
 private func pacExpect(_ condition: @autoclosure () throws -> Bool, _ message: String) throws {
     guard try condition() else { throw PACCheckFailure(message) }
+}
+
+// CFNetwork delivers the callback on the run loop where its source is scheduled.
+private final class PACURLResult {
+    var completed = false
+    var proxies: [[String: Any]]?
+    var error: CFError?
+}
+
+private func pacLoadNativeURL(_ url: URL, target: URL) throws -> [[String: Any]] {
+    let result = PACURLResult()
+    var context = CFStreamClientContext(version: 0, info: Unmanaged.passUnretained(result).toOpaque(),
+                                        retain: nil, release: nil, copyDescription: nil)
+    let callback: CFProxyAutoConfigurationResultCallback = { info, proxies, error in
+        let result = Unmanaged<PACURLResult>.fromOpaque(info).takeUnretainedValue()
+        result.proxies = proxies as? [[String: Any]]
+        result.error = error
+        result.completed = true
+        CFRunLoopStop(CFRunLoopGetCurrent())
+    }
+    let source = CFNetworkExecuteProxyAutoConfigurationURL(url as CFURL, target as CFURL, callback, &context)
+    let loop = CFRunLoopGetCurrent()
+    CFRunLoopAddSource(loop, source, .defaultMode)
+    defer {
+        CFRunLoopRemoveSource(loop, source, .defaultMode)
+        CFRunLoopSourceInvalidate(source)
+        withExtendedLifetime(result) {}
+    }
+    let deadline = ProcessInfo.processInfo.systemUptime + 7
+    while !result.completed {
+        let remaining = deadline - ProcessInfo.processInfo.systemUptime
+        guard remaining > 0 else { throw PACCheckFailure("native PAC URL evaluation timed out for \(target)") }
+        CFRunLoopRunInMode(.defaultMode, remaining, false)
+    }
+    guard result.error == nil, let proxies = result.proxies else {
+        throw PACCheckFailure("native PAC URL evaluation failed for \(target): \(String(describing: result.error))")
+    }
+    return proxies
+}
+
+private func pacExpectNativeRoute(_ choices: [[String: Any]], type: CFString, port: Int? = nil) throws {
+    try pacExpect(choices.count == 1 && choices[0][kCFProxyTypeKey as String] as? String == type as String,
+                  "native PAC URL expected \(type), got \(choices)")
+    if let port {
+        try pacExpect(choices[0][kCFProxyHostNameKey as String] as? String == "127.0.0.1" &&
+                      choices[0][kCFProxyPortNumberKey as String] as? Int == port, "native PAC URL expected loopback port \(port)")
+    }
 }
 
 private func pacScriptFunction(_ script: String) throws -> JSValue {

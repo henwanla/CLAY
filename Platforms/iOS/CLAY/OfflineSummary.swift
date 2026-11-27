@@ -46,7 +46,7 @@ struct OfflineSummary {
         uuid: 11111111-1111-4111-8111-111111111111
         tls: true
       - name: Sample unsupported node
-        type: socks5
+        type: wireguard
         server: sample.invalid
         port: 1080
     """

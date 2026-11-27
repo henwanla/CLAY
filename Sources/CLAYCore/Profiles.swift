@@ -165,6 +165,33 @@ public struct NodeProfile: Identifiable {
         self.options = fields
     }
 
+    fileprivate init(name: String, upstream kind: String, server: String, port: Int,
+                     username: String?, password: String?, tls: Bool, sni: String, pin: String?) throws {
+        guard Self.validPasswordNodeHost(server), (1...65535).contains(port) else { throw ImportError.invalidAccount }
+        guard kind == "http" || kind == "socks5", (tls || sni.isEmpty && pin == nil),
+              sni.isEmpty || kind == "http" && Self.validPasswordNodeHost(sni)
+        else { throw ImportError.unsupportedOption }
+        var fields: [String: Any] = ["type": kind, "server": server, "port": port, "tls": tls]
+        if let username, let password {
+            guard Self.validPassword(username), Self.validPassword(password),
+                  kind != "http" || !username.contains(":"),
+                  kind != "socks5" || username.utf8.count <= 255 && password.utf8.count <= 255
+            else { throw ImportError.invalidAccount }
+            fields["username"] = username
+            fields["password"] = password
+        } else if username != nil || password != nil { throw ImportError.invalidAccount }
+        if tls {
+            fields["skip-cert-verify"] = false
+            if let pin { fields["fingerprint"] = try Self.certificateFingerprint(pin) }
+            if !sni.isEmpty { fields["sni"] = sni }
+        }
+        self.name = Self.title(name, fallback: kind == "socks5" ? "SOCKS5" : tls ? "HTTPS" : "HTTP")
+        self.protocolName = kind
+        self.transport = "tcp"
+        self.security = tls ? "tls" : "none"
+        self.options = fields
+    }
+
     private static func validPassword(_ password: String) -> Bool {
         !password.isEmpty && !password.utf8.contains { $0 < 32 || $0 == 127 }
     }
@@ -223,7 +250,7 @@ public struct ImportResult {
 
 public enum ProfileImporter {
     public static let maxBytes = 2 * 1024 * 1024
-    private static let linkSchemes = ["vmess://", "vless://", "ss://", "trojan://", "hysteria2://", "hy2://", "tuic://"]
+    private static let linkSchemes = ["vmess://", "vless://", "ss://", "trojan://", "hysteria2://", "hy2://", "tuic://", "socks5://"]
 
     public static func read(_ text: String) -> ImportResult {
         var result = ImportResult()
@@ -281,6 +308,7 @@ public enum ProfileImporter {
 
     private static func fromClashProxy(_ item: Any) throws -> NodeProfile {
         guard let p = item as? [String: Any], let kind = p["type"] as? String else { throw ImportError.malformed }
+        if kind == "http" || kind == "socks5" { return try fromClashUpstream(p, kind: kind) }
         if ["ss", "trojan", "hysteria2", "tuic"].contains(kind) { return try fromClashPasswordProxy(p, kind: kind) }
         guard ["vless", "vmess"].contains(kind) else { throw ImportError.unsupportedProtocol }
         guard let server = p["server"] as? String, let port = int(p["port"]), let account = p["uuid"] as? String else {
@@ -320,6 +348,23 @@ public enum ProfileImporter {
                                realityHybrid: clashValue(reality, "support-x25519mlkem768", as: Bool.self),
                                udp: clashValue(p, "udp", as: Bool.self) ?? false,
                                packetEncoding: clashValue(p, "packet-encoding", as: String.self) ?? "")
+    }
+
+    private static func fromClashUpstream(_ p: [String: Any], kind: String) throws -> NodeProfile {
+        let allowed: Set<String> = ["type", "name", "server", "port", "username", "password", "tls", "sni",
+                                    "skip-cert-verify", "fingerprint", "udp"]
+        // Even with TLS on the SOCKS control channel, RFC 1928 UDP is sent separately.
+        // The pinned adapter does not verify the relay as the sender of datagrams.
+        guard Set(p.keys).isSubset(of: allowed),
+              try clashValue(p, "skip-cert-verify", as: Bool.self) != true,
+              try clashValue(p, "udp", as: Bool.self) != true,
+              kind == "http" || p["sni"] == nil else { throw ImportError.unsupportedOption }
+        guard let server = try clashValue(p, "server", as: String.self), let port = int(p["port"])
+        else { throw ImportError.invalidAccount }
+        return try NodeProfile(name: clashValue(p, "name", as: String.self) ?? "", upstream: kind, server: server, port: port,
+                               username: clashValue(p, "username", as: String.self), password: clashValue(p, "password", as: String.self),
+                               tls: clashValue(p, "tls", as: Bool.self) ?? false, sni: clashValue(p, "sni", as: String.self) ?? "",
+                               pin: clashValue(p, "fingerprint", as: String.self))
     }
 
     private static func fromClashPasswordProxy(_ p: [String: Any], kind: String) throws -> NodeProfile {
@@ -480,6 +525,14 @@ public enum ProfileImporter {
     }
 
     private static func fromLink(_ link: String) throws -> NodeProfile {
+        if link.hasPrefix("socks5://") {
+            guard let uri = URLComponents(string: link), let server = uri.host, let port = uri.port,
+                  uri.path.isEmpty || uri.path == "/", uri.query == nil
+            else { throw ImportError.malformed }
+            let host = server.hasPrefix("[") && server.hasSuffix("]") ? String(server.dropFirst().dropLast()) : server
+            return try NodeProfile(name: uri.fragment ?? "", upstream: "socks5", server: host, port: port,
+                                   username: uri.user, password: uri.password, tls: false, sni: "", pin: nil)
+        }
         if link.hasPrefix("ss://") { return try fromPasswordLink(String(link.dropFirst(5)), kind: "ss") }
         if link.hasPrefix("trojan://") { return try fromPasswordLink(String(link.dropFirst(9)), kind: "trojan") }
         if link.hasPrefix("hysteria2://") { return try fromPasswordLink(String(link.dropFirst(12)), kind: "hysteria2") }

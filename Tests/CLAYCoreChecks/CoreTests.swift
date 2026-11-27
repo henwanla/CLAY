@@ -37,6 +37,7 @@ import Darwin
         try tests.testHysteria2Nodes()
         tests.testHysteria2RejectsUnsupportedOrAmbiguousInput()
         try tests.testTuicV5()
+        try tests.testForwardProxyImports()
         try tests.testFullConfigurationImportsOutboundButNotSystemInputs()
         tests.testOfflineSubscriptionTextNeverFetchesURLs()
         try tests.testDistinctEngineNodeNames()
@@ -148,6 +149,45 @@ import Darwin
             let rejected = ProfileImporter.read("ss://2022-blake3-\(cipher):\(encoded)@example.test:443")
             XCTAssertTrue(rejected.profiles.isEmpty)
             XCTAssertEqual(rejected.issues[.invalidAccount], 1)
+        }
+    }
+
+    func testForwardProxyImports() throws {
+        let pin = String(repeating: "AB:", count: 31) + "AB"
+        let yaml = """
+        proxies:
+          - {type: http, server: 127.0.0.1, port: 8888}
+          - {type: http, server: proxy.example.test, port: 443, username: fixture, password: 'pa:ss', tls: true, sni: tls.example.test, fingerprint: '\(pin)'}
+          - {type: socks5, server: '::1', port: 1080, username: 'name+2', password: 'p@55:word', udp: false}
+        """
+        let result = SubscriptionImporter.parse(yaml + "\nproxy-providers: {ignored: {url: 'https://example.test/provider'}}")
+        XCTAssertTrue(result.issues.isEmpty)
+        XCTAssertEqual(result.profiles.map(\.security), ["none", "tls", "none"])
+        XCTAssertEqual(result.profiles.map(\.name), ["HTTP", "HTTPS", "SOCKS5"])
+        let http = try fields(result.profiles[1])
+        XCTAssertEqual(http["password"] as? String, "pa:ss")
+        XCTAssertEqual(http["sni"] as? String, "tls.example.test")
+        XCTAssertEqual(http["fingerprint"] as? String, String(repeating: "ab", count: 32))
+        XCTAssertEqual(http["skip-cert-verify"] as? Bool, false)
+        let link = ProfileImporter.read("socks5://name+2:p%4055%3Aword@[::1]:1080#Local").profiles.first
+        XCTAssertTrue(try XCTUnwrap(link).hasSameConnection(as: result.profiles[2]))
+        XCTAssertEqual(ProfileImporter.read("socks5://127.0.0.1:1080").profiles.count, 1)
+        for link in ["https://example.test:443/", "http://u:p@example.test:8080", "socks5://u@example.test:1080",
+                     "socks5://u:p%0D@example.test:1080", "socks5://example.test:1080?tls=true", "socks5://example.test:1080/other"] {
+            XCTAssertTrue(ProfileImporter.read(link).profiles.isEmpty)
+        }
+        let base: [String: Any] = ["type": "socks5", "server": "proxy.example.test", "port": 1080]
+        let unsupported: [[String: Any]] = [
+            ["tls": 1], ["tls": true, "skip-cert-verify": true], ["tls": true, "sni": "proxy.example.test"],
+            ["fingerprint": pin], ["headers": ["Host": "example.test"]], ["dialer-proxy": "other"], ["udp": true],
+            ["password": "alone"], ["username": "", "password": "anything"],
+            ["username": "fixture", "password": String(repeating: "é", count: 128)],
+            ["type": "http", "username": "name:other", "password": "anything"],
+        ]
+        for fields in unsupported {
+            let node = base.merging(fields) { _, replacement in replacement }
+            let data = try JSONSerialization.data(withJSONObject: ["proxies": [node]])
+            XCTAssertTrue(ProfileImporter.read(String(decoding: data, as: UTF8.self)).profiles.isEmpty)
         }
     }
 
@@ -422,7 +462,7 @@ import Darwin
         let body = """
         {"allow-lan":true,"mixed-port":7000,"external-controller":"0.0.0.0:7001","proxy-providers":{"outside":{"type":"http","url":"https://example.test/ignored"}},"rules":["MATCH,DIRECT"],"proxies":[
           {"name":"Clash Node","type":"vless","server":"127.0.0.1","port":443,"uuid":"\(uuid)","network":"ws","tls":true,"udp":false,"servername":"example.test","ws-opts":{"path":"/clay","headers":{"Host":"example.test"}}},
-          {"name":"Other type","type":"socks5","server":"127.0.0.1","port":443},
+          {"name":"Other type","type":"wireguard","server":"127.0.0.1","port":443},
           {"name":"Chained node","type":"vless","server":"127.0.0.1","port":443,"uuid":"\(uuid)","dialer-proxy":"outside"}
         ]}
         """
@@ -469,7 +509,7 @@ import Darwin
           - { <<: *sample, name: merged }
           - {name: !custom Tag, type: vless, server: 127.0.0.1, port: 443, uuid: \(uuid)}
           - {name: duplicate, type: vless, server: 127.0.0.1, port: 443, port: 1234, uuid: \(uuid)}
-          - {name: other protocol, type: socks5, server: 127.0.0.1, port: 443}
+          - {name: other protocol, type: wireguard, server: 127.0.0.1, port: 443}
           - {name: Reality, type: vless, server: 127.0.0.1, port: 443, uuid: \(uuid), tls: true, servername: example.test, client-fingerprint: chrome, reality-opts: { public-key: \(key), short-id: 001230 }}
         rules:
           - MATCH,DIRECT

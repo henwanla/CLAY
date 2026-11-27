@@ -213,6 +213,30 @@ func TestImportedProtocols(t *testing.T) {
 		add("tuic-"+relay, listener, err, map[string]any{"type": "tuic", "uuid": account, "password": password,
 			"fingerprint": pin, "udp-relay-mode": relay, "congestion-controller": "cubic"}, true)
 	}
+	forwardIndex := len(nodes)
+	forwardUsers := inbound.AuthUsers{{Username: "fixture", Password: password}}
+	for _, kind := range []string{"http", "socks5"} {
+		for _, useTLS := range []bool{false, true} {
+			label := kind + "-tcp"
+			fields := map[string]any{"type": kind, "username": "fixture", "password": password, "tls": useTLS}
+			var certificate, privateKey string
+			if useTLS {
+				label = kind + "-tls"
+				certificate, privateKey = cert, private
+				fields["fingerprint"] = pin
+			}
+			var listener C.InboundListener
+			var err error
+			if kind == "http" {
+				listener, err = inbound.NewHTTP(&inbound.HTTPOption{BaseOption: base(kind), Users: forwardUsers,
+					Certificate: certificate, PrivateKey: privateKey})
+			} else {
+				listener, err = inbound.NewSocks(&inbound.SocksOption{BaseOption: base(kind), Users: forwardUsers,
+					Certificate: certificate, PrivateKey: privateKey})
+			}
+			add(label, listener, err, fields, false)
+		}
+	}
 
 	data := normalizedFixtures(t, nodes...)
 	for index, check := range variants {
@@ -284,6 +308,12 @@ func TestImportedProtocols(t *testing.T) {
 		{"tuic-untrusted-cert", "fingerprint", "", tuicIndex},
 		{"tuic-wrong-pin", "fingerprint", strings.Repeat("00", 32), tuicIndex},
 		{"tuic-wrong-password", "password", "different-fixture-password", tuicIndex},
+		{"http-wrong-password", "password", "different-fixture-password", forwardIndex},
+		{"https-untrusted-cert", "fingerprint", "", forwardIndex + 1},
+		{"https-wrong-pin", "fingerprint", strings.Repeat("00", 32), forwardIndex + 1},
+		{"socks5-wrong-password", "password", "different-fixture-password", forwardIndex + 2},
+		{"socks5-tls-untrusted-cert", "fingerprint", "", forwardIndex + 3},
+		{"socks5-tls-wrong-pin", "fingerprint", strings.Repeat("00", 32), forwardIndex + 3},
 	} {
 		t.Run(check.label, func(t *testing.T) {
 			wrong := cloneFields(nodes[check.index])
@@ -301,6 +331,25 @@ func TestImportedProtocols(t *testing.T) {
 			defer closePeer()
 			checkNoReply(t, peer, ctx)
 		})
+	}
+}
+
+func TestForwardProxyPrivateProfileRejectsUnsafeOptions(t *testing.T) {
+	for _, changed := range []map[string]any{
+		{"udp": true}, {"headers": map[string]any{"Host": "unused.invalid"}}, {"dialer-proxy": "external"},
+		{"tls": true, "skip-cert-verify": true}, {"tls": false, "fingerprint": strings.Repeat("00", 32)},
+		{"tls": true, "skip-cert-verify": false, "sni": "explicit.invalid"}, {"port": 42.5},
+		{"username": "fixture"}, {"username": "fixture", "password": strings.Repeat("é", 128)},
+	} {
+		node := map[string]any{"name": "node-478733c8-afad-47f1-8ee0-cee758e7447f", "type": "socks5",
+			"server": "127.0.0.1", "port": 1080, "tls": false}
+		for key, value := range changed {
+			node[key] = value
+		}
+		data, _ := json.Marshal(profile{Proxies: []map[string]any{node}, Rules: []string{"MATCH,CLAY"}})
+		if _, _, err := decodeProfile(data); err == nil {
+			t.Fatal("unsafe forwarding option passed the private ABI")
+		}
 	}
 }
 

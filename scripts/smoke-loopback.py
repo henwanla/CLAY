@@ -172,6 +172,25 @@ with tempfile.TemporaryDirectory(prefix='clay-fixtures-') as tmp, ExitStack() as
             wrong_key = base64.b64encode(secrets.token_bytes(key_bytes)).decode('ascii')
             rejected.append({**node, 'password': server_key + ':' + wrong_key if identity else wrong_key})
 
+        for kind, inbound_kind in (('http', 'http'), ('socks5', 'socks')):
+            for use_tls in (False, True):
+                tcp = pending.enter_context(socket.socket()); tcp.bind(('127.0.0.1', 0))
+                port = tcp.getsockname()[1]
+                name = kind + ('-tls' if use_tls else '-tcp')
+                password = secrets.token_hex(24)
+                node = {'name': name, 'type': kind, 'server': '127.0.0.1', 'port': port,
+                        'username': 'fixture', 'password': password, 'tls': use_tls}
+                listener = {'name': name, 'type': inbound_kind, 'listen': '127.0.0.1', 'port': str(port),
+                            'users': [{'username': 'fixture', 'password': password}]}
+                if use_tls:
+                    node['fingerprint'] = fingerprint
+                    listener.update(certificate=str(cert), **{'private-key': str(key)})
+                    rejected.append({**node, 'fingerprint': secrets.token_hex(32)})
+                else:
+                    rejected.append({**node, 'password': secrets.token_hex(24)})
+                nodes.append(node)
+                local_config['listeners'].append(listener)
+
     local_profiles = tmp / 'local-profiles.json'; local_profiles.write_text(json.dumps({'proxies': nodes})); local_profiles.chmod(0o600)
     local_server = tmp / 'local-server.json'; local_server.write_text(json.dumps(local_config)); local_server.chmod(0o600)
     subprocess.run([tool, 'verify-config', local_profiles, engine], env=env, timeout=15, check=True)
@@ -189,7 +208,7 @@ with tempfile.TemporaryDirectory(prefix='clay-fixtures-') as tmp, ExitStack() as
                 local_profiles.write_text(json.dumps({'proxies': [candidate]}))
                 failed = subprocess.run([tool, 'smoke', local_profiles, engine, target, token], text=True, capture_output=True, env=env, timeout=20)
                 assert failed.returncode == 1 and 'FAIL probeFailed' in failed.stdout, 'Invalid upstream credentials were not rejected'
-            print('PASS Shadowsocks 2022, Hysteria2 and TUIC forwarding; invalid keys and certificates refused')
+            print('PASS Shadowsocks 2022, Hysteria2, TUIC, HTTP CONNECT and SOCKS5; invalid keys and certificates refused')
         finally:
             server.terminate()
             try: server.wait(timeout=3)

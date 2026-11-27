@@ -81,6 +81,8 @@ IP-CIDR6,2001:db8:1234::/48,PROXY
 
 CLAY 支持 Shadowsocks 2022 的 AES-128-GCM、AES-256-GCM 和 ChaCha20-Poly1305。可使用 `ss://` 链接或 Clash 内联配置。密钥必须是套件要求长度的标准 Base64；AES 也支持以冒号分隔的服务器与用户密钥。插件参数不执行。
 
+开发版还可在 Clash 内联 `proxies` 中导入 `type: http`（CONNECT）和 `type: socks5` 上游。两种节点都支持可选的用户名和密码，以及 `tls: true`；TLS 默认验证证书，可显式配置 Mihomo 的 SHA-256 `fingerprint`。明文模式不会加密代理握手。SOCKS5 也接受 `socks5://host:port` 或带用户名和密码的链接；带 TLS 的节点请用内联配置。两种上游目前仅支持 TCP；导入时拒绝 `udp: true`、自定义请求头和跳过证书验证。普通 HTTPS 链接仍用于订阅。
+
 开发版的 Hysteria2 支持固定端口、SNI、Salamander 和 Gecko。分享链接省略端口时使用 443，并要求通过 TLS 证书验证；带 `insecure=1`、`pinSHA256`、端口跳跃或 Realms 的链接不导入。Clash/Mihomo 内联的 Hysteria2 和 Trojan 节点可以显式提供 SHA-256 `fingerprint`，此时使用 Mihomo 自身的证书固定机制。Shadowsocks 插件和跳过 Trojan 证书验证的设置不导入。
 
 开发版的 TUIC v5 需要 UUID、密码和端口，支持 SNI、ALPN、拥塞控制与 `native`／`quic` UDP 中继。分享链接使用正常 TLS 证书验证；内联 Clash/Mihomo 节点还可指定 Mihomo 原生 SHA-256 `fingerprint`。不导入 TUIC v4 令牌、禁用 SNI、跳过证书验证或开启 0-RTT 的配置。

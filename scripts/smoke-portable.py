@@ -19,6 +19,7 @@ NODE_LABEL = "SYNTHETIC_NODE_PRIVATE_TITLE"
 NODE_HOST = "synthetic-node.example.test"
 SECRET = b"portable-fixture-token"
 NODE_PASSWORD = b"portable-fixture-password"
+NODE_USERNAME = b"portable-private-fixture-user"
 OBFS_PASSWORD = b"portable-fixture-obfs-password"
 SS2022_KEY = base64.b64encode(bytes([0xFB] * 16))
 RESPONSE_PRIVATE = "DO_NOT_PRINT_CONTROLLER_CONNECTION"
@@ -33,6 +34,7 @@ def run(*args, data=None, code=0):
         assert value.encode() not in combined, "sensitive value in CLI output"
     assert SECRET not in combined, "secret in CLI output"
     assert NODE_PASSWORD not in combined, "node password in CLI output"
+    assert NODE_USERNAME not in combined, "node username in CLI output"
     assert OBFS_PASSWORD not in combined, "obfuscation password in CLI output"
     assert SS2022_KEY.rstrip(b"=") not in combined, "Shadowsocks key in CLI output"
     assert not (code == 0 and result.stderr), "standard error on successful invocation"
@@ -102,6 +104,14 @@ proxies:
     assert run("inspect", yaml, "--numbered") == (b"nodes=5\nnode=1 vless/tcp/tls\nnode=2 ss/tcp/aead\n"
                                                   b"node=3 trojan/tcp/tls\nnode=4 hysteria2/quic/tls\nnode=5 tuic/quic/tls\n"
                                                   b"skipped.unsupportedProtocol=1\n")
+
+    upstreams = directory / "upstreams.json"
+    upstreams.write_text(json.dumps({"proxies": [
+        {"name": NODE_LABEL, "type": kind, "server": NODE_HOST, "port": 443, "tls": tls,
+         "username": NODE_USERNAME.decode(), "password": NODE_PASSWORD.decode()}
+        for kind, tls in (("http", True), ("socks5", False))
+    ]}), encoding="utf-8")
+    assert run("inspect", upstreams, "--numbered") == b"nodes=2\nnode=1 http/tcp/tls\nnode=2 socks5/tcp/none\n"
 
     ss2022 = directory / "ss2022.txt"
     encoded = quote(SS2022_KEY.decode("ascii"), safe="")

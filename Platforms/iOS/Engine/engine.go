@@ -68,6 +68,11 @@ var shadowsocksKeys = map[string]bool{
 	"name": true, "type": true, "server": true, "port": true, "password": true, "cipher": true, "udp": true,
 }
 
+var forwardProxyKeys = map[string]bool{
+	"name": true, "type": true, "server": true, "port": true, "username": true, "password": true,
+	"tls": true, "sni": true, "skip-cert-verify": true, "fingerprint": true,
+}
+
 type profile struct {
 	Proxies []map[string]any `json:"proxies"`
 	Rules   []string         `json:"rules"`
@@ -106,6 +111,11 @@ func decodeProfile(data []byte) (profile, []string, error) {
 			if !validShadowsocks(proxy) {
 				return profile{}, nil, errProfile
 			}
+		case "http", "socks5":
+			allowedKeys = forwardProxyKeys
+			if !validForwardProxy(proxy) {
+				return profile{}, nil, errProfile
+			}
 		}
 		for key, value := range proxy {
 			if !allowedKeys[key] {
@@ -135,13 +145,64 @@ func decodeProfile(data []byte) (profile, []string, error) {
 		}
 		seen[id] = true
 		switch proxy["type"] {
-		case "vmess", "vless", "ss", "trojan", "hysteria2", "tuic":
+		case "vmess", "vless", "ss", "trojan", "hysteria2", "tuic", "http", "socks5":
 		default:
 			return profile{}, nil, errProfile
 		}
 		ids[index] = id
 	}
 	return p, ids, nil
+}
+
+func validForwardProxy(node map[string]any) bool {
+	host := func(value any) bool {
+		s, ok := value.(string)
+		if !ok || len(s) == 0 || len(s) > 253 {
+			return false
+		}
+		if strings.Contains(s, ":") {
+			ip, err := netip.ParseAddr(s)
+			return err == nil && ip.Is6() && ip.Zone() == ""
+		}
+		for _, label := range strings.Split(strings.TrimSuffix(s, "."), ".") {
+			if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' ||
+				strings.IndexFunc(label, func(c rune) bool {
+					return !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-')
+				}) >= 0 {
+				return false
+			}
+		}
+		return true
+	}
+	port, portOK := node["port"].(float64)
+	tls, tlsOK := node["tls"].(bool)
+	if !host(node["server"]) || !portOK || port < 1 || port > 65535 || port != float64(int(port)) || !tlsOK {
+		return false
+	}
+	if verify, exists := node["skip-cert-verify"]; tls && (!exists || verify != false) || !tls && exists {
+		return false
+	}
+	if sni, exists := node["sni"]; exists && (!tls || node["type"] != "http" || !host(sni)) {
+		return false
+	}
+	if value, exists := node["fingerprint"]; exists {
+		if pin, ok := value.(string); !tls || !ok || !certificateDigest.MatchString(pin) {
+			return false
+		}
+	}
+	user, hasUser := node["username"]
+	pass, hasPass := node["password"]
+	if !hasUser && !hasPass {
+		return true
+	}
+	username, userOK := user.(string)
+	password, passOK := pass.(string)
+	valid := func(s string) bool {
+		return s != "" && strings.IndexFunc(s, func(c rune) bool { return c < 32 || c == 127 }) < 0
+	}
+	return userOK && passOK && valid(username) && valid(password) &&
+		(node["type"] != "http" || !strings.Contains(username, ":")) &&
+		(node["type"] != "socks5" || len(username) <= 255 && len(password) <= 255)
 }
 
 func validShadowsocks(node map[string]any) bool {

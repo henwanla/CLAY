@@ -46,6 +46,10 @@ Shadowsocks 2022 的三种密码套件，以及 AES-128／AES-256 的服务器�
 
 The host packet bridge verifies IPv4 TCP and UDP for three Shadowsocks 2022 suites and both AES suites with server and user keys. The Lab can switch into all five variants while connected and forward TCP and UDP. A wrong user key yields no response. These checks do not run on an iPhone.
 
+宿主回环也验证了带认证的 HTTP CONNECT、SOCKS5 和两者的 TLS 形式。在线换节点后仍可用同一个隧道建立新的 TCP 连接；错误密码、不受信任的证书或错误的证书指纹均无法取得应答。此四种上游不转发 UDP。
+
+The host loopback suite also switches between authenticated HTTP CONNECT and SOCKS5 upstreams, including their TLS variants. TCP works through the new node while the tunnel stays up. Wrong credentials, untrusted certificates, and incorrect pins fail. These upstreams do not forward UDP.
+
 CI repeats Lab TCP and UDP switching and restart tests with Go's race detector, then checks arm64 linkage for both iOS SDKs. The build applies [a small patch to the pinned Mihomo source](Engine/tuic-v5-packet-close.patch) so closing a TUIC v5 UDP association can safely interrupt a concurrent read. Before distributing a binary, include the corresponding Mihomo source, this patch, bridge source, build instructions, and required license files.
 
 ## CLAY 隧道实验 / CLAY Tunnel Lab
